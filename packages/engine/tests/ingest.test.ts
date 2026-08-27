@@ -59,4 +59,22 @@ describe("readJsonlFile", () => {
     expect(events[0]!.type).toBe("session_meta");
     expect(parse_errors).toEqual([]);
   });
+
+  it("parses a JSONL line whose non-ASCII character sits on a 64-byte chunk boundary", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-utf8-"));
+    const filePath = path.join(dir, "rollout-utf8.jsonl");
+    const head = '{"type":"session_meta","payload":{"id":"u8","pad":"';
+    const tail = '"}}\n';
+    const headLen = Buffer.byteLength(head, "utf8");
+    const pad = "a".repeat(63 - headLen);
+    const line = head + pad + "€" + tail;
+    expect(Buffer.byteLength(head + pad, "utf8")).toBe(63);
+
+    writeFileSync(filePath, line);
+    const { events, parse_errors } = readJsonlFile(filePath, { chunkBytes: 64 });
+    expect(parse_errors).toEqual([]);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe("session_meta");
+    expect((events[0]!.payload as { pad: string }).pad).toContain("€");
+  });
 });

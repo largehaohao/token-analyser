@@ -53,6 +53,7 @@ export function isWriteOrTest(command: string): boolean {
   if (/tee /.test(command)) return true;
   if (/>/.test(command)) return true;
   if (/sed -i/.test(command)) return true;
+  if (/\bpython3?\b/.test(command)) return true;
   if (/pytest/.test(command)) return true;
   if (/vitest/.test(command)) return true;
   if (/jest/.test(command)) return true;

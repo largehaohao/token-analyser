@@ -132,12 +132,17 @@ function detectRereadRepeat(turns: Turn[]): Turn[] {
   return labeled;
 }
 
+function isCompactEvent(event: RolloutLine): boolean {
+  if (event.type === "compacted") return true;
+  return event.type === "event_msg" && event.payload?.type === "context_compacted";
+}
+
 function detectCompactionLoop(
   turns: Turn[],
   events: RolloutLine[],
 ): { compactionTurns: Turn[]; heavy: boolean } {
   const compactTimes = events
-    .filter((event) => event.type === "compacted")
+    .filter(isCompactEvent)
     .map((event) => Date.parse(event.timestamp))
     .sort((a, b) => a - b);
 
@@ -201,7 +206,7 @@ function buildCompactionSuggestions(
   heavy: boolean,
 ): Suggestion[] {
   const suggestions: Suggestion[] = [];
-  const compactCount = events.filter((event) => event.type === "compacted").length;
+  const compactCount = events.filter(isCompactEvent).length;
 
   if (compactionTurns.length > 0 || heavy) {
     const allCost = sumTurns(turns);

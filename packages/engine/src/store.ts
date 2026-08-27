@@ -39,6 +39,8 @@ function toListItem(snap: SessionSnapshot): SessionListItem {
     cost: snap.cost,
     waste: snap.waste,
     parse_error: snap.parse_errors.length > 0,
+    parse_error_offset: snap.parse_errors[0]?.offset,
+    parse_error_message: snap.parse_errors[0]?.message,
     ledger_warning: snap.ledger_warning,
   };
 }
@@ -92,22 +94,35 @@ export class SessionStore {
 
   ingestPath(filePath: string): string | undefined {
     const snap = ingestFile(filePath, { cacheHome: this.cacheHome });
-    this.snapshots.set(snap.id, { ...snap, children: [] });
+    const existing = this.snapshots.get(snap.id);
+    const next: SessionSnapshot = {
+      ...snap,
+      children: existing?.children ?? [],
+    };
+    this.snapshots.set(next.id, next);
 
-    if (snap.parentId && this.snapshots.has(snap.parentId)) {
-      const parent = this.snapshots.get(snap.parentId)!;
-      const child = this.snapshots.get(snap.id)!;
-      if (!parent.children.some((c) => c.id === child.id)) {
-        parent.children.push(child);
+    if (next.parentId && this.snapshots.has(next.parentId)) {
+      const parent = this.snapshots.get(next.parentId)!;
+      const idx = parent.children.findIndex((c) => c.id === next.id);
+      if (idx === -1) {
+        parent.children.push(next);
+      } else {
+        parent.children[idx] = next;
       }
       const rebuilt = rebuildDerived(parent);
       this.snapshots.set(parent.id, rebuilt);
       for (const c of rebuilt.children) {
         this.snapshots.set(c.id, c);
       }
+    } else if (next.children.length > 0) {
+      const rebuilt = rebuildDerived(next);
+      this.snapshots.set(rebuilt.id, rebuilt);
+      for (const c of rebuilt.children) {
+        this.snapshots.set(c.id, c);
+      }
     }
 
-    return snap.id;
+    return next.id;
   }
 
   list(): SessionListItem[] {

@@ -1,5 +1,5 @@
 import { preview, sha256 } from "./hash.ts";
-import { loadRateCard, priceUsage } from "./rate-card.ts";
+import { effectiveRateCard, priceUsage } from "./rate-card.ts";
 import type {
   RolloutLine,
   SessionMeta,
@@ -12,6 +12,7 @@ type TurnContext = {
   model: string | null;
   effort: string | null;
   fastMode: boolean;
+  collaborationMode: string | null;
 };
 
 type PendingTool = {
@@ -73,6 +74,7 @@ function extractTurnContext(payload: Record<string, unknown>): TurnContext {
     model: (payload.model as string | undefined) ?? null,
     effort,
     fastMode,
+    collaborationMode: asString(collaboration?.mode) || null,
   };
 }
 
@@ -206,7 +208,7 @@ export function buildLedger(
   fastMode: boolean;
   meta: SessionMeta;
 } {
-  const card = loadRateCard();
+  const card = effectiveRateCard();
   let meta: SessionMeta = {
     id: sessionId,
     parentId: null,
@@ -219,6 +221,7 @@ export function buildLedger(
     model: null,
     effort: null,
     fastMode: false,
+    collaborationMode: null,
   };
   let sessionFastMode = false;
 
@@ -306,6 +309,7 @@ export function buildLedger(
         bucket: "other",
         labels: [],
         hasPatchApply: window.hasPatchApply,
+        collaborationMode: turnContext.collaborationMode,
       };
       turns.push(turn);
 

@@ -213,4 +213,61 @@ describe("startServer", () => {
       await server.close();
     }
   });
+
+  it("emits session_updated for the parent when a child is ingested", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-child-sse-"));
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const parentPath = path.join(dir, "rollout-parent.jsonl");
+    const childPath = path.join(dir, "rollout-child.jsonl");
+    writeFileSync(
+      parentPath,
+      waitPollAsS1().replaceAll('"s1"', '"parent-1"'),
+    );
+    writeFileSync(
+      childPath,
+      readFileSync(path.join(fixtures, "child-prefix.jsonl"), "utf8"),
+    );
+    store.refresh([parentPath]);
+
+    const server = await startServer({ port: 0, store });
+
+    try {
+      const events: string[] = [];
+      const controller = new AbortController();
+      const streamRes = await fetch(`${server.url}/stream`, {
+        signal: controller.signal,
+      });
+      const reader = streamRes.body!.getReader();
+      const decoder = new TextDecoder();
+      void (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            events.push(decoder.decode(value));
+          }
+        } catch {
+          // aborted
+        }
+      })();
+
+      store.ingestPath(childPath);
+
+      const deadline = Date.now() + 1000;
+      while (Date.now() < deadline) {
+        const joined = events.join("");
+        if (joined.includes("parent-1")) break;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+
+      controller.abort();
+
+      const joined = events.join("");
+      expect(joined).toContain("event: session_updated");
+      expect(joined).toContain('"id":"parent-1"');
+      expect(joined).not.toMatch(/event: session_added[\s\S]*"id":"child-1"/);
+    } finally {
+      await server.close();
+    }
+  });
 });

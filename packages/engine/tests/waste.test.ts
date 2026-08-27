@@ -36,6 +36,7 @@ function turn(partial: {
     bucket: partial.bucket,
     labels: partial.labels ?? [],
     hasPatchApply: false,
+    collaborationMode: null,
   };
 }
 

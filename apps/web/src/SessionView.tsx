@@ -1,4 +1,4 @@
-import type { SessionSnapshot } from "./api";
+import type { SessionSnapshot, Turn } from "./api";
 import { useUnit } from "./UnitContext";
 import { formatCost, disclaimer } from "./format";
 import { CostTree, collectTurnIds, findNodeById } from "./CostTree";
@@ -11,6 +11,10 @@ type Props = {
   onSelectNode: (id: string) => void;
   onUpdate: (snap: SessionSnapshot) => void;
 };
+
+function flattenTurns(snap: SessionSnapshot): Turn[] {
+  return [...snap.turns, ...(snap.children ?? []).flatMap(flattenTurns)];
+}
 
 export function SessionView({
   snapshot,
@@ -56,21 +60,38 @@ export function SessionView({
           Ledger warning: token usage may not reconcile with recorded costs.
         </div>
       )}
+      {(snapshot.parse_errors ?? []).length > 0 && (
+        <div className="banner parse-errors">
+          {snapshot.parse_errors.map((err, i) => (
+            <div key={`${err.offset}-${i}`}>
+              Parse error in {snapshot.path} at byte {err.offset}: {err.message}
+            </div>
+          ))}
+        </div>
+      )}
 
       <header className="session-headline">
-        <div className="headline-row">
-          <span className="headline-label">Total</span>
-          <span className="headline-value">
-            {formatCost(snapshot.cost, unit)}
-          </span>
+        <div className="headline-main">
+          <div className="headline-row">
+            <span className="headline-label">Total</span>
+            <span className="headline-value">
+              {formatCost(snapshot.cost, unit)}
+            </span>
+          </div>
+          <div className="headline-row">
+            <span className="headline-label">Waste</span>
+            <span className="headline-value waste" data-testid="waste-headline">
+              {formatCost(snapshot.waste, unit)}
+            </span>
+          </div>
+          <p className="disclaimer">{disclaimer(snapshot.rateCardAsOf)}</p>
         </div>
-        <div className="headline-row">
-          <span className="headline-label">Waste</span>
-          <span className="headline-value waste" data-testid="waste-headline">
-            {formatCost(snapshot.waste, unit)}
-          </span>
-        </div>
-        <p className="disclaimer">{disclaimer(snapshot.rateCardAsOf)}</p>
+        {snapshot.rate_limits != null && (
+          <aside className="rate-limits">
+            <h3>Rate limits</h3>
+            <pre>{JSON.stringify(snapshot.rate_limits, null, 2)}</pre>
+          </aside>
+        )}
       </header>
 
       <div className="session-body">
@@ -100,7 +121,7 @@ export function SessionView({
             </div>
           )}
         </div>
-        <TurnTable turns={snapshot.turns} turnIds={turnIds} />
+        <TurnTable turns={flattenTurns(snapshot)} turnIds={turnIds} />
       </div>
     </div>
   );

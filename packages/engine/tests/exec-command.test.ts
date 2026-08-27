@@ -13,6 +13,8 @@ describe("isWriteOrTest", () => {
   it("detects patches and tests", () => {
     expect(isWriteOrTest("git apply /tmp/x.patch")).toBe(true);
     expect(isWriteOrTest("pnpm test")).toBe(true);
+    expect(isWriteOrTest("python foo.py")).toBe(true);
+    expect(isWriteOrTest("python3 foo.py")).toBe(true);
     expect(isWriteOrTest("cat README.md")).toBe(false);
   });
 });

@@ -52,6 +52,44 @@ describe("SessionStore", () => {
     });
     expect(store.get("parent-1")!.waste.raw).toBe(0);
   });
+
+  it("preserves joined children when ingestPath re-reads parent and child", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "store-reingest-"));
+    const cacheDir = path.join(dir, "cache");
+    const parentPath = path.join(dir, "rollout-parent.jsonl");
+    const childPath = path.join(dir, "rollout-child.jsonl");
+    writeFileSync(parentPath, parentFixture());
+    writeFileSync(
+      childPath,
+      readFileSync(path.join(fixtures, "child-prefix.jsonl"), "utf8"),
+    );
+
+    const store = new SessionStore({ cacheDir });
+    store.refresh([parentPath, childPath]);
+
+    const before = store.get("parent-1")!;
+    const subagentsRaw = before.tree.children.find((c) => c.label === "subagents")!
+      .cost.raw;
+
+    store.ingestPath(parentPath);
+    const afterParent = store.get("parent-1")!;
+    expect(afterParent.children[0]!.nickname).toBe("Plato");
+    expect(
+      afterParent.tree.children.find((c) => c.label === "subagents")!.cost.raw,
+    ).toBe(subagentsRaw);
+
+    writeFileSync(
+      childPath,
+      readFileSync(childPath, "utf8").replace("Plato", "Aristotle"),
+    );
+    store.ingestPath(childPath);
+
+    const after = store.get("parent-1")!;
+    expect(after.children[0]!.nickname).toBe("Aristotle");
+    const subagents = after.tree.children.find((c) => c.label === "subagents");
+    expect(subagents!.cost.raw).toBe(after.children[0]!.cost.raw);
+    expect(subagents!.children[0]!.label).toBe("Aristotle");
+  });
 });
 
 describe("watchSessions", () => {

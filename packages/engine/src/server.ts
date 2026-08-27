@@ -98,7 +98,14 @@ function wireStoreChangeEvents(
     try {
       const idsBefore = new Set(store.list().map((s) => s.id));
       const id = origIngest(filePath);
-      if (id) onChange(id, !idsBefore.has(id));
+      if (id) {
+        const snap = store.get(id);
+        const isNew = snap?.parentId == null && !idsBefore.has(id);
+        onChange(id, isNew);
+        if (snap?.parentId) {
+          onChange(snap.parentId, false);
+        }
+      }
       return id;
     } catch (err) {
       onError(

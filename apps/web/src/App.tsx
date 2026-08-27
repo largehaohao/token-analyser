@@ -49,10 +49,10 @@ export function App() {
   }, [selectedId, refreshSession]);
 
   useEffect(() => {
-    return openStream(({ id }) => {
+    return openStream(() => {
       refreshList();
-      if (id === selectedId) {
-        refreshSession(id);
+      if (selectedId) {
+        refreshSession(selectedId);
       }
     });
   }, [selectedId, refreshList, refreshSession]);

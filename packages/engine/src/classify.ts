@@ -107,6 +107,8 @@ function classifyTurn(turn: Turn, pathHashes: Map<string, string>): Bucket {
     return "reread";
   }
 
+  if (turn.collaborationMode === "plan") return "planning";
+
   if (turn.hasPatchApply) return "code";
   for (const tool of turn.tools) {
     if (tool.name === "exec" && isWriteOrTest(tool.input)) {

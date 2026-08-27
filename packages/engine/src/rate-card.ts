@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadUserConfig } from "./config.ts";
 import type { Cost, RateCard, TokenUsage } from "./types.ts";
 
 const defaultPath = path.resolve(
@@ -10,6 +11,13 @@ const defaultPath = path.resolve(
 
 export function loadRateCard(cardPath: string = defaultPath): RateCard {
   return JSON.parse(readFileSync(cardPath, "utf8")) as RateCard;
+}
+
+export function effectiveRateCard(cardPath: string = defaultPath): RateCard {
+  const card = loadRateCard(cardPath);
+  const override = loadUserConfig().usd_per_credit;
+  if (override == null) return card;
+  return { ...card, usd_per_credit: override };
 }
 
 export function priceUsage(

@@ -35,6 +35,7 @@ function turn(partial: {
     bucket: partial.bucket,
     labels: partial.labels ?? [],
     hasPatchApply: false,
+    collaborationMode: null,
   };
 }
 
@@ -109,6 +110,27 @@ describe("buildTree", () => {
     expect(waiting.children.find((c) => c.bucket === "waiting.poll")!.cost.raw).toBe(100);
   });
 
+  it("poll and coord percents sum to ~100 of waiting, not of the root", () => {
+    const root = buildTree({
+      sessionId: "parent",
+      label: "parent",
+      turns: [
+        turn({ id: "p1", bucket: "waiting.poll", raw: 80 }),
+        turn({ id: "p2", bucket: "waiting.coord", raw: 20 }),
+        turn({ id: "p3", bucket: "code", raw: 100 }),
+      ],
+      children: [],
+    });
+
+    const waiting = root.children.find((c) => c.label === "waiting")!;
+    const poll = waiting.children.find((c) => c.bucket === "waiting.poll")!;
+    const coord = waiting.children.find((c) => c.bucket === "waiting.coord")!;
+    expect(poll.percentOfParent + coord.percentOfParent).toBeCloseTo(100, 5);
+    expect(poll.percentOfParent).toBeCloseTo(80, 5);
+    expect(coord.percentOfParent).toBeCloseTo(20, 5);
+    expect(waiting.percentOfParent).toBeCloseTo(50, 5);
+  });
+
   it("root child percents sum to ~100", () => {
     const root = buildTree({
       sessionId: "s1",
@@ -137,5 +159,23 @@ describe("isIdleChild", () => {
   it("returns false when cost.raw is 0", () => {
     const child = stubSnapshot("child", "Plato", []);
     expect(isIdleChild(child)).toBe(false);
+  });
+
+  it("uses own-turn raw as the idle denominator, not rolled-up descendants", () => {
+    const grandchild = stubSnapshot("gc", "gc", [
+      turn({ id: "g1", bucket: "code", raw: 1000, sessionId: "gc" }),
+    ]);
+    const childTurns = [
+      turn({ id: "c1", bucket: "waiting.poll", raw: 80, sessionId: "child" }),
+    ];
+    const child = stubSnapshot("child", "Plato", childTurns, [grandchild]);
+    child.cost = buildTree({
+      sessionId: child.id,
+      label: child.nickname ?? child.id,
+      turns: child.turns,
+      children: child.children,
+    }).cost;
+    expect(child.cost.raw).toBe(1080);
+    expect(isIdleChild(child)).toBe(true);
   });
 });

@@ -66,12 +66,15 @@ export type SessionSnapshot = {
   model: string | null;
   effort: string | null;
   ledger_warning: boolean;
+  parse_errors: { offset: number; message: string }[];
+  rate_limits: unknown | null;
   rateCardAsOf: string;
   cost: Cost;
   waste: Cost;
   toggles: Record<WasteToggleId, boolean>;
   tree: TreeNode;
   turns: Turn[];
+  children: SessionSnapshot[];
   suggestions: Suggestion[];
 };
 
@@ -88,6 +91,8 @@ export type SessionListItem = {
   cost: Cost;
   waste: Cost;
   parse_error: boolean;
+  parse_error_offset?: number;
+  parse_error_message?: string;
   ledger_warning: boolean;
 };
 

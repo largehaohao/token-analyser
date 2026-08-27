@@ -114,10 +114,11 @@ export function buildTree(args: {
     turnIds: [],
   };
 
-  const waitingCost = addCost(
-    bucketNodes.get("waiting.poll")!.cost,
-    bucketNodes.get("waiting.coord")!.cost,
-  );
+  const pollNode = bucketNodes.get("waiting.poll")!;
+  const coordNode = bucketNodes.get("waiting.coord")!;
+  const waitingCost = addCost(pollNode.cost, coordNode.cost);
+  pollNode.percentOfParent = percentOf(waitingCost, pollNode.cost);
+  coordNode.percentOfParent = percentOf(waitingCost, coordNode.cost);
 
   const waitingNode: TreeNode = {
     id: `${args.sessionId}:waiting`,
@@ -125,10 +126,7 @@ export function buildTree(args: {
     label: "waiting",
     cost: waitingCost,
     percentOfParent: percentOf(rootCost, waitingCost),
-    children: [
-      bucketNodes.get("waiting.poll")!,
-      bucketNodes.get("waiting.coord")!,
-    ],
+    children: [pollNode, coordNode],
     turnIds: [],
   };
 
@@ -160,12 +158,13 @@ export function buildTree(args: {
 }
 
 export function isIdleChild(child: SessionSnapshot): boolean {
-  if (child.cost.raw === 0) return false;
+  const ownRaw = sumTurns(child.turns).raw;
+  if (ownRaw === 0) return false;
 
   const codeRaw = bucketRaw(child.turns, "code");
   if (codeRaw !== 0) return false;
 
   const pollRaw = bucketRaw(child.turns, "waiting.poll");
   const rereadRaw = bucketRaw(child.turns, "reread");
-  return (pollRaw + rereadRaw) / child.cost.raw >= 0.8;
+  return (pollRaw + rereadRaw) / ownRaw >= 0.8;
 }

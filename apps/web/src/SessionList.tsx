@@ -74,6 +74,14 @@ export function SessionList({ sessions, selectedId, onSelect, onImport }: Props)
                     waste {wasteShare(s.waste, s.cost)}
                   </span>
                 </div>
+                {s.parse_error && s.parse_error_message != null && (
+                  <div
+                    className="session-meta parse-error-detail"
+                    title={`offset ${s.parse_error_offset}: ${s.parse_error_message}`}
+                  >
+                    offset {s.parse_error_offset}: {s.parse_error_message}
+                  </div>
+                )}
               </button>
             </li>
           ))}

@@ -48,6 +48,7 @@ export type Turn = {
   bucket: Bucket;
   labels: DetectorLabel[];
   hasPatchApply: boolean;
+  collaborationMode: string | null;
 };
 
 export type WasteToggleId =
@@ -140,6 +141,8 @@ export type SessionListItem = {
   cost: Cost;
   waste: Cost;
   parse_error: boolean;
+  parse_error_offset?: number;
+  parse_error_message?: string;
   ledger_warning: boolean;
 };
 

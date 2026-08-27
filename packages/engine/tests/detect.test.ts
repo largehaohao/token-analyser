@@ -46,6 +46,7 @@ function pollTurn(id: string, endedAt: string, tools: ToolCall[] = []): Turn {
     bucket: "waiting.poll" as Bucket,
     labels: [],
     hasPatchApply: false,
+    collaborationMode: null,
   };
 }
 
@@ -102,5 +103,20 @@ describe("detect", () => {
 
     expect(labeled[0].labels).not.toContain("compaction_loop");
     expect(labeled[1].labels).toContain("compaction_loop");
+  });
+
+  it("treats event_msg.context_compacted as a compact boundary", () => {
+    const { turns, events } = classifiedFromFixture("compacted-reread.jsonl");
+    const rewritten = events.map((event) =>
+      event.type === "compacted"
+        ? {
+            ...event,
+            type: "event_msg",
+            payload: { ...event.payload, type: "context_compacted" },
+          }
+        : event,
+    );
+    const { turns: labeled } = detect(turns, rewritten);
+    expect(labeled[1]!.labels).toContain("compaction_loop");
   });
 });
