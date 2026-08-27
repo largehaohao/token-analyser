@@ -42,4 +42,21 @@ describe("readJsonlFile", () => {
     expect(parse_errors).toHaveLength(1);
     expect(parse_errors[0]!.message.length).toBeGreaterThan(0);
   });
+
+  it("handles a trailing incomplete line split across read chunks", () => {
+    const waitPoll = readFileSync(
+      path.join(fixtures, "wait-poll.jsonl"),
+      "utf8",
+    );
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-"));
+    const filePath = path.join(dir, "rollout-chunked.jsonl");
+    // Force the incomplete tail to span a 64-byte read boundary.
+    const payload = waitPoll + '{"timestamp":"2026-08-27T00:99:00.000Z"';
+    writeFileSync(filePath, payload);
+
+    const { events, parse_errors } = readJsonlFile(filePath);
+    expect(events.length).toBeGreaterThan(0);
+    expect(events[0]!.type).toBe("session_meta");
+    expect(parse_errors).toEqual([]);
+  });
 });

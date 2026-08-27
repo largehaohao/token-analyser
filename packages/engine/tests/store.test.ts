@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,6 +76,37 @@ describe("watchSessions", () => {
 
       expect(store.list()).toHaveLength(1);
       expect(store.list()[0]!.id).toBe("w1");
+    } finally {
+      stop();
+    }
+  });
+
+  it("detects rollout files in nested subdirectories without recursive watch", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "watch-nested-"));
+    const nested = path.join(dir, "2026", "08", "27");
+    mkdirSync(nested, { recursive: true });
+    const cacheDir = path.join(dir, "cache");
+    const store = new SessionStore({ cacheDir });
+    const rolloutPath = path.join(nested, "rollout-nested.jsonl");
+    const line =
+      '{"timestamp":"2026-08-27T00:00:00.000Z","type":"session_meta","payload":{"id":"nested-1","session_id":"nested-1"}}\n';
+
+    const stop = watchSessions(store, () => {}, {
+      watchPaths: [dir],
+      recursive: false,
+    });
+
+    try {
+      writeFileSync(rolloutPath, line);
+
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        if (store.list().length === 1) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      expect(store.list()).toHaveLength(1);
+      expect(store.list()[0]!.id).toBe("nested-1");
     } finally {
       stop();
     }
