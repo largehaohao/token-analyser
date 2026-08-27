@@ -418,15 +418,47 @@ export async function startServer(opts?: {
   };
 }
 
+function collectFixtureFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".jsonl"))
+    .map((f) => path.join(dir, f));
+}
+
 async function main(): Promise<void> {
   const config = loadUserConfig();
   const store = new SessionStore();
-  store.refresh(collectRolloutFiles(config.watch_paths));
+  const repoRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../..",
+  );
 
-  const { url, onIngestError } = await startServer({ store });
+  const fixtureDir = process.env.FIXTURE_DIR;
+  if (fixtureDir) {
+    const root = path.isAbsolute(fixtureDir)
+      ? fixtureDir
+      : path.resolve(repoRoot, fixtureDir);
+    for (const file of collectFixtureFiles(root)) {
+      store.ingestPath(file);
+    }
+  } else {
+    store.refresh(collectRolloutFiles(config.watch_paths));
+  }
+
+  const webDist = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../apps/web/dist",
+  );
+  const serveUi = process.env.SERVE_UI === "1" && existsSync(webDist);
+  const { url, onIngestError } = await startServer({
+    store,
+    ...(serveUi ? { staticDir: webDist, port: 7788 } : {}),
+  });
   console.log(`token-analyser engine listening on ${url}`);
 
-  watchSessions(store, () => {}, { onError: onIngestError });
+  if (!fixtureDir) {
+    watchSessions(store, () => {}, { onError: onIngestError });
+  }
 }
 
 const entry = process.argv[1]
