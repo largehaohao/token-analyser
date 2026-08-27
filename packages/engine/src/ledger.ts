@@ -32,14 +32,19 @@ function usageEqual(a: TokenUsage, b: TokenUsage): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function emptyUsage(): TokenUsage {
+function extractSubagentMeta(source: unknown): {
+  parentId: string | null;
+  nickname: string | null;
+} {
+  const sourceRecord = asRecord(source);
+  const subagent = sourceRecord ? asRecord(sourceRecord.subagent) : null;
+  const threadSpawn = subagent ? asRecord(subagent.thread_spawn) : null;
+  if (!threadSpawn) {
+    return { parentId: null, nickname: null };
+  }
   return {
-    input_tokens: 0,
-    cached_input_tokens: 0,
-    cache_write_input_tokens: 0,
-    output_tokens: 0,
-    reasoning_output_tokens: 0,
-    total_tokens: 0,
+    parentId: asString(threadSpawn.parent_thread_id) || null,
+    nickname: asString(threadSpawn.agent_nickname) || null,
   };
 }
 
@@ -234,10 +239,11 @@ export function buildLedger(
     const payload = event.payload ?? {};
 
     if (event.type === "session_meta") {
+      const subagentMeta = extractSubagentMeta(payload.source);
       meta = {
         id: asString(payload.id ?? payload.session_id) || sessionId,
-        parentId: (payload.parent_id as string | null | undefined) ?? null,
-        nickname: (payload.nickname as string | null | undefined) ?? null,
+        parentId: subagentMeta.parentId,
+        nickname: subagentMeta.nickname,
         cwd: (payload.cwd as string | null | undefined) ?? null,
         startedAt:
           (payload.started_at as string | null | undefined) ??

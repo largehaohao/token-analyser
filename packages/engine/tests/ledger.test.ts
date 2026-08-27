@@ -33,4 +33,27 @@ describe("buildLedger", () => {
     const rawSum = turns[0].cost.raw + turns[1].cost.raw;
     expect(rawSum).toBe(1050 + 2020);
   });
+
+  it("drops copied prefix token_counts before child task_started", () => {
+    const { turns, meta } = buildLedger(
+      eventsFrom("child-prefix.jsonl"),
+      "child-1",
+      { isSubagent: true },
+    );
+    expect(turns).toHaveLength(1);
+    expect(turns[0].cost.raw).toBe(540);
+    expect(turns[0].usage.input_tokens).toBe(500);
+    expect(meta.parentId).toBe("parent-1");
+    expect(meta.nickname).toBe("Plato");
+  });
+
+  it("would inflate totals if prefix were kept (guard)", () => {
+    const { turns } = buildLedger(
+      eventsFrom("child-prefix.jsonl"),
+      "child-1",
+      { isSubagent: false },
+    );
+    expect(turns.length).toBeGreaterThanOrEqual(2);
+    expect(turns[0].cost.raw).toBe(1_000_000);
+  });
 });
