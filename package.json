@@ -1,0 +1,11 @@
+{
+  "name": "token-analyser",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "test": "pnpm --filter engine test",
+    "analyse": "pnpm --filter engine analyse",
+    "dev": "pnpm --filter engine start & pnpm --filter web dev",
+    "start": "pnpm --filter engine start"
+  }
+}

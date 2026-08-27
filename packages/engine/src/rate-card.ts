@@ -1,0 +1,36 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Cost, RateCard, TokenUsage } from "./types.ts";
+
+const defaultPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../config/rate-card.json",
+);
+
+export function loadRateCard(cardPath: string = defaultPath): RateCard {
+  return JSON.parse(readFileSync(cardPath, "utf8")) as RateCard;
+}
+
+export function priceUsage(
+  usage: TokenUsage,
+  model: string | null,
+  card: RateCard,
+  fastMode: boolean,
+): Cost {
+  const uncached_input = usage.input_tokens - usage.cached_input_tokens;
+  const cached_input = usage.cached_input_tokens;
+  const output = usage.output_tokens;
+  const raw = usage.input_tokens + usage.output_tokens;
+  const rates = model ? card.models[model] : undefined;
+  if (!rates) {
+    return { raw, uncached_input, cached_input, output, credits: null, usd: null };
+  }
+  let credits =
+    (uncached_input / 1e6) * rates.input +
+    (cached_input / 1e6) * rates.cached +
+    (output / 1e6) * rates.output;
+  if (fastMode) credits *= card.fast_multiplier;
+  const usd = credits * card.usd_per_credit;
+  return { raw, uncached_input, cached_input, output, credits, usd };
+}
