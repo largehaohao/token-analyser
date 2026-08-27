@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "test": "pnpm --filter engine test && sh -c 'test \"$E2E\" = 1 && pnpm --filter web test:e2e || true'",
+    "test": "pnpm --filter engine test && sh -c 'if [ \"$E2E\" = 1 ]; then pnpm --filter web test:e2e; fi'",
     "analyse": "pnpm --filter engine analyse",
     "dev": "pnpm --filter engine start & pnpm --filter web dev",
     "start": "pnpm --filter web build && SERVE_UI=1 PORT=7788 pnpm --filter engine start"
