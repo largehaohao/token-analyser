@@ -1,0 +1,105 @@
+import { describe, expect, it } from "vitest";
+import type { Bucket, Cost, DetectorLabel, SessionSnapshot, Turn } from "../src/types.ts";
+import { DEFAULT_WASTE_TOGGLES, emptyCost } from "../src/types.ts";
+import { buildTree, sumTurns } from "../src/tree.ts";
+import { computeWaste } from "../src/waste.ts";
+
+function cost(raw: number): Cost {
+  return { raw, uncached_input: 0, cached_input: 0, output: 0, credits: 0, usd: 0 };
+}
+
+function turn(partial: {
+  id: string;
+  bucket: Bucket;
+  raw: number;
+  sessionId?: string;
+  labels?: DetectorLabel[];
+}): Turn {
+  return {
+    id: partial.id,
+    sessionId: partial.sessionId ?? "s1",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    endedAt: "2026-01-01T00:00:01.000Z",
+    model: null,
+    effort: null,
+    prompt: "",
+    tools: [],
+    usage: {
+      input_tokens: 0,
+      cached_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_output_tokens: 0,
+      total_tokens: 0,
+    },
+    cost: cost(partial.raw),
+    bucket: partial.bucket,
+    labels: partial.labels ?? [],
+    hasPatchApply: false,
+  };
+}
+
+function snapshotWithTurns(id: string, nickname: string, turns: Turn[]): SessionSnapshot {
+  const childCost = sumTurns(turns);
+  const tree = buildTree({ sessionId: id, label: nickname, turns, children: [] });
+  return {
+    id,
+    parentId: "parent",
+    nickname,
+    cwd: null,
+    live: false,
+    path: `/tmp/${id}.jsonl`,
+    startedAt: null,
+    lastEventAt: null,
+    model: null,
+    effort: null,
+    ledger_warning: false,
+    parse_errors: [],
+    rate_limits: null,
+    rateCardAsOf: "2026-01-01",
+    fastMode: false,
+    cost: childCost,
+    waste: emptyCost(),
+    toggles: DEFAULT_WASTE_TOGGLES,
+    tree,
+    turns,
+    children: [],
+    suggestions: [],
+  };
+}
+
+describe("computeWaste", () => {
+  it("default toggles count poll and hash-reread once even if also compaction_loop", () => {
+    const poll = turn({ id: "1", bucket: "waiting.poll", raw: 100 });
+    const reread = turn({ id: "2", bucket: "reread", raw: 50, labels: ["compaction_loop"] });
+    const { waste, turnIds } = computeWaste({
+      turns: [poll, reread],
+      children: [],
+      toggles: DEFAULT_WASTE_TOGGLES,
+    });
+    expect(turnIds).toEqual(new Set(["1", "2"]));
+    expect(waste.raw).toBe(150);
+  });
+
+  it("idle child full raw counts once with poll toggle also on", () => {
+    const childTurn = turn({ id: "c1", bucket: "waiting.poll", raw: 80, sessionId: "child" });
+    const child = snapshotWithTurns("child", "Plato", [childTurn]);
+    const { waste, turnIds } = computeWaste({
+      turns: [],
+      children: [child],
+      toggles: DEFAULT_WASTE_TOGGLES,
+    });
+    expect(turnIds).toEqual(new Set(["c1"]));
+    expect(waste.raw).toBe(80);
+  });
+
+  it("different hash reread bucket is not waste by default", () => {
+    const t = turn({ id: "3", bucket: "other", raw: 40 });
+    const { waste } = computeWaste({
+      turns: [t],
+      children: [],
+      toggles: DEFAULT_WASTE_TOGGLES,
+    });
+    expect(waste.raw).toBe(0);
+  });
+});
