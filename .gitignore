@@ -9,4 +9,6 @@ Untitled/
 .worktrees/
 .superpowers/
 coverage/
+test-results/
+playwright-report/
 fixtures/private/

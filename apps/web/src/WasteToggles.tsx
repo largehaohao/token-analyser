@@ -19,6 +19,10 @@ type Props = {
 
 export function WasteToggles({ snapshot, onUpdate }: Props) {
   async function handleChange(id: WasteToggleId, checked: boolean) {
+    onUpdate({
+      ...snapshot,
+      toggles: { ...snapshot.toggles, [id]: checked },
+    });
     const updated = await patchToggles(snapshot.id, { [id]: checked });
     onUpdate(updated);
   }
