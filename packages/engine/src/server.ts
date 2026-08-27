@@ -78,9 +78,15 @@ function collectRolloutFiles(roots: string[]): string[] {
   return results;
 }
 
+function errorIdFromPath(filePath: string): string {
+  const base = path.basename(filePath);
+  return base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : base;
+}
+
 function wireStoreChangeEvents(
   store: SessionStore,
   onChange: (id: string, isNew: boolean) => void,
+  onError: (id: string, reason: string) => void,
 ): void {
   const marker = "__changeEventsWired" as const;
   const tagged = store as SessionStore & { [marker]?: boolean };
@@ -89,10 +95,18 @@ function wireStoreChangeEvents(
 
   const origIngest = store.ingestPath.bind(store);
   store.ingestPath = (filePath: string) => {
-    const idsBefore = new Set(store.list().map((s) => s.id));
-    const id = origIngest(filePath);
-    if (id) onChange(id, !idsBefore.has(id));
-    return id;
+    try {
+      const idsBefore = new Set(store.list().map((s) => s.id));
+      const id = origIngest(filePath);
+      if (id) onChange(id, !idsBefore.has(id));
+      return id;
+    } catch (err) {
+      onError(
+        errorIdFromPath(filePath),
+        err instanceof Error ? err.message : String(err),
+      );
+      return undefined;
+    }
   };
 
   const origSetToggles = store.setToggles.bind(store);
@@ -259,7 +273,11 @@ export async function startServer(opts?: {
   port?: number;
   store?: SessionStore;
   staticDir?: string;
-}): Promise<{ url: string; close: () => Promise<void> }> {
+}): Promise<{
+  url: string;
+  close: () => Promise<void>;
+  onIngestError: (id: string, reason: string) => void;
+}> {
   const store = opts?.store ?? new SessionStore();
   const staticDir = opts?.staticDir;
   const port =
@@ -276,9 +294,17 @@ export async function startServer(opts?: {
     }
   }
 
-  wireStoreChangeEvents(store, (id, isNew) => {
-    broadcast(isNew ? "session_added" : "session_updated", { id });
-  });
+  const notifySessionError = (id: string, reason: string): void => {
+    broadcast("session_error", { id, reason });
+  };
+
+  wireStoreChangeEvents(
+    store,
+    (id, isNew) => {
+      broadcast(isNew ? "session_added" : "session_updated", { id });
+    },
+    notifySessionError,
+  );
 
   const server = http.createServer(async (req, res) => {
     if (req.method === "OPTIONS") {
@@ -378,6 +404,7 @@ export async function startServer(opts?: {
 
   return {
     url,
+    onIngestError: notifySessionError,
     close: async () => {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       for (const client of sseClients) {
@@ -396,10 +423,10 @@ async function main(): Promise<void> {
   const store = new SessionStore();
   store.refresh(collectRolloutFiles(config.watch_paths));
 
-  const { url } = await startServer({ store });
+  const { url, onIngestError } = await startServer({ store });
   console.log(`token-analyser engine listening on ${url}`);
 
-  watchSessions(store, () => {});
+  watchSessions(store, () => {}, { onError: onIngestError });
 }
 
 const entry = process.argv[1]

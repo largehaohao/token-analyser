@@ -164,4 +164,53 @@ describe("startServer", () => {
       await server.close();
     }
   });
+
+  it("streams session_error when import ingest fails", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-import-err-"));
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({ port: 0, store });
+
+    try {
+      const events: string[] = [];
+      const controller = new AbortController();
+      const streamRes = await fetch(`${server.url}/stream`, {
+        signal: controller.signal,
+      });
+      const reader = streamRes.body!.getReader();
+      const decoder = new TextDecoder();
+      void (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            events.push(decoder.decode(value));
+          }
+        } catch {
+          // aborted
+        }
+      })();
+
+      const missingPath = path.join(dir, "missing-rollout.jsonl");
+      const importRes = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: missingPath }),
+      });
+      expect(importRes.status).toBe(500);
+      expect(await importRes.json()).toEqual({ error: "ingest_failed" });
+
+      const deadline = Date.now() + 1000;
+      while (Date.now() < deadline) {
+        if (events.join("").includes("session_error")) break;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+
+      controller.abort();
+
+      expect(events.join("")).toContain("event: session_error");
+      expect(events.join("")).toMatch(/"reason":/);
+    } finally {
+      await server.close();
+    }
+  });
 });

@@ -7,6 +7,7 @@ export type WatchOptions = {
   watchPaths?: string[];
   /** When false, use per-subdirectory watchers instead of recursive fs.watch. */
   recursive?: boolean;
+  onError?: (id: string, reason: string) => void;
 };
 
 function isRolloutJsonl(name: string): boolean {
@@ -38,14 +39,22 @@ export function watchSessions(
   const watchers: ReturnType<typeof watch>[] = [];
   const useRecursive = opts?.recursive ?? true;
 
+  function errorIdFromPath(filePath: string): string {
+    const base = path.basename(filePath);
+    return base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : base;
+  }
+
   function ingestIfRollout(fullPath: string): void {
     const base = path.basename(fullPath);
     if (!isRolloutJsonl(base) || !existsSync(fullPath)) return;
     try {
       const id = store.ingestPath(fullPath);
       if (id) onChange(id);
-    } catch {
-      // skip unreadable or partial files until next change
+    } catch (err) {
+      opts?.onError?.(
+        errorIdFromPath(fullPath),
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 
