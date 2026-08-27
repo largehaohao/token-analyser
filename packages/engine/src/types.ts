@@ -143,6 +143,14 @@ export type SessionListItem = {
   ledger_warning: boolean;
 };
 
+export type SessionMeta = {
+  id: string;
+  parentId: string | null;
+  nickname: string | null;
+  cwd: string | null;
+  startedAt: string | null;
+};
+
 export type RolloutLine = {
   timestamp: string;
   type: string;
