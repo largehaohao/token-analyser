@@ -107,7 +107,8 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
             <small>{formatUnitSuffix(unit)}</small>
           </div>
           <div className="kpi-sub">
-            {wastePct} 的已知{unit === "tokens" ? " token" : "费用"}（默认浪费开关）
+            {wastePct} 的已知{unit === "tokens" ? " token" : "费用"}
+            （随各会话浪费开关变化）
           </div>
         </article>
         <button
@@ -124,6 +125,12 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
           </div>
         </button>
       </div>
+
+      {overview.sessionCount === 0 && (
+        <p className="empty-overview">
+          该时间范围内没有会话。试试 7 天或全部，或把 JSONL 拖到会话列表导入。
+        </p>
+      )}
 
       <section className="chart-card token-mix-card">
         <div className="chart-head">

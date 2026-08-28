@@ -53,7 +53,9 @@ export function TurnTable({ turns, turnIds, highlightTurnId }: Props) {
         )}
       </div>
       {filtered.length === 0 ? (
-        <p className="empty-turns">选择成本树节点查看轮次。</p>
+        <p className="empty-turns">
+          该节点没有轮次。点选「本会话」查看全部。
+        </p>
       ) : (
         <table className="turn-table">
           <thead>
