@@ -525,6 +525,16 @@ input {
   background: #c49bff;
 }
 
+.swatch.unpriced {
+  background: repeating-linear-gradient(
+    -45deg,
+    #3d4a3d,
+    #3d4a3d 3px,
+    #7dffb3 3px,
+    #7dffb3 6px
+  );
+}
+
 .mix-bar {
   display: flex;
   height: 6px;
@@ -1168,6 +1178,26 @@ input {
   display: block;
   width: 100%;
   background: #e8b48a;
+}
+
+.trend-stack.unpriced .trend-fill {
+  background: repeating-linear-gradient(
+    -45deg,
+    #243024,
+    #243024 3px,
+    #7dffb3 3px,
+    #7dffb3 6px
+  );
+  opacity: 0.85;
+}
+
+.trend-col.overflow .trend-stack {
+  outline: 1px dashed #3d4a3d;
+  outline-offset: 1px;
+}
+
+.trend-col.overflow .trend-label {
+  color: #a8b4a8;
 }
 
 .trend-label {

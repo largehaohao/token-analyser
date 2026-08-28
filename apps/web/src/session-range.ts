@@ -19,7 +19,7 @@ export type DatedSession = {
 };
 
 function sessionTimeMs(session: DatedSession): number | null {
-  const iso = session.startedAt ?? session.lastEventAt;
+  const iso = session.lastEventAt ?? session.startedAt;
   if (!iso) return null;
   const t = Date.parse(iso);
   return Number.isFinite(t) ? t : null;

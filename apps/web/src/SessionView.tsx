@@ -4,19 +4,17 @@ import { useUnit } from "./UnitContext";
 import {
   cacheHitRatio,
   disclaimer,
-  formatAbsoluteTime,
   formatCost,
   formatPercent,
-  formatRelativeTime,
   wasteShare,
 } from "./format";
 import { ContextProfileCard } from "./ContextProfile";
-import { CostTree, collectTurnIds, findNodeById } from "./CostTree";
+import { CostTree, collectTurnIds, findNodeById, findNodeForTurnId } from "./CostTree";
 import { MixBar } from "./MixBar";
 import { RateLimits } from "./RateLimits";
 import { WasteToggles } from "./WasteToggles";
 import { TurnTable } from "./TurnTable";
-import { useNow } from "./useNow";
+import { RelativeTime } from "./RelativeTime";
 
 type Props = {
   snapshot: SessionSnapshot;
@@ -40,13 +38,13 @@ export function SessionView({
   onContextOpen,
 }: Props) {
   const { unit } = useUnit();
-  const now = useNow();
   const [highlightTurnId, setHighlightTurnId] = useState<string | null>(null);
 
   useEffect(() => {
     setHighlightTurnId(null);
   }, [snapshot.id]);
 
+  const turns = useMemo(() => flattenTurns(snapshot), [snapshot]);
   const selectedNode = selectedNodeId
     ? findNodeById(snapshot.tree, selectedNodeId)
     : snapshot.tree;
@@ -63,21 +61,8 @@ export function SessionView({
     const first = ids[0];
     if (!first) return;
     setHighlightTurnId(first);
-    function findNode(node: typeof snapshot.tree): string | null {
-      if (node.turnIds.includes(first)) return node.id;
-      for (const child of node.children) {
-        const found = findNode(child);
-        if (found) return found;
-      }
-      return null;
-    }
-    for (const child of snapshot.tree.children) {
-      const id = findNode(child);
-      if (id) {
-        onSelectNode(id);
-        return;
-      }
-    }
+    const node = findNodeForTurnId(snapshot.tree, first);
+    if (node && node.kind !== "root") onSelectNode(node.id);
   }
 
   return (
@@ -111,10 +96,8 @@ export function SessionView({
             · {snapshot.cwd}
           </span>
         )}
-        <span
-          title={formatAbsoluteTime(snapshot.startedAt ?? snapshot.lastEventAt)}
-        >
-          · {formatRelativeTime(snapshot.startedAt ?? snapshot.lastEventAt, now)}
+        <span>
+          · <RelativeTime iso={snapshot.startedAt ?? snapshot.lastEventAt} />
         </span>
         {hit != null && <span>· 缓存命中 {formatPercent(100 * hit)}</span>}
       </p>
@@ -197,7 +180,7 @@ export function SessionView({
           )}
         </div>
         <TurnTable
-          turns={flattenTurns(snapshot)}
+          turns={turns}
           turnIds={turnIds}
           highlightTurnId={highlightTurnId}
           resetKey={`${snapshot.id}:${selectedNodeId ?? ""}`}

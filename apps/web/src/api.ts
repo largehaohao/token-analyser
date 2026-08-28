@@ -131,6 +131,7 @@ export type Overview = {
   watchPath: string;
   cost: Cost;
   waste: Cost;
+  unpricedRaw: number;
   days: OverviewDay[];
   slices: OverviewSlice[];
 };

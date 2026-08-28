@@ -80,8 +80,8 @@ describe("detect", () => {
     expect(suggestions[0].id).toBe("poll-spin-1");
     expect(suggestions[0].kind).toBe("poll_spin");
     expect(suggestions[0].title).toContain("wait_agent");
-    expect(suggestions[0].body).toMatch(/%.*raw/i);
-    expect(suggestions[0].body).toMatch(/credit/i);
+    expect(suggestions[0].body).toMatch(/原始 token/);
+    expect(suggestions[0].body).toMatch(/credits/);
     expect(suggestions[0].turnIds).toEqual(["p1", "p2", "p3"]);
   });
 
@@ -99,10 +99,12 @@ describe("detect", () => {
 
   it("labels post-compact identical reread as compaction_loop", () => {
     const { turns, events } = classifiedFromFixture("compacted-reread.jsonl");
-    const { turns: labeled } = detect(turns, events);
+    const { turns: labeled, suggestions } = detect(turns, events);
 
     expect(labeled[0].labels).not.toContain("compaction_loop");
     expect(labeled[1].labels).toContain("compaction_loop");
+    expect(suggestions[0]?.title).toMatch(/压缩循环/);
+    expect(suggestions[0]?.body).toMatch(/上下文已压缩/);
   });
 
   it("treats event_msg.context_compacted as a compact boundary", () => {

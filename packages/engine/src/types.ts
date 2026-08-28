@@ -198,3 +198,34 @@ export function addCost(a: Cost, b: Cost): Cost {
     usd,
   };
 }
+
+/** Sum tokens always; keep known money and skip unpriced children. */
+export function addKnownCost(a: Cost, b: Cost): Cost {
+  const credits =
+    a.credits == null
+      ? b.credits
+      : b.credits == null
+        ? a.credits
+        : a.credits + b.credits;
+  const usd =
+    a.usd == null ? b.usd : b.usd == null ? a.usd : a.usd + b.usd;
+  return {
+    raw: a.raw + b.raw,
+    uncached_input: a.uncached_input + b.uncached_input,
+    cached_input: a.cached_input + b.cached_input,
+    output: a.output + b.output,
+    credits,
+    usd,
+  };
+}
+
+export function emptyMaybeCost(): Cost {
+  return {
+    raw: 0,
+    uncached_input: 0,
+    cached_input: 0,
+    output: 0,
+    credits: null,
+    usd: null,
+  };
+}

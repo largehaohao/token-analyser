@@ -4,7 +4,7 @@ import type { CostUnit } from "./format";
 const UNITS: { id: CostUnit; label: string }[] = [
   { id: "tokens", label: "Tokens" },
   { id: "credits", label: "Credits" },
-  { id: "usd", label: "费用" },
+  { id: "usd", label: "USD" },
 ];
 
 export function UnitSwitcher() {
