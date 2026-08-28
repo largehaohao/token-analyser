@@ -60,6 +60,15 @@ export function allocatePercents(values: number[], digits = 1): number[] {
   return out.map((value) => value / factor);
 }
 
+export function headlineCostUnit(unit: CostUnit): CostUnit {
+  return unit === "tokens" ? "credits" : unit;
+}
+
+export function unpricedNote(unpricedRaw: number): string {
+  if (unpricedRaw <= 0) return "";
+  return `另有 ${formatExactTokens(unpricedRaw)} tokens 未定价`;
+}
+
 export function wasteShare(
   waste: Cost,
   total: Cost,
@@ -68,7 +77,7 @@ export function wasteShare(
   const totalValue = costValue(total, unit);
   const wasteValue = costValue(waste, unit);
   if (totalValue == null || wasteValue == null) {
-    return unit === "tokens" ? formatPercent(0) : wasteShare(waste, total, "tokens");
+    return unit === "tokens" ? formatPercent(0) : "—";
   }
   if (totalValue === 0) return formatPercent(0);
   return formatPercent((100 * wasteValue) / totalValue);

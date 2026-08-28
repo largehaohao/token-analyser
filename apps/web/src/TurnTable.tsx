@@ -52,7 +52,7 @@ export function TurnTable({ turns, turnIds, highlightTurnId, resetKey }: Props) 
       block: "nearest",
       behavior: "smooth",
     });
-  }, [highlightTurnId, visible]);
+  }, [highlightTurnId]);
 
   return (
     <div className="turn-table-wrap chart-card">

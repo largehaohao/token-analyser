@@ -87,14 +87,14 @@ function detectPollSpin(turns: Turn[]): Suggestion | null {
       : (100 * spinCost.credits) / allCost.credits;
 
   const title = hasWaitAgent
-    ? "Parent woke the model only to call wait_agent"
-    : "Repeated poll idle turns";
+    ? "父会话只为了 wait_agent 才唤醒模型"
+    : "重复的空闲轮询";
 
-  let body = `Poll is ${rawPct.toFixed(1)}% of session raw`;
+  let body = `轮询占会话原始 token 的 ${rawPct.toFixed(1)}%`;
   if (creditsPct != null) {
-    body += `, ~${creditsPct.toFixed(1)}% of credits`;
+    body += `，约 credits 的 ${creditsPct.toFixed(1)}%`;
   }
-  body += ".";
+  body += "。";
 
   return {
     id: "poll-spin-1",
@@ -217,10 +217,8 @@ function buildCompactionSuggestions(
     suggestions.push({
       id: heavy ? "compaction-loop-heavy-1" : "compaction-loop-1",
       kind: heavy ? "compaction_loop_heavy" : "compaction_loop",
-      title: heavy
-        ? "Heavy compaction loop detected"
-        : "Compaction loop detected",
-      body: `Context compacted ${compactCount} time${compactCount === 1 ? "" : "s"}, then the same files were read back.${credits != null ? ` ~${credits} credits.` : ""} Finish the child task or shrink the working set before continuing.`,
+      title: heavy ? "检测到重度压缩循环" : "检测到压缩循环",
+      body: `上下文已压缩 ${compactCount} 次，随后又把相同文件读了回来。${credits != null ? `约 ${credits} credits。` : ""}先结束子任务或缩小工作集再继续。`,
       turnIds: compactionTurns.map((turn) => turn.id),
     });
   }
@@ -234,8 +232,8 @@ function buildRereadRepeatSuggestion(labeled: Turn[]): Suggestion | null {
   return {
     id: "reread-repeat-1",
     kind: "reread_repeat",
-    title: "Identical file reads repeated",
-    body: `${labeled.length} turn${labeled.length === 1 ? "" : "s"} re-read files with unchanged output.`,
+    title: "相同文件被重复读取",
+    body: `${labeled.length} 轮在输出未变的情况下重读了文件。`,
     turnIds: labeled.map((turn) => turn.id),
   };
 }

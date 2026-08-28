@@ -41,6 +41,16 @@ describe("filterSessionsByRange", () => {
     expect(filterSessionsByRange(sessions, "5h", NOW)).toEqual(sessions);
   });
 
+  it("keeps a session that started before the window but is still active", () => {
+    const longRunning = session(
+      "2026-07-19T09:00:00.000Z",
+      "2026-08-28T11:00:00.000Z",
+    );
+    expect(filterSessionsByRange([longRunning], "7d", NOW)).toEqual([
+      longRunning,
+    ]);
+  });
+
   it("drops sessions with no timestamps from bounded ranges, keeps them in all", () => {
     const sessions = [session(null, null)];
     expect(filterSessionsByRange(sessions, "5h", NOW)).toEqual([]);

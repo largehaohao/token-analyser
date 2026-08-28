@@ -5,6 +5,8 @@ import {
   cacheHitRatio,
   formatPercent,
   formatRelativeTime,
+  headlineCostUnit,
+  unpricedNote,
   wasteShare,
 } from "./format";
 
@@ -42,10 +44,23 @@ describe("wasteShare", () => {
     expect(wasteShare(waste, total, "usd")).toBe("25.0%");
   });
 
-  it("falls back to token share when credits are unpriced", () => {
+  it("does not pretend a token share is a credit share when money is unknown", () => {
     const total = cost({ raw: 200, credits: null, usd: null });
     const waste = cost({ raw: 50, credits: null, usd: null });
-    expect(wasteShare(waste, total, "credits")).toBe("25.0%");
+    expect(wasteShare(waste, total, "credits")).toBe("—");
+    expect(wasteShare(waste, total, "usd")).toBe("—");
+    expect(wasteShare(waste, total, "tokens")).toBe("25.0%");
+  });
+
+  it("keeps the headline unit on credits when the page is in tokens", () => {
+    expect(headlineCostUnit("tokens")).toBe("credits");
+    expect(headlineCostUnit("credits")).toBe("credits");
+    expect(headlineCostUnit("usd")).toBe("usd");
+  });
+
+  it("names unpriced leftover tokens instead of hiding them", () => {
+    expect(unpricedNote(0)).toBe("");
+    expect(unpricedNote(5100)).toBe("另有 5,100 tokens 未定价");
   });
 
   it("does not round a non-zero share down to 0.0%", () => {

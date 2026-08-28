@@ -2,30 +2,29 @@ import { useState } from "react";
 import type { OverviewDay, OverviewSlice } from "./api";
 import { SLICE_META, type SliceKey } from "./buckets";
 import {
+  barHeightPct,
+  chartDayTooltip,
+  chartMax,
+  dayMetricValue,
+  formatChartDay,
+  isOverflowDate,
+  shouldLabelChartDay,
+  unitToChartMetric,
+  type ChartMetric,
+} from "./chart-metric";
+import {
   allocatePercents,
   formatChartNumber,
   formatExactTokens,
   formatPercent,
 } from "./format";
-
-export type ChartMetric = "usd" | "tokens" | "credits";
-
-function dayValue(day: OverviewDay, metric: ChartMetric): number {
-  if (metric === "tokens") return day.cost.raw;
-  if (metric === "credits") return day.cost.credits ?? 0;
-  return day.cost.usd ?? 0;
-}
+import { useUnit } from "./UnitContext";
 
 function flaggedValue(day: OverviewDay, metric: ChartMetric): number {
   if (metric === "tokens") return day.flaggedCost.raw;
-  if (metric === "credits") return day.flaggedCost.credits ?? 0;
-  return day.flaggedCost.usd ?? 0;
-}
-
-function formatDay(date: string): string {
-  if (date === "earlier") return "更早";
-  const parts = date.split("-");
-  return `${parts[1]}/${parts[2]}`;
+  const money =
+    metric === "credits" ? day.flaggedCost.credits : day.flaggedCost.usd;
+  return money ?? 0;
 }
 
 type TrendProps = {
@@ -34,10 +33,15 @@ type TrendProps = {
 };
 
 export function TrendChart({ days, rangeLabel }: TrendProps) {
-  const [metric, setMetric] = useState<ChartMetric>("usd");
-  const values = days.map((day) => dayValue(day, metric));
-  const max = Math.max(...values, 1);
+  const { unit } = useUnit();
+  const metric = unitToChartMetric(unit);
+  const values = days.map((day) => dayMetricValue(day, metric));
+  const max = chartMax(values);
   const ticks = [max, max / 2, 0];
+  const dates = days.map((day) => day.date);
+  const hasUnpriced = days.some(
+    (day) => dayMetricValue(day, metric) == null && day.cost.raw > 0,
+  );
 
   return (
     <section className="chart-card">
@@ -47,27 +51,9 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
           <p className="chart-desc">
             按 UTC 日期归桶（跨日会话按每轮结束时间拆分）
             {rangeLabel ? ` · ${rangeLabel}` : ""}
-            。窗口外的用量记在「更早」。不是逐 token 实时扣费。
+            。窗口外的用量记在「更早 / 之后」。单位跟随页顶开关。不是逐 token
+            实时扣费。
           </p>
-        </div>
-        <div className="metric-switch" role="group" aria-label="趋势单位">
-          {(
-            [
-              ["usd", "费用"],
-              ["tokens", "Tokens"],
-              ["credits", "Credits"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={metric === id ? "active" : ""}
-              aria-pressed={metric === id}
-              onClick={() => setMetric(id)}
-            >
-              {label}
-            </button>
-          ))}
         </div>
       </div>
       <div className="trend" data-testid="trend-chart">
@@ -77,19 +63,24 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
           ))}
         </div>
         <div className="trend-plot">
-          {days.map((day, index) => {
-            const total = dayValue(day, metric);
+          {days.map((day) => {
+            const total = dayMetricValue(day, metric);
             const flagged = flaggedValue(day, metric);
-            const height = (100 * total) / max;
-            const flagShare = total > 0 ? (100 * flagged) / total : 0;
-            const labelEvery = days.length > 14 ? Math.ceil(days.length / 10) : 1;
+            const bar = barHeightPct(total, day.cost.raw, max);
+            const flagShare =
+              total != null && total > 0 ? (100 * flagged) / total : 0;
             return (
-              <div key={day.date} className="trend-col">
+              <div
+                key={day.date}
+                className={`trend-col${isOverflowDate(day.date) ? " overflow" : ""}`}
+              >
                 <div
-                  className="trend-stack"
-                  style={{ height: `${Math.max(height, total > 0 ? 2 : 0)}%` }}
+                  className={`trend-stack${bar.unpriced ? " unpriced" : ""}`}
+                  style={{
+                    height: `${Math.max(bar.height, bar.unpriced || (total ?? 0) > 0 ? 2 : 0)}%`,
+                  }}
                 >
-                  {flagged > 0 && (
+                  {!bar.unpriced && flagged > 0 && (
                     <span
                       className="trend-flag"
                       style={{ height: `${flagShare}%` }}
@@ -97,15 +88,18 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
                   )}
                   <span
                     className="trend-fill"
-                    style={{ height: `${100 - flagShare}%` }}
+                    style={{
+                      height: bar.unpriced ? "100%" : `${100 - flagShare}%`,
+                    }}
                   />
                 </div>
                 <div className="chart-tooltip">
                   <strong>
-                    {day.date === "earlier"
-                      ? "窗口之前"
-                      : `${day.date} UTC`}{" "}
-                    · {formatChartNumber(total, metric)}
+                    {chartDayTooltip(day.date)}
+                    {" · "}
+                    {total == null
+                      ? "未定价"
+                      : formatChartNumber(total, metric)}
                   </strong>
                   <span>
                     账本警告 / 解析错误 {formatChartNumber(flagged, metric)}
@@ -113,7 +107,9 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
                   <span>{formatExactTokens(day.cost.raw)} tokens</span>
                 </div>
                 <span className="trend-label">
-                  {index % labelEvery === 0 ? formatDay(day.date) : ""}
+                  {shouldLabelChartDay(day.date, dates)
+                    ? formatChartDay(day.date)
+                    : ""}
                 </span>
               </div>
             );
@@ -127,6 +123,11 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
         <span>
           <i className="swatch waste" /> 含账本警告或解析错误（不是浪费开关）
         </span>
+        {hasUnpriced && (
+          <span>
+            <i className="swatch unpriced" /> 未定价模型（柱高仅作标记）
+          </span>
+        )}
       </div>
     </section>
   );

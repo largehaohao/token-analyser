@@ -21,7 +21,9 @@ function turn(partial: {
   raw: number;
   startedAt?: string;
   endedAt?: string;
+  priced?: boolean;
 }): Turn {
+  const priced = cost(partial.raw);
   return {
     id: partial.id,
     sessionId: "s",
@@ -39,7 +41,10 @@ function turn(partial: {
       reasoning_output_tokens: 0,
       total_tokens: 0,
     },
-    cost: cost(partial.raw),
+    cost:
+      partial.priced === false
+        ? { ...priced, credits: null, usd: null }
+        : priced,
     bucket: partial.bucket,
     labels: [],
     hasPatchApply: false,
@@ -50,6 +55,7 @@ function turn(partial: {
 function session(partial: {
   id: string;
   startedAt: string;
+  lastEventAt?: string;
   turns: Turn[];
   children?: SessionSnapshot[];
   ledger_warning?: boolean;
@@ -71,7 +77,7 @@ function session(partial: {
     live: partial.live ?? false,
     path: `/tmp/${partial.id}.jsonl`,
     startedAt: partial.startedAt,
-    lastEventAt: partial.startedAt,
+    lastEventAt: partial.lastEventAt ?? partial.startedAt,
     model: "gpt-5.6-luna",
     effort: "max",
     ledger_warning: partial.ledger_warning ?? false,
@@ -300,5 +306,130 @@ describe("buildOverview", () => {
     );
     expect(overview.sessionCount).toBe(1);
     expect(overview.cost.raw).toBe(40);
+  });
+
+  it("keeps a long-running session whose last event is inside the window", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "long",
+          startedAt: "2026-07-19T09:00:00.000Z",
+          lastEventAt: "2026-08-28T11:00:00.000Z",
+          turns: [
+            turn({
+              id: "old",
+              bucket: "code",
+              raw: 100,
+              startedAt: "2026-07-19T09:00:00.000Z",
+            }),
+            turn({
+              id: "today",
+              bucket: "code",
+              raw: 9000,
+              startedAt: "2026-08-28T11:00:00.000Z",
+            }),
+          ],
+        }),
+      ],
+      {
+        watchPath: "/tmp",
+        now: "2026-08-28T12:00:00.000Z",
+        sinceMs: Date.parse("2026-08-21T12:00:00.000Z"),
+        dayCount: 8,
+      },
+    );
+    expect(overview.sessionCount).toBe(1);
+    expect(overview.cost.raw).toBe(9100);
+    expect(overview.days.find((d) => d.date === "2026-08-28")?.cost.raw).toBe(
+      9000,
+    );
+    expect(overview.days[0]?.date).toBe("earlier");
+    expect(overview.days[0]?.cost.raw).toBe(100);
+  });
+
+  it("does not let one unpriced turn wipe a day's known credits", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "mix",
+          startedAt: "2026-08-28T10:00:00.000Z",
+          turns: [
+            turn({
+              id: "priced",
+              bucket: "code",
+              raw: 10_000,
+              startedAt: "2026-08-28T10:00:00.000Z",
+            }),
+            turn({
+              id: "mystery",
+              bucket: "code",
+              raw: 50,
+              startedAt: "2026-08-28T11:00:00.000Z",
+              priced: false,
+            }),
+          ],
+        }),
+      ],
+      { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z", dayCount: 2 },
+    );
+    expect(overview.cost.raw).toBe(10_050);
+    expect(overview.cost.credits).toBeCloseTo(100, 5);
+    expect(overview.unpricedRaw).toBe(50);
+    const today = overview.days.find((d) => d.date === "2026-08-28")!;
+    expect(today.cost.raw).toBe(10_050);
+    expect(today.cost.credits).toBeCloseTo(100, 5);
+    expect(today.cost.usd).not.toBeNull();
+  });
+
+  it("keeps a fully unpriced day as null money instead of zero", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "mystery",
+          startedAt: "2026-08-28T10:00:00.000Z",
+          turns: [
+            turn({
+              id: "u",
+              bucket: "other",
+              raw: 5100,
+              startedAt: "2026-08-28T10:00:00.000Z",
+              priced: false,
+            }),
+          ],
+        }),
+      ],
+      { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z", dayCount: 2 },
+    );
+    expect(overview.cost.credits).toBeNull();
+    expect(overview.unpricedRaw).toBe(5100);
+    const today = overview.days.find((d) => d.date === "2026-08-28")!;
+    expect(today.cost.raw).toBe(5100);
+    expect(today.cost.credits).toBeNull();
+    expect(today.cost.usd).toBeNull();
+  });
+
+  it("puts future-dated turns in a later bucket, not earlier", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "clock",
+          startedAt: "2026-08-28T10:00:00.000Z",
+          turns: [
+            turn({
+              id: "future",
+              bucket: "code",
+              raw: 500,
+              startedAt: "2026-09-30T10:00:00.000Z",
+            }),
+          ],
+        }),
+      ],
+      { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z", dayCount: 8 },
+    );
+    expect(overview.days.map((d) => d.date)).toContain("later");
+    expect(overview.days[0]?.date).not.toBe("later");
+    expect(overview.days.at(-1)?.date).toBe("later");
+    expect(overview.days.at(-1)?.cost.raw).toBe(500);
+    expect(overview.days.find((d) => d.date === "earlier")).toBeUndefined();
   });
 });
