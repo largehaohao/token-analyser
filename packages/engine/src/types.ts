@@ -201,14 +201,20 @@ export function addCost(a: Cost, b: Cost): Cost {
 
 /** Sum tokens always; keep known money and skip unpriced children. */
 export function addKnownCost(a: Cost, b: Cost): Cost {
+  const aMoney = moneyFields(a);
+  const bMoney = moneyFields(b);
   const credits =
-    a.credits == null
-      ? b.credits
-      : b.credits == null
-        ? a.credits
-        : a.credits + b.credits;
+    aMoney.credits == null
+      ? bMoney.credits
+      : bMoney.credits == null
+        ? aMoney.credits
+        : aMoney.credits + bMoney.credits;
   const usd =
-    a.usd == null ? b.usd : b.usd == null ? a.usd : a.usd + b.usd;
+    aMoney.usd == null
+      ? bMoney.usd
+      : bMoney.usd == null
+        ? aMoney.usd
+        : aMoney.usd + bMoney.usd;
   return {
     raw: a.raw + b.raw,
     uncached_input: a.uncached_input + b.uncached_input,
@@ -217,6 +223,13 @@ export function addKnownCost(a: Cost, b: Cost): Cost {
     credits,
     usd,
   };
+}
+
+function moneyFields(cost: Cost): { credits: number | null; usd: number | null } {
+  if (cost.raw === 0 && cost.credits === 0 && cost.usd === 0) {
+    return { credits: null, usd: null };
+  }
+  return { credits: cost.credits, usd: cost.usd };
 }
 
 export function emptyMaybeCost(): Cost {

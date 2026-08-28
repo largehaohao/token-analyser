@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { Cost } from "./api";
 import {
   allocatePercents,
+  activityTimestamp,
   cacheHitRatio,
   formatPercent,
   formatRelativeTime,
   headlineCostUnit,
   unpricedNote,
+  unpricedRawFromTurns,
   wasteShare,
 } from "./format";
 
@@ -61,6 +63,12 @@ describe("wasteShare", () => {
   it("names unpriced leftover tokens instead of hiding them", () => {
     expect(unpricedNote(0)).toBe("");
     expect(unpricedNote(5100)).toBe("另有 5,100 tokens 未定价");
+    expect(
+      unpricedRawFromTurns([
+        { cost: { raw: 10_000, credits: 100 } },
+        { cost: { raw: 50, credits: null } },
+      ]),
+    ).toBe(50);
   });
 
   it("does not round a non-zero share down to 0.0%", () => {
@@ -99,5 +107,16 @@ describe("formatRelativeTime", () => {
 
   it("returns an em dash for missing timestamps", () => {
     expect(formatRelativeTime(null, now)).toBe("—");
+  });
+});
+
+describe("activityTimestamp", () => {
+  it("prefers last activity so range labels match the filter", () => {
+    expect(
+      activityTimestamp({
+        startedAt: "2026-07-19T09:00:00.000Z",
+        lastEventAt: "2026-08-28T11:00:00.000Z",
+      }),
+    ).toBe("2026-08-28T11:00:00.000Z");
   });
 });

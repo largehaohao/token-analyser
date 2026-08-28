@@ -121,6 +121,7 @@ export type OverviewDay = {
   date: string;
   cost: Cost;
   flaggedCost: Cost;
+  unpricedRaw: number;
 };
 
 export type Overview = {

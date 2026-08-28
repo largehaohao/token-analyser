@@ -4,7 +4,9 @@ import {
   barHeightPct,
   chartDayTooltip,
   chartMax,
+  dayHasMixedUnpriced,
   dayMetricValue,
+  flaggedValue,
   formatChartDay,
   shouldLabelChartDay,
   unitToChartMetric,
@@ -15,6 +17,10 @@ function day(partial: {
   raw: number;
   credits?: number | null;
   usd?: number | null;
+  unpricedRaw?: number;
+  flaggedRaw?: number;
+  flaggedCredits?: number | null;
+  flaggedUsd?: number | null;
 }): OverviewDay {
   return {
     date: partial.date,
@@ -27,13 +33,24 @@ function day(partial: {
       usd: partial.usd === undefined ? partial.raw / 1000 : partial.usd,
     },
     flaggedCost: {
-      raw: 0,
+      raw: partial.flaggedRaw ?? 0,
       uncached_input: 0,
       cached_input: 0,
       output: 0,
-      credits: 0,
-      usd: 0,
+      credits:
+        partial.flaggedCredits === undefined
+          ? (partial.flaggedRaw ?? 0) === 0
+            ? 0
+            : (partial.flaggedRaw ?? 0) / 100
+          : partial.flaggedCredits,
+      usd:
+        partial.flaggedUsd === undefined
+          ? (partial.flaggedRaw ?? 0) === 0
+            ? 0
+            : (partial.flaggedRaw ?? 0) / 1000
+          : partial.flaggedUsd,
     },
+    unpricedRaw: partial.unpricedRaw ?? 0,
   };
 }
 
@@ -43,6 +60,45 @@ describe("dayMetricValue", () => {
     expect(dayMetricValue(unknown, "tokens")).toBe(7653600);
     expect(dayMetricValue(unknown, "usd")).toBeNull();
     expect(dayMetricValue(unknown, "credits")).toBeNull();
+  });
+});
+
+describe("flaggedValue", () => {
+  it("does not coerce unknown flagged money to zero", () => {
+    const mixed = day({
+      date: "2026-08-28",
+      raw: 10_050,
+      credits: 100,
+      usd: 4,
+      flaggedRaw: 50,
+      flaggedCredits: null,
+      flaggedUsd: null,
+    });
+    expect(flaggedValue(mixed, "tokens")).toBe(50);
+    expect(flaggedValue(mixed, "credits")).toBeNull();
+    expect(flaggedValue(mixed, "usd")).toBeNull();
+  });
+});
+
+describe("dayHasMixedUnpriced", () => {
+  it("marks a priced day that still has unpriced leftover tokens", () => {
+    const mixed = day({
+      date: "2026-08-28",
+      raw: 10_050,
+      credits: 100,
+      usd: 4,
+      unpricedRaw: 50,
+    });
+    expect(dayHasMixedUnpriced(mixed, "credits")).toBe(true);
+    expect(dayHasMixedUnpriced(mixed, "tokens")).toBe(true);
+    const fullyUnknown = day({
+      date: "2026-08-27",
+      raw: 5100,
+      credits: null,
+      usd: null,
+      unpricedRaw: 5100,
+    });
+    expect(dayHasMixedUnpriced(fullyUnknown, "credits")).toBe(false);
   });
 });
 

@@ -1,6 +1,7 @@
 import {
-  addCost,
+  addKnownCost,
   emptyCost,
+  emptyMaybeCost,
   type Cost,
   type SessionSnapshot,
   type Turn,
@@ -60,10 +61,11 @@ export function computeWaste(args: {
     }
   }
 
-  let waste = emptyCost();
+  let waste = emptyMaybeCost();
   for (const id of turnIds) {
-    waste = addCost(waste, turnById.get(id)!.cost);
+    waste = addKnownCost(waste, turnById.get(id)!.cost);
   }
+  if (waste.raw === 0) waste = emptyCost();
 
   return { waste, turnIds };
 }

@@ -6,6 +6,7 @@ import {
   mkdirSync,
   renameSync,
   statSync,
+  readdirSync,
 } from "node:fs";
 import path from "node:path";
 import { sha256 } from "./hash.ts";
@@ -60,6 +61,33 @@ export function readCache(
     }
     return undefined;
   }
+}
+
+export function pruneStaleCache(home?: string): number {
+  const dir = cacheDir(home);
+  if (!existsSync(dir)) return 0;
+  let removed = 0;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    const file = path.join(dir, name);
+    try {
+      const value = JSON.parse(readFileSync(file, "utf8")) as {
+        version?: unknown;
+      };
+      if (value.version !== CACHE_VERSION) {
+        unlinkSync(file);
+        removed += 1;
+      }
+    } catch {
+      try {
+        unlinkSync(file);
+        removed += 1;
+      } catch {
+        // ignore concurrent deletes
+      }
+    }
+  }
+  return removed;
 }
 
 export function writeCache(
