@@ -16,6 +16,7 @@ function TreeRow({
   depth,
   selectedNodeId,
   displayPercent,
+  rootPercents,
   onSelect,
 }: {
   node: TreeNode;
@@ -24,20 +25,23 @@ function TreeRow({
   depth: number;
   selectedNodeId: string | null;
   displayPercent: number;
+  rootPercents: number[];
   onSelect: (id: string) => void;
 }) {
   const { unit } = useUnit();
-  const branch = isLast ? "└─" : "├─";
+  const branch = depth === 0 ? "" : isLast ? "└─" : "├─";
   const isRootChild = depth === 1;
   const appearance = treeAppearance(node.label, node.kind, node.bucket);
-  const muted = node.cost.raw === 0;
+  const muted = node.cost.raw === 0 && depth > 0;
+  const selected =
+    selectedNodeId === node.id || (selectedNodeId == null && depth === 0);
 
   return (
     <>
       <button
         type="button"
-        className={`tree-row${selectedNodeId === node.id ? " selected" : ""}${muted ? " muted" : ""}`}
-        aria-pressed={selectedNodeId === node.id}
+        className={`tree-row${selected ? " selected" : ""}${muted ? " muted" : ""}`}
+        aria-pressed={selected}
         onClick={() => onSelect(node.id)}
       >
         <span className="tree-prefix">
@@ -67,11 +71,14 @@ function TreeRow({
         <TreeRow
           key={child.id}
           node={child}
-          prefix={prefix + (isLast ? "  " : "│ ")}
+          prefix={depth === 0 ? "" : prefix + (isLast ? "  " : "│ ")}
           isLast={i === node.children.length - 1}
           depth={depth + 1}
           selectedNodeId={selectedNodeId}
-          displayPercent={child.percentOfParent}
+          displayPercent={
+            depth === 0 ? rootPercents[i] : child.percentOfParent
+          }
+          rootPercents={rootPercents}
           onSelect={onSelect}
         />
       ))}
@@ -80,24 +87,26 @@ function TreeRow({
 }
 
 export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
-  const percents = allocatePercents(tree.children.map((child) => child.cost.raw));
+  const rootPercents = allocatePercents(
+    tree.children.map((child) => child.cost.raw),
+  );
 
   return (
     <div className="cost-tree chart-card">
       <h3>成本树</h3>
-      <p className="chart-desc">点选节点过滤右侧轮次。占比按原始 token 划分，合计 100%。</p>
-      {tree.children.map((child, i) => (
-        <TreeRow
-          key={child.id}
-          node={child}
-          prefix=""
-          isLast={i === tree.children.length - 1}
-          depth={1}
-          selectedNodeId={selectedNodeId}
-          displayPercent={percents[i]}
-          onSelect={onSelect}
-        />
-      ))}
+      <p className="chart-desc">
+        点选节点过滤右侧轮次。根节点为全部轮次。占比按原始 token 划分，合计 100%。
+      </p>
+      <TreeRow
+        node={tree}
+        prefix=""
+        isLast
+        depth={0}
+        selectedNodeId={selectedNodeId}
+        displayPercent={100}
+        rootPercents={rootPercents}
+        onSelect={onSelect}
+      />
     </div>
   );
 }

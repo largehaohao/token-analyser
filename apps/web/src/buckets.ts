@@ -31,6 +31,7 @@ export function treeAppearance(
   kind: string,
   bucket?: string,
 ): { label: string; color: string } {
+  if (kind === "root") return { label: "本会话", color: "#e8eee8" };
   const key = bucket ?? label;
   if (key in TREE_LABELS) return TREE_LABELS[key];
   if (kind === "child") return { label, color: SLICE_META.subagents.color };
