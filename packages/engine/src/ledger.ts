@@ -29,6 +29,11 @@ type WindowState = {
   startedAt: string | null;
 };
 
+type PendingOwner = {
+  pending: PendingTool;
+  turn: Turn;
+};
+
 function usageEqual(a: TokenUsage, b: TokenUsage): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -44,8 +49,14 @@ function extractSubagentMeta(source: unknown): {
     return { parentId: null, nickname: null };
   }
   return {
-    parentId: asString(threadSpawn.parent_thread_id) || null,
-    nickname: asString(threadSpawn.agent_nickname) || null,
+    parentId:
+      typeof threadSpawn.parent_thread_id === "string"
+        ? threadSpawn.parent_thread_id || null
+        : null,
+    nickname:
+      typeof threadSpawn.agent_nickname === "string"
+        ? threadSpawn.agent_nickname || null
+        : null,
   };
 }
 
@@ -58,20 +69,64 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function asString(value: unknown): string {
   if (typeof value === "string") return value;
   if (value == null) return "";
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
   return String(value);
+}
+
+function canonicalToolName(value: unknown): string {
+  const name = asString(value).trim();
+  const lower = name.toLowerCase();
+  if (/(^|[._]|__)exec(?:_command)?$/.test(lower)) return "exec";
+  if (/(^|[._]|__)wait(?:_agent|_threads)?$/.test(lower)) return "wait_agent";
+  if (/(^|[._]|__)list(?:_agents|_threads)?$/.test(lower)) return "list_agents";
+  if (/(^|[._]|__)write_stdin$/.test(lower)) return "write_stdin";
+  if (/(^|[._]|__)send_message(?:_to_thread)?$/.test(lower)) {
+    return "send_message";
+  }
+  if (/(^|[._]|__)(?:spawn_agent|create_thread|fork_thread)$/.test(lower)) {
+    return "spawn_agent";
+  }
+  if (/(^|[._]|__)followup_task$/.test(lower)) return "send_message";
+  return name;
+}
+
+function normalizeToolInput(value: unknown, toolName: string): string {
+  const text = asString(value);
+  if (toolName !== "exec" || !text) return text;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const record = asRecord(parsed);
+    if (record && typeof record.cmd === "string") return record.cmd;
+    if (record && typeof record.command === "string") return record.command;
+  } catch {
+    // The input may already be a plain shell command.
+  }
+  return text;
 }
 
 function extractTurnContext(payload: Record<string, unknown>): TurnContext {
   const collaboration = asRecord(payload.collaboration_mode);
   const settings = collaboration ? asRecord(collaboration.settings) : null;
   const effort =
-    (settings?.reasoning_effort as string | undefined) ??
-    (payload.effort as string | undefined) ??
+    (typeof settings?.reasoning_effort === "string"
+      ? settings.reasoning_effort
+      : undefined) ??
+    (typeof payload.effort === "string" ? payload.effort : undefined) ??
     null;
   const fastMode =
     payload.fast_mode === true || payload.speed === "fast";
+  const model =
+    (typeof payload.model === "string" ? payload.model : undefined) ??
+    (typeof settings?.model === "string" ? settings.model : undefined) ??
+    null;
   return {
-    model: (payload.model as string | undefined) ?? null,
+    model,
     effort,
     fastMode,
     collaborationMode: asString(collaboration?.mode) || null,
@@ -81,7 +136,17 @@ function extractTurnContext(payload: Record<string, unknown>): TurnContext {
 function extractUsage(value: unknown): TokenUsage | null {
   const record = asRecord(value);
   if (!record) return null;
-  return {
+  for (const key of [
+    "input_tokens",
+    "cached_input_tokens",
+    "output_tokens",
+    "total_tokens",
+  ]) {
+    if (typeof record[key] !== "number" || !Number.isFinite(record[key])) {
+      return null;
+    }
+  }
+  const usage: TokenUsage = {
     input_tokens: Number(record.input_tokens ?? 0),
     cached_input_tokens: Number(record.cached_input_tokens ?? 0),
     cache_write_input_tokens: Number(record.cache_write_input_tokens ?? 0),
@@ -89,6 +154,11 @@ function extractUsage(value: unknown): TokenUsage | null {
     reasoning_output_tokens: Number(record.reasoning_output_tokens ?? 0),
     total_tokens: Number(record.total_tokens ?? 0),
   };
+  return Object.values(usage).every(
+    (item) => Number.isFinite(item) && item >= 0,
+  ) && usage.cached_input_tokens <= usage.input_tokens
+    ? usage
+    : null;
 }
 
 function extractUserText(payload: Record<string, unknown>): string {
@@ -123,18 +193,46 @@ function finalizeTool(pending: PendingTool, output: string): ToolCall {
   };
 }
 
-function pairToolOutput(window: WindowState, callId: string, output: string) {
-  const index = window.pendingTools.findIndex((tool) => tool.callId === callId);
-  if (index === -1) return;
-  const [pending] = window.pendingTools.splice(index, 1);
-  window.tools.push(finalizeTool(pending, output));
+function pairToolOutput(
+  window: WindowState,
+  outstanding: PendingOwner[],
+  callId: string,
+  output: string,
+): void {
+  let index = callId
+    ? window.pendingTools.findIndex((tool) => tool.callId === callId)
+    : window.pendingTools.length === 1
+      ? 0
+      : -1;
+  if (index !== -1) {
+    const [pending] = window.pendingTools.splice(index, 1);
+    window.tools.push(finalizeTool(pending!, output));
+    return;
+  }
+
+  index = callId
+    ? outstanding.findIndex((owner) => owner.pending.callId === callId)
+    : outstanding.length === 1
+      ? 0
+      : -1;
+  if (index !== -1) {
+    const [owner] = outstanding.splice(index, 1);
+    owner!.turn.tools.push(finalizeTool(owner!.pending, output));
+  }
 }
 
-function flushPendingTools(window: WindowState) {
+function movePendingTools(window: WindowState, turn: Turn, outstanding: PendingOwner[]): void {
   for (const pending of window.pendingTools) {
-    window.tools.push(finalizeTool(pending, ""));
+    outstanding.push({ pending, turn });
   }
   window.pendingTools = [];
+}
+
+function flushOutstandingTools(outstanding: PendingOwner[]): void {
+  for (const owner of outstanding) {
+    owner.turn.tools.push(finalizeTool(owner.pending, ""));
+  }
+  outstanding.length = 0;
 }
 
 function withinSlack(actual: number, expected: number): boolean {
@@ -145,10 +243,11 @@ function accumulateEvent(
   event: RolloutLine,
   window: WindowState,
   armed: boolean,
+  outstanding: PendingOwner[],
 ) {
   if (!armed) return;
 
-  const payload = event.payload ?? {};
+  const payload = asRecord(event.payload) ?? {};
 
   if (event.type === "turn_context") {
     return;
@@ -182,9 +281,14 @@ function accumulateEvent(
   }
 
   if (itemType === "custom_tool_call" || itemType === "function_call") {
+    const fn = asRecord(payload.function);
+    const name = canonicalToolName(payload.name ?? fn?.name);
     window.pendingTools.push({
-      name: asString(payload.name),
-      input: asString(payload.input ?? payload.arguments),
+      name,
+      input: normalizeToolInput(
+        payload.input ?? payload.arguments ?? fn?.arguments,
+        name,
+      ),
       callId: asString(payload.call_id),
     });
     return;
@@ -194,7 +298,12 @@ function accumulateEvent(
     itemType === "custom_tool_call_output" ||
     itemType === "function_call_output"
   ) {
-    pairToolOutput(window, asString(payload.call_id), asString(payload.output));
+    pairToolOutput(
+      window,
+      outstanding,
+      asString(payload.call_id),
+      asString(payload.output),
+    );
   }
 }
 
@@ -227,6 +336,8 @@ export function buildLedger(
 
   let armed = !opts.isSubagent;
   let window = newWindow();
+  const outstanding: PendingOwner[] = [];
+  let lastPrompt = "";
   let keptTurnCount = 0;
   let ledger_warning = false;
 
@@ -235,11 +346,14 @@ export function buildLedger(
   let runningInput = 0;
   let runningOutput = 0;
   let runningCached = 0;
+  let runningCacheWrite = 0;
+  let runningReasoning = 0;
+  let runningTotal = 0;
 
   const turns: Turn[] = [];
 
   for (const event of events) {
-    const payload = event.payload ?? {};
+    const payload = asRecord(event.payload) ?? {};
 
     if (event.type === "session_meta") {
       const subagentMeta = extractSubagentMeta(payload.source);
@@ -263,7 +377,7 @@ export function buildLedger(
 
     if (event.type === "event_msg" && payload.type === "task_started") {
       if (opts.isSubagent) armed = true;
-      accumulateEvent(event, window, armed);
+      accumulateEvent(event, window, armed, outstanding);
       continue;
     }
 
@@ -275,7 +389,16 @@ export function buildLedger(
       const info = asRecord(payload.info);
       const lastUsage = extractUsage(info?.last_token_usage);
       const totalUsage = extractUsage(info?.total_token_usage);
-      if (!lastUsage || !totalUsage) continue;
+      if (!lastUsage || !totalUsage) {
+        if (
+          info &&
+          (info.last_token_usage !== undefined ||
+            info.total_token_usage !== undefined)
+        ) {
+          ledger_warning = true;
+        }
+        continue;
+      }
 
       if (
         prevLastUsage &&
@@ -286,9 +409,10 @@ export function buildLedger(
         continue;
       }
 
-      flushPendingTools(window);
       keptTurnCount += 1;
       const turnId = `${sessionId}:${event.ordinal ?? keptTurnCount}`;
+      const prompt = window.promptParts.join("\n") || lastPrompt;
+      if (window.promptParts.length > 0) lastPrompt = prompt;
 
       const turn: Turn = {
         id: turnId,
@@ -297,7 +421,7 @@ export function buildLedger(
         endedAt: event.timestamp,
         model: turnContext.model,
         effort: turnContext.effort,
-        prompt: window.promptParts.join("\n"),
+        prompt,
         tools: window.tools,
         usage: lastUsage,
         cost: priceUsage(
@@ -312,6 +436,7 @@ export function buildLedger(
         collaborationMode: turnContext.collaborationMode,
       };
       turns.push(turn);
+      movePendingTools(window, turn, outstanding);
 
       prevLastUsage = lastUsage;
       prevTotalUsage = totalUsage;
@@ -319,11 +444,17 @@ export function buildLedger(
       runningInput += lastUsage.input_tokens;
       runningOutput += lastUsage.output_tokens;
       runningCached += lastUsage.cached_input_tokens;
+      runningCacheWrite += lastUsage.cache_write_input_tokens;
+      runningReasoning += lastUsage.reasoning_output_tokens;
+      runningTotal += lastUsage.total_tokens;
 
       if (
         !withinSlack(runningInput, totalUsage.input_tokens) ||
         !withinSlack(runningOutput, totalUsage.output_tokens) ||
-        !withinSlack(runningCached, totalUsage.cached_input_tokens)
+        !withinSlack(runningCached, totalUsage.cached_input_tokens) ||
+        !withinSlack(runningCacheWrite, totalUsage.cache_write_input_tokens) ||
+        !withinSlack(runningReasoning, totalUsage.reasoning_output_tokens) ||
+        !withinSlack(runningTotal, totalUsage.total_tokens)
       ) {
         ledger_warning = true;
       }
@@ -332,8 +463,10 @@ export function buildLedger(
       continue;
     }
 
-    accumulateEvent(event, window, armed);
+    accumulateEvent(event, window, armed, outstanding);
   }
+
+  flushOutstandingTools(outstanding);
 
   return {
     turns,

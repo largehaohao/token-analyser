@@ -103,4 +103,27 @@ describe("computeWaste", () => {
     });
     expect(waste.raw).toBe(0);
   });
+
+  it("counts an idle grandchild even when its parent child is healthy", () => {
+    const grandchild = snapshotWithTurns("grandchild", "GC", [
+      turn({ id: "gc-poll", bucket: "waiting.poll", raw: 80, sessionId: "grandchild" }),
+    ]);
+    const child = snapshotWithTurns("child", "Child", [
+      turn({ id: "child-code", bucket: "code", raw: 200, sessionId: "child" }),
+    ]);
+    child.children = [grandchild];
+    child.cost = buildTree({
+      sessionId: child.id,
+      label: child.nickname ?? child.id,
+      turns: child.turns,
+      children: child.children,
+    }).cost;
+
+    const { waste } = computeWaste({
+      turns: [],
+      children: [child],
+      toggles: DEFAULT_WASTE_TOGGLES,
+    });
+    expect(waste.raw).toBe(80);
+  });
 });

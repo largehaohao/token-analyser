@@ -1,5 +1,5 @@
 import { openSync, readSync, closeSync, statSync } from "node:fs";
-import { parseJsonlChunk } from "./parse-jsonl.ts";
+import { parseJsonlLine } from "./parse-jsonl.ts";
 import { analyseSession } from "./snapshot.ts";
 import {
   cacheKey,
@@ -8,83 +8,107 @@ import {
   writeCache,
 } from "./cache.ts";
 import type { ParseError, RolloutLine, SessionSnapshot } from "./types.ts";
+import { effectiveRateCard } from "./rate-card.ts";
 
 export const READ_CHUNK_BYTES = 64 * 1024;
 
-/** Exclusive end index of complete UTF-8 sequences in `buf`. */
-function utf8CompleteEnd(buf: Buffer): number {
-  if (buf.length === 0) return 0;
+type JsonlReadDetails = {
+  events: RolloutLine[];
+  parse_errors: ParseError[];
+  /** Byte offset at which `rest` starts. */
+  offset: number;
+  rest: Buffer<ArrayBufferLike>;
+};
 
-  let i = buf.length - 1;
-  let cont = 0;
-  while (i >= 0 && (buf[i]! & 0b1100_0000) === 0b1000_0000) {
-    cont++;
-    i--;
-    if (cont >= 3) break;
+function readJsonlFileDetailed(
+  filePath: string,
+  startOffset = 0,
+  initialRest: Buffer<ArrayBufferLike> = Buffer.alloc(0),
+  chunkBytes = READ_CHUNK_BYTES,
+): JsonlReadDetails {
+  const events: RolloutLine[] = [];
+  const parse_errors: ParseError[] = [];
+  let offset = startOffset;
+  let pending = initialRest;
+  let position = startOffset + initialRest.length;
+
+  const consumeCompleteLines = (): void => {
+    while (true) {
+      const newline = pending.indexOf(0x0a);
+      if (newline === -1) return;
+      const lineBytes = pending.subarray(0, newline);
+      const line = lineBytes.toString("utf8");
+      if (line.trim() !== "") {
+        try {
+          events.push(parseJsonlLine(line.replace(/\r$/, "")));
+        } catch (err) {
+          parse_errors.push({
+            offset,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      offset += newline + 1;
+      pending = pending.subarray(newline + 1);
+    }
+  };
+
+  const fd = openSync(filePath, "r");
+  const buf = Buffer.alloc(chunkBytes);
+  try {
+    while (true) {
+      const n = readSync(fd, buf, 0, buf.length, position);
+      if (n === 0) break;
+      position += n;
+      pending = Buffer.concat([pending, buf.subarray(0, n)]);
+      consumeCompleteLines();
+    }
+  } finally {
+    closeSync(fd);
   }
-  if (i < 0) return 0;
 
-  const lead = buf[i]!;
-  let expected = 0;
-  if ((lead & 0b1000_0000) === 0) expected = 0;
-  else if ((lead & 0b1110_0000) === 0b1100_0000) expected = 1;
-  else if ((lead & 0b1111_0000) === 0b1110_0000) expected = 2;
-  else if ((lead & 0b1111_1000) === 0b1111_0000) expected = 3;
-  else return buf.length;
+  // A complete JSON object is valid without a trailing newline. A failed
+  // parse is kept as a tail because a live writer may still append to it.
+  if (pending.length > 0 && pending[pending.length - 1] !== 0x0a) {
+    try {
+      events.push(parseJsonlLine(pending.toString("utf8").replace(/\r$/, "")));
+      offset += pending.length;
+      pending = Buffer.alloc(0);
+    } catch {
+      // Wait for the next write to complete the final line.
+    }
+  }
 
-  if (cont < expected) return i;
-  return buf.length;
+  return { events, parse_errors, offset, rest: pending };
 }
 
 export function readJsonlFile(
   filePath: string,
   opts?: { chunkBytes?: number },
 ): { events: RolloutLine[]; parse_errors: ParseError[] } {
-  const events: RolloutLine[] = [];
-  const parse_errors: ParseError[] = [];
-  let lineRest = "";
-  let utf8Rest = Buffer.alloc(0);
-  let offset = 0;
-  const chunkBytes = opts?.chunkBytes ?? READ_CHUNK_BYTES;
-
-  const fd = openSync(filePath, "r");
-  const buf = Buffer.alloc(chunkBytes);
-  try {
-    while (true) {
-      const n = readSync(fd, buf, 0, buf.length, null);
-      if (n === 0) break;
-
-      const combinedBuf = Buffer.concat([utf8Rest, buf.subarray(0, n)]);
-      const completeEnd = utf8CompleteEnd(combinedBuf);
-      utf8Rest = combinedBuf.subarray(completeEnd);
-      const complete = combinedBuf.subarray(0, completeEnd);
-      const combined = lineRest + complete.toString("utf8");
-      const result = parseJsonlChunk(combined, offset);
-      events.push(...result.events);
-      parse_errors.push(...result.errors);
-      offset +=
-        Buffer.byteLength(combined, "utf8") -
-        Buffer.byteLength(result.rest, "utf8");
-      lineRest = result.rest;
-    }
-
-    if (utf8Rest.length > 0) {
-      const combined = lineRest + utf8Rest.toString("utf8");
-      const result = parseJsonlChunk(combined, offset);
-      events.push(...result.events);
-      parse_errors.push(...result.errors);
-      lineRest = result.rest;
-    }
-  } finally {
-    closeSync(fd);
-  }
-
-  return { events, parse_errors };
+  const details = readJsonlFileDetailed(
+    filePath,
+    0,
+    Buffer.alloc(0),
+    opts?.chunkBytes ?? READ_CHUNK_BYTES,
+  );
+  return { events: details.events, parse_errors: details.parse_errors };
 }
 
 export type IngestOptions = {
   cacheHome?: string;
+  /** The watcher observes append-only rollout files. Direct imports default to a full reread. */
+  allowAppend?: boolean;
 };
+
+type LiveReadState = JsonlReadDetails & {
+  inode: number;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+};
+
+const liveReadStates = new Map<string, LiveReadState>();
 
 export function ingestFile(
   filePath: string,
@@ -92,7 +116,7 @@ export function ingestFile(
 ): SessionSnapshot {
   const st = statSync(filePath);
   const live = isLive(st.mtimeMs);
-  const key = cacheKey(filePath);
+  const key = cacheKey(filePath, JSON.stringify(effectiveRateCard()));
 
   if (!live) {
     const cached = readCache(key, opts?.cacheHome);
@@ -101,7 +125,40 @@ export function ingestFile(
     }
   }
 
-  const { events, parse_errors } = readJsonlFile(filePath);
+  let events: RolloutLine[];
+  let parse_errors: ParseError[];
+  if (live && opts?.allowAppend) {
+    const previous = liveReadStates.get(filePath);
+    const canAppend =
+      previous &&
+      previous.inode === st.ino &&
+      st.size >= previous.offset + previous.rest.length &&
+      (st.size > previous.size ||
+        (st.mtimeMs === previous.mtimeMs && st.ctimeMs === previous.ctimeMs));
+    const details = canAppend
+      ? readJsonlFileDetailed(filePath, previous.offset, previous.rest)
+      : readJsonlFileDetailed(filePath);
+    events = previous && canAppend
+      ? [...previous.events, ...details.events]
+      : details.events;
+    parse_errors = previous && canAppend
+      ? [...previous.parse_errors, ...details.parse_errors]
+      : details.parse_errors;
+    liveReadStates.set(filePath, {
+      ...details,
+      events,
+      parse_errors,
+      inode: st.ino,
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+      ctimeMs: st.ctimeMs,
+    });
+  } else {
+    liveReadStates.delete(filePath);
+    const details = readJsonlFileDetailed(filePath);
+    events = details.events;
+    parse_errors = details.parse_errors;
+  }
   const snapshot = analyseSession({
     events,
     path: filePath,

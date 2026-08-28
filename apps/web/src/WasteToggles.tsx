@@ -1,5 +1,6 @@
+import { useRef } from "react";
 import type { WasteToggleId, SessionSnapshot } from "./api";
-import { patchToggles } from "./api";
+import { getSession, patchToggles } from "./api";
 
 const TOGGLE_LABELS: { id: WasteToggleId; label: string }[] = [
   { id: "poll", label: "Waiting poll" },
@@ -18,13 +19,42 @@ type Props = {
 };
 
 export function WasteToggles({ snapshot, onUpdate }: Props) {
-  async function handleChange(id: WasteToggleId, checked: boolean) {
-    onUpdate({
-      ...snapshot,
-      toggles: { ...snapshot.toggles, [id]: checked },
-    });
-    const updated = await patchToggles(snapshot.id, { [id]: checked });
-    onUpdate(updated);
+  const latest = useRef(snapshot);
+  const requestQueue = useRef(Promise.resolve());
+
+  // Keep the ref current during render so a selection change invalidates
+  // responses from a previous session before another click can queue work.
+  latest.current = snapshot;
+
+  function handleChange(id: WasteToggleId, checked: boolean): void {
+    const current = latest.current;
+    const optimistic = {
+      ...current,
+      toggles: { ...current.toggles, [id]: checked },
+    };
+    latest.current = optimistic;
+    onUpdate(optimistic);
+
+    requestQueue.current = requestQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (latest.current.id !== current.id) return;
+        try {
+          const updated = await patchToggles(current.id, { [id]: checked });
+          if (latest.current.id !== current.id) return;
+          latest.current = updated;
+          onUpdate(updated);
+        } catch {
+          try {
+            const refreshed = await getSession(current.id);
+            if (latest.current.id !== current.id) return;
+            latest.current = refreshed;
+            onUpdate(refreshed);
+          } catch {
+            // Keep the optimistic state until the next successful refresh.
+          }
+        }
+      });
   }
 
   return (

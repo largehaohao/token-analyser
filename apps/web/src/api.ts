@@ -37,11 +37,20 @@ export type Turn = {
   model: string | null;
   effort: string | null;
   prompt: string;
-  tools: { name: string; input: string }[];
+  tools: {
+    name: string;
+    input: string;
+    outputSha256: string;
+    outputBytes: number;
+    outputPreview: string;
+  }[];
   usage: {
     input_tokens: number;
     cached_input_tokens: number;
+    cache_write_input_tokens: number;
     output_tokens: number;
+    reasoning_output_tokens: number;
+    total_tokens: number;
   };
   cost: Cost;
 };
@@ -69,6 +78,7 @@ export type SessionSnapshot = {
   parse_errors: { offset: number; message: string }[];
   rate_limits: unknown | null;
   rateCardAsOf: string;
+  fastMode: boolean;
   cost: Cost;
   waste: Cost;
   toggles: Record<WasteToggleId, boolean>;

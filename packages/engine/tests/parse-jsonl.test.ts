@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { parseJsonlChunk } from "../src/parse-jsonl.ts";
 
 describe("parseJsonlChunk", () => {
+  it("skips valid JSON values that are not rollout event objects", () => {
+    const result = parseJsonlChunk(
+      "null\n{\"timestamp\":\"2026-08-27T00:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{}}\n",
+      0,
+    );
+    expect(result.events).toHaveLength(1);
+    expect(result.errors).toHaveLength(1);
+  });
   it("parses complete lines and keeps an incomplete tail", () => {
     const chunk = '{"timestamp":"t","type":"session_meta","payload":{"id":"a"}}\n{"timestamp":"t2","type":"turn_context"';
     const result = parseJsonlChunk(chunk, 0);

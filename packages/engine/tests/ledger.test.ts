@@ -56,4 +56,38 @@ describe("buildLedger", () => {
     expect(turns.length).toBeGreaterThanOrEqual(2);
     expect(turns[0].cost.raw).toBe(1_000_000);
   });
+
+  it("keeps tool output that arrives after the usage event attached to its turn", () => {
+    const source = eventsFrom("reread-different-hash.jsonl");
+    const firstOutputIndex = source.findIndex(
+      (event) => event.type === "response_item" && event.payload?.type === "custom_tool_call_output",
+    );
+    const reordered = [...source];
+    const [output] = reordered.splice(firstOutputIndex, 1);
+    const tokenIndex = reordered.findIndex(
+      (event) => event.type === "event_msg" && event.payload?.type === "token_count",
+    );
+    reordered.splice(tokenIndex + 1, 0, output!);
+    const { turns } = buildLedger(reordered, "late-output", { isSubagent: false });
+    expect(turns[0]!.tools[0]!.outputBytes).toBeGreaterThan(0);
+  });
+
+  it("carries the last user prompt into continuation turns", () => {
+    const events = eventsFrom("duplicate-token-count.jsonl");
+    const { turns } = buildLedger(events, "prompt-continuation", { isSubagent: false });
+    expect(turns[1]!.prompt).toContain("hello");
+  });
+
+  it("accepts function-call command envelopes and canonicalizes tool aliases", () => {
+    const source = eventsFrom("wait-poll.jsonl");
+    const call = source.find((event) => event.type === "response_item" && event.payload?.type === "custom_tool_call");
+    const output = source.find((event) => event.type === "response_item" && event.payload?.type === "custom_tool_call_output");
+    expect(call).toBeDefined();
+    expect(output).toBeDefined();
+    call!.payload = { type: "function_call", name: "functions.exec_command", arguments: JSON.stringify({ cmd: "cat README.md" }), call_id: "envelope" };
+    output!.payload = { type: "function_call_output", call_id: "envelope", output: "readme" };
+    const { turns } = buildLedger(source, "function-envelope", { isSubagent: false });
+    expect(turns[0]!.tools[0]!.name).toBe("exec");
+    expect(turns[0]!.tools[0]!.input).toBe("cat README.md");
+  });
 });

@@ -174,9 +174,8 @@ export function emptyCost(): Cost {
 
 export function addCost(a: Cost, b: Cost): Cost {
   const credits =
-    a.credits == null || b.credits == null ? (a.credits == null && b.credits == null ? null : (a.credits ?? 0) + (b.credits ?? 0)) : a.credits + b.credits;
-  const usd =
-    a.usd == null || b.usd == null ? (a.usd == null && b.usd == null ? null : (a.usd ?? 0) + (b.usd ?? 0)) : a.usd + b.usd;
+    a.credits == null || b.credits == null ? null : a.credits + b.credits;
+  const usd = a.usd == null || b.usd == null ? null : a.usd + b.usd;
   return {
     raw: a.raw + b.raw,
     uncached_input: a.uncached_input + b.uncached_input,

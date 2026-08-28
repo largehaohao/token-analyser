@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { effectiveRateCard, loadRateCard, priceUsage } from "../src/rate-card.ts";
+import { addCost } from "../src/types.ts";
 
 const cardPath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -11,6 +12,13 @@ const cardPath = path.resolve(
 );
 
 describe("rate card", () => {
+  it("keeps aggregate money unknown when any child is unpriced", () => {
+    const known = { raw: 1, uncached_input: 1, cached_input: 0, output: 0, credits: 2, usd: 3 };
+    const unknown = { raw: 1, uncached_input: 1, cached_input: 0, output: 0, credits: null, usd: null };
+    expect(addCost(known, unknown).credits).toBeNull();
+    expect(addCost(known, unknown).usd).toBeNull();
+  });
+
   it("prices Sol uncached/cached/output per 1M", () => {
     const card = loadRateCard(cardPath);
     const cost = priceUsage(

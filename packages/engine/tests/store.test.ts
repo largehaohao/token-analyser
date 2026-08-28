@@ -90,6 +90,56 @@ describe("SessionStore", () => {
     expect(subagents!.cost.raw).toBe(after.children[0]!.cost.raw);
     expect(subagents!.children[0]!.label).toBe("Aristotle");
   });
+
+  it("joins out-of-order nested children and propagates updates to the root", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "store-nested-"));
+    const cacheDir = path.join(dir, "cache");
+    const parentPath = path.join(dir, "rollout-parent.jsonl");
+    const childPath = path.join(dir, "rollout-child.jsonl");
+    const grandchildPath = path.join(dir, "rollout-grandchild.jsonl");
+    const childText = readFileSync(path.join(fixtures, "child-prefix.jsonl"), "utf8");
+    writeFileSync(parentPath, parentFixture());
+    writeFileSync(childPath, childText);
+    writeFileSync(
+      grandchildPath,
+      childText.replaceAll('"child-1"', '"grandchild-1"').replaceAll('"parent-1"', '"child-1"').replace("Plato", "Socrates"),
+    );
+
+    const store = new SessionStore({ cacheDir });
+    store.ingestPath(childPath);
+    store.ingestPath(grandchildPath);
+    store.ingestPath(parentPath);
+
+    const root = store.get("parent-1")!;
+    expect(store.list().map((item) => item.id)).toEqual(["parent-1"]);
+    expect(root.children[0]!.children[0]!.nickname).toBe("Socrates");
+    const expectedRaw =
+      root.turns.reduce((sum, turn) => sum + turn.cost.raw, 0) +
+      root.children[0]!.turns.reduce((sum, turn) => sum + turn.cost.raw, 0) +
+      root.children[0]!.children[0]!.turns.reduce((sum, turn) => sum + turn.cost.raw, 0);
+    expect(root.cost.raw).toBe(expectedRaw);
+
+    store.setToggles("parent-1", { poll: false });
+    store.ingestPath(parentPath);
+    expect(store.get("parent-1")!.toggles.poll).toBe(false);
+  });
+
+  it("refreshes the live flag after a file stops changing", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "store-live-"));
+    const filePath = path.join(dir, "rollout-live.jsonl");
+    writeFileSync(filePath, parentFixture());
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.ingestPath(filePath);
+
+    const realNow = Date.now;
+    try {
+      const initial = realNow();
+      Date.now = () => initial + 121_000;
+      expect(store.list()[0]!.live).toBe(false);
+    } finally {
+      Date.now = realNow;
+    }
+  });
 });
 
 describe("watchSessions", () => {

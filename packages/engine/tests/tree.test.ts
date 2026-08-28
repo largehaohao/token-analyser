@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Bucket, Cost, DetectorLabel, SessionSnapshot, Turn } from "../src/types.ts";
-import { emptyCost } from "../src/types.ts";
+import { DEFAULT_WASTE_TOGGLES, emptyCost } from "../src/types.ts";
 import { buildTree, isIdleChild, sumTurns } from "../src/tree.ts";
 
 function cost(raw: number): Cost {
@@ -65,7 +65,7 @@ function stubSnapshot(
     fastMode: false,
     cost: childCost,
     waste: emptyCost(),
-    toggles: {},
+    toggles: { ...DEFAULT_WASTE_TOGGLES },
     tree,
     turns,
     children,

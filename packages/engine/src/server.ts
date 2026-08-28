@@ -10,7 +10,7 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadUserConfig, tokenAnalyserHome } from "./config.ts";
-import { SessionStore } from "./store.ts";
+import { SessionStore, type SessionIngestOptions } from "./store.ts";
 import { watchSessions } from "./watch.ts";
 import type { SessionSnapshot, WasteToggleId } from "./types.ts";
 
@@ -20,6 +20,21 @@ const DEFAULT_PORT = 7789;
 const HEARTBEAT_MS = 15_000;
 
 type SseEvent = "session_added" | "session_updated" | "session_error";
+
+const WASTE_TOGGLE_IDS = new Set<WasteToggleId>([
+  "poll",
+  "reread",
+  "compaction_loop",
+  "idle_subagents",
+  "coord",
+  "healthy_subagents",
+  "planning",
+  "code",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
 
 function corsHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
@@ -62,7 +77,13 @@ function collectRolloutFiles(roots: string[]): string[] {
 
   function walk(dir: string): void {
     if (!existsSync(dir)) return;
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full);
@@ -94,13 +115,15 @@ function wireStoreChangeEvents(
   tagged[marker] = true;
 
   const origIngest = store.ingestPath.bind(store);
-  store.ingestPath = (filePath: string) => {
+  store.ingestPath = (filePath: string, ingestOptions?: SessionIngestOptions) => {
     try {
       const idsBefore = new Set(store.list().map((s) => s.id));
-      const id = origIngest(filePath);
+      const id = origIngest(filePath, ingestOptions);
       if (id) {
         const snap = store.get(id);
-        const isNew = snap?.parentId == null && !idsBefore.has(id);
+        const parentId = snap?.parentId;
+        const isRoot = parentId == null || !store.get(parentId);
+        const isNew = isRoot && !idsBefore.has(id);
         onChange(id, isNew);
         if (snap?.parentId) {
           onChange(snap.parentId, false);
@@ -119,7 +142,7 @@ function wireStoreChangeEvents(
   const origSetToggles = store.setToggles.bind(store);
   store.setToggles = (
     id: string,
-    toggles: Record<WasteToggleId, boolean>,
+    toggles: Partial<Record<WasteToggleId, boolean>>,
   ) => {
     if (!store.get(id)) return;
     origSetToggles(id, toggles);
@@ -167,7 +190,7 @@ async function handleImport(
       return;
     }
 
-    const filePath = body.path;
+    const filePath = body && typeof body.path === "string" ? body.path : undefined;
     if (!filePath || !path.isAbsolute(filePath) || !filePath.endsWith(".jsonl")) {
       sendJson(res, 400, { error: "invalid_path" });
       return;
@@ -243,7 +266,13 @@ function serveStatic(
   const rel = pathname === "/" ? "index.html" : pathname.replace(/^\//, "");
   const resolved = path.resolve(staticDir, rel);
 
-  if (!resolved.startsWith(path.resolve(staticDir))) {
+  const staticRoot = path.resolve(staticDir);
+  const relative = path.relative(staticRoot, resolved);
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
     sendJson(res, 403, { error: "forbidden" });
     return true;
   }
@@ -297,7 +326,12 @@ export async function startServer(opts?: {
   function broadcast(event: SseEvent, data: { id: string; reason?: string }): void {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const client of sseClients) {
-      client.write(payload);
+      try {
+        client.write(payload);
+      } catch {
+        sseClients.delete(client);
+        client.destroy();
+      }
     }
   }
 
@@ -314,6 +348,7 @@ export async function startServer(opts?: {
   );
 
   const server = http.createServer(async (req, res) => {
+    try {
     if (req.method === "OPTIONS") {
       res.writeHead(204, corsHeaders());
       res.end();
@@ -353,15 +388,20 @@ export async function startServer(opts?: {
 
       let partial: Partial<Record<WasteToggleId, boolean>>;
       try {
-        partial = JSON.parse((await readBody(req)).toString("utf8")) as Partial<
-          Record<WasteToggleId, boolean>
-        >;
+        const parsed: unknown = JSON.parse((await readBody(req)).toString("utf8"));
+        if (!isRecord(parsed)) throw new Error("toggle patch must be an object");
+        for (const [key, value] of Object.entries(parsed)) {
+          if (!WASTE_TOGGLE_IDS.has(key as WasteToggleId) || typeof value !== "boolean") {
+            throw new Error("invalid toggle");
+          }
+        }
+        partial = parsed as Partial<Record<WasteToggleId, boolean>>;
       } catch {
         sendJson(res, 400, { error: "invalid_json" });
         return;
       }
 
-      store.setToggles(id, { ...snap.toggles, ...partial });
+      store.setToggles(id, partial);
       sendJson(res, 200, store.get(id));
       return;
     }
@@ -375,6 +415,7 @@ export async function startServer(opts?: {
       });
       res.write(": connected\n\n");
       sseClients.add(res);
+      res.on("error", () => sseClients.delete(res));
       req.on("close", () => {
         sseClients.delete(res);
       });
@@ -391,6 +432,13 @@ export async function startServer(opts?: {
     }
 
     sendJson(res, 404, { error: "not_found" });
+    } catch (err) {
+      if (res.headersSent) {
+        res.destroy(err instanceof Error ? err : undefined);
+      } else {
+        sendJson(res, 500, { error: "internal_error" });
+      }
+    }
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -405,7 +453,12 @@ export async function startServer(opts?: {
 
   heartbeatTimer = setInterval(() => {
     for (const client of sseClients) {
-      client.write(": heartbeat\n\n");
+      try {
+        client.write(": heartbeat\n\n");
+      } catch {
+        sseClients.delete(client);
+        client.destroy();
+      }
     }
   }, HEARTBEAT_MS);
 
@@ -457,9 +510,14 @@ async function main(): Promise<void> {
     "../../../apps/web/dist",
   );
   const serveUi = process.env.SERVE_UI === "1" && existsSync(webDist);
+  const configuredPort = process.env.PORT
+    ? Number.parseInt(process.env.PORT, 10)
+    : 7788;
   const { url, onIngestError } = await startServer({
     store,
-    ...(serveUi ? { staticDir: webDist, port: 7788 } : {}),
+    ...(serveUi
+      ? { staticDir: webDist, port: configuredPort || 7788 }
+      : {}),
   });
   console.log(`token-analyser engine listening on ${url}`);
 

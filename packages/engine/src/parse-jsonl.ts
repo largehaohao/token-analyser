@@ -1,5 +1,25 @@
 import type { ParseError, RolloutLine } from "./types.ts";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function parseJsonlLine(line: string): RolloutLine {
+  const value: unknown = JSON.parse(line);
+  if (!isRecord(value) || typeof value.type !== "string") {
+    throw new Error("JSONL event must be an object with a string type");
+  }
+  if (value.payload !== undefined && !isRecord(value.payload)) {
+    throw new Error("JSONL event payload must be an object");
+  }
+  return {
+    timestamp: typeof value.timestamp === "string" ? value.timestamp : "",
+    type: value.type,
+    ...(typeof value.ordinal === "number" ? { ordinal: value.ordinal } : {}),
+    ...(value.payload !== undefined ? { payload: value.payload } : {}),
+  };
+}
+
 export function parseJsonlChunk(
   chunk: string,
   byteOffsetStart: number,
@@ -15,7 +35,7 @@ export function parseJsonlChunk(
       continue;
     }
     try {
-      events.push(JSON.parse(line) as RolloutLine);
+      events.push(parseJsonlLine(line));
     } catch (err) {
       errors.push({
         offset,

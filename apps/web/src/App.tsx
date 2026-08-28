@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getSession,
   importNdjson,
@@ -19,30 +19,46 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const listRequest = useRef(0);
+  const sessionRequest = useRef(0);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
 
   const refreshList = useCallback(async () => {
+    const requestId = ++listRequest.current;
     const list = await listSessions();
-    setSessions(list);
+    if (requestId === listRequest.current) {
+      setSessions(list);
+      setSelectedId((current) => {
+        if (current && list.some((session) => session.id === current)) {
+          return current;
+        }
+        return list[0]?.id ?? null;
+      });
+    }
     return list;
   }, []);
 
   const refreshSession = useCallback(async (id: string) => {
+    const requestId = ++sessionRequest.current;
     const snap = await getSession(id);
-    setSnapshot(snap);
+    if (
+      requestId === sessionRequest.current &&
+      selectedIdRef.current === id
+    ) {
+      setSnapshot(snap);
+    }
     return snap;
   }, []);
 
   useEffect(() => {
-    refreshList().then((list) => {
-      if (list.length > 0 && !selectedId) {
-        setSelectedId(list[0]!.id);
-      }
-    });
-  }, [refreshList, selectedId]);
+    void refreshList().catch(() => undefined);
+  }, [refreshList]);
 
   useEffect(() => {
+    sessionRequest.current += 1;
     if (selectedId) {
-      refreshSession(selectedId);
+      void refreshSession(selectedId).catch(() => undefined);
     } else {
       setSnapshot(null);
     }
@@ -50,16 +66,19 @@ export function App() {
 
   useEffect(() => {
     return openStream(() => {
-      refreshList();
-      if (selectedId) {
-        refreshSession(selectedId);
+      void refreshList().catch(() => undefined);
+      const currentId = selectedIdRef.current;
+      if (currentId) {
+        void refreshSession(currentId).catch(() => undefined);
       }
     });
-  }, [selectedId, refreshList, refreshSession]);
+  }, [refreshList, refreshSession]);
 
   async function handleImport(filename: string, text: string) {
     const snap = await importNdjson(filename, text);
     await refreshList();
+    sessionRequest.current += 1;
+    selectedIdRef.current = snap.id;
     setSelectedId(snap.id);
     setSnapshot(snap);
   }

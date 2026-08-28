@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { afterEach, describe, expect, it } from "vitest";
+import { appendFileSync, readFileSync, writeFileSync, mkdtempSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readJsonlFile } from "../src/ingest.ts";
+import { ingestFile, readJsonlFile } from "../src/ingest.ts";
 
 const fixtures = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -11,6 +11,9 @@ const fixtures = path.resolve(
 );
 
 describe("readJsonlFile", () => {
+  afterEach(() => {
+    delete process.env.TOKEN_ANALYSER_HOME;
+  });
   it("returns complete events when file ends with an incomplete line", () => {
     const waitPoll = readFileSync(
       path.join(fixtures, "wait-poll.jsonl"),
@@ -76,5 +79,49 @@ describe("readJsonlFile", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("session_meta");
     expect((events[0]!.payload as { pad: string }).pad).toContain("€");
+  });
+
+  it("parses a complete final JSONL event without a trailing newline", () => {
+    const waitPoll = readFileSync(
+      path.join(fixtures, "wait-poll.jsonl"),
+      "utf8",
+    );
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-final-line-"));
+    const filePath = path.join(dir, "rollout-final.jsonl");
+    writeFileSync(filePath, waitPoll.trimEnd());
+    const { events, parse_errors } = readJsonlFile(filePath);
+    expect(parse_errors).toEqual([]);
+    expect(events.length).toBe(
+      waitPoll.trimEnd().split("\n").length,
+    );
+  });
+
+  it("reads appended live bytes without reparsing the existing prefix", () => {
+    const waitPoll = readFileSync(
+      path.join(fixtures, "wait-poll.jsonl"),
+      "utf8",
+    );
+    const [first, ...rest] = waitPoll.trimEnd().split("\n");
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-live-"));
+    const filePath = path.join(dir, "rollout-live.jsonl");
+    writeFileSync(filePath, first);
+    expect(ingestFile(filePath, { allowAppend: true }).turns).toHaveLength(0);
+    appendFileSync(filePath, `\n${rest.join("\n")}`);
+    expect(ingestFile(filePath, { allowAppend: true }).turns.length).toBeGreaterThan(0);
+  });
+
+  it("invalidates the historical cache when the effective rate card changes", () => {
+    const waitPoll = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8");
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-cache-rate-"));
+    const filePath = path.join(dir, "rollout-cache-rate.jsonl");
+    writeFileSync(filePath, waitPoll);
+    const old = new Date(Date.now() - 600_000);
+    utimesSync(filePath, old, old);
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    writeFileSync(path.join(dir, "config.json"), JSON.stringify({ usd_per_credit: 0.04 }));
+    const first = ingestFile(filePath, { cacheHome: dir });
+    writeFileSync(path.join(dir, "config.json"), JSON.stringify({ usd_per_credit: 1 }));
+    const second = ingestFile(filePath, { cacheHome: dir });
+    expect(second.cost.usd).toBeGreaterThan(first.cost.usd!);
   });
 });

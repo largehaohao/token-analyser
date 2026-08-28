@@ -16,7 +16,13 @@ function isRolloutJsonl(name: string): boolean {
 
 function listDirectories(root: string): string[] {
   const dirs = [root];
-  for (const entry of readdirSync(root)) {
+  let entries: string[];
+  try {
+    entries = readdirSync(root);
+  } catch {
+    return dirs;
+  }
+  for (const entry of entries) {
     const full = path.join(root, entry);
     try {
       if (statSync(full).isDirectory()) {
@@ -37,6 +43,11 @@ export function watchSessions(
   const watchPaths =
     opts?.watchPaths ?? loadUserConfig().watch_paths;
   const watchers: ReturnType<typeof watch>[] = [];
+  const pending = new Map<string, ReturnType<typeof setTimeout>>();
+  // fs.watch can miss a create event when a directory is watched immediately
+  // before the writer creates its first file.  A short startup rescan closes
+  // that race without turning every append into a full directory traversal.
+  let startupScan: ReturnType<typeof setTimeout> | undefined;
   const useRecursive = opts?.recursive ?? true;
 
   function errorIdFromPath(filePath: string): string {
@@ -48,7 +59,7 @@ export function watchSessions(
     const base = path.basename(fullPath);
     if (!isRolloutJsonl(base) || !existsSync(fullPath)) return;
     try {
-      const id = store.ingestPath(fullPath);
+      const id = store.ingestPath(fullPath, { allowAppend: true });
       if (id) onChange(id);
     } catch (err) {
       opts?.onError?.(
@@ -58,14 +69,45 @@ export function watchSessions(
     }
   }
 
+  function scheduleIngest(fullPath: string): void {
+    const previous = pending.get(fullPath);
+    if (previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+      pending.delete(fullPath);
+      ingestIfRollout(fullPath);
+    }, 50);
+    pending.set(fullPath, timer);
+  }
+
   function watchDirectory(dir: string): void {
-    const w = watch(dir, (_event, filename) => {
-      if (!filename) return;
-      const base = path.basename(filename);
-      if (!isRolloutJsonl(base)) return;
-      ingestIfRollout(path.join(dir, filename));
-    });
-    watchers.push(w);
+    try {
+      const w = watch(dir, (_event, filename) => {
+        if (!filename) return;
+        const base = path.basename(filename);
+        if (!isRolloutJsonl(base)) return;
+        scheduleIngest(path.join(dir, filename));
+      });
+      watchers.push(w);
+    } catch {
+      // An inaccessible directory should not prevent other roots from being watched.
+    }
+  }
+
+  function scanForRollouts(): void {
+    for (const root of watchPaths) {
+      if (!existsSync(root)) continue;
+      for (const dir of listDirectories(root)) {
+        let entries: string[];
+        try {
+          entries = readdirSync(dir);
+        } catch {
+          continue;
+        }
+        for (const entry of entries) {
+          if (isRolloutJsonl(entry)) scheduleIngest(path.join(dir, entry));
+        }
+      }
+    }
   }
 
   for (const root of watchPaths) {
@@ -80,7 +122,7 @@ export function watchSessions(
             if (!filename) return;
             const base = path.basename(filename);
             if (!isRolloutJsonl(base)) return;
-            ingestIfRollout(path.join(root, filename));
+            scheduleIngest(path.join(root, filename));
           },
         );
         watchers.push(w);
@@ -95,7 +137,12 @@ export function watchSessions(
     }
   }
 
+  startupScan = setTimeout(scanForRollouts, 25);
+
   return () => {
+    if (startupScan) clearTimeout(startupScan);
+    for (const timer of pending.values()) clearTimeout(timer);
+    pending.clear();
     for (const w of watchers) w.close();
   };
 }

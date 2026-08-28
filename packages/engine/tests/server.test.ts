@@ -165,6 +165,33 @@ describe("startServer", () => {
     }
   });
 
+  it("rejects malformed JSON bodies without taking down the server", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-invalid-body-"));
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({ port: 0, store });
+
+    try {
+      const importRes = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "null",
+      });
+      expect(importRes.status).toBe(400);
+
+      const toggleRes = await fetch(`${server.url}/sessions/missing/waste-toggles`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: "null",
+      });
+      expect(toggleRes.status).toBe(404);
+
+      const alive = await fetch(`${server.url}/sessions`);
+      expect(alive.status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("streams session_error when import ingest fails", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "server-import-err-"));
     const store = new SessionStore({ cacheDir: path.join(dir, "cache") });

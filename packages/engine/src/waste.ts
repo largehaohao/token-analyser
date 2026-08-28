@@ -20,9 +20,7 @@ function isOwnTurnWaste(turn: Turn, toggles: Record<WasteToggleId, boolean>): bo
 
 function collectChildTurns(child: SessionSnapshot, idle: boolean): Turn[] {
   const matchesIdle = isIdleChild(child);
-  if (matchesIdle !== idle) return [];
-
-  const turns = [...child.turns];
+  const turns = matchesIdle === idle ? [...child.turns] : [];
   for (const grandchild of child.children) {
     turns.push(...collectChildTurns(grandchild, idle));
   }

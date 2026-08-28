@@ -1,7 +1,9 @@
 import path from "node:path";
+import { existsSync, statSync } from "node:fs";
 import { buildTree } from "./tree.ts";
 import { computeWaste } from "./waste.ts";
-import { ingestFile } from "./ingest.ts";
+import { ingestFile, type IngestOptions } from "./ingest.ts";
+import { isLive } from "./cache.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
   type SessionListItem,
@@ -49,8 +51,13 @@ export type SessionStoreOptions = {
   cacheDir?: string;
 };
 
+export type SessionIngestOptions = Pick<IngestOptions, "allowAppend">;
+
 export class SessionStore {
+  /** Raw per-file snapshots. Children are attached only in `rebuildAll`. */
+  private sources = new Map<string, SessionSnapshot>();
   private snapshots = new Map<string, SessionSnapshot>();
+  private toggles = new Map<string, Record<WasteToggleId, boolean>>();
   private cacheHome?: string;
 
   constructor(opts?: SessionStoreOptions) {
@@ -59,74 +66,105 @@ export class SessionStore {
     }
   }
 
+  private rebuildAll(): void {
+    const childrenByParent = new Map<string, string[]>();
+    for (const [id, source] of this.sources) {
+      if (!source.parentId || !this.sources.has(source.parentId)) continue;
+      const children = childrenByParent.get(source.parentId) ?? [];
+      children.push(id);
+      childrenByParent.set(source.parentId, children);
+    }
+
+    const rebuilt = new Map<string, SessionSnapshot>();
+    const building = new Set<string>();
+
+    const build = (id: string): SessionSnapshot => {
+      const existing = rebuilt.get(id);
+      if (existing) return existing;
+      const source = this.sources.get(id)!;
+      if (building.has(id)) {
+        // A malformed cycle should not recurse forever or hide the session.
+        return { ...source, children: [] };
+      }
+
+      building.add(id);
+      const children = (childrenByParent.get(id) ?? []).map(build);
+      building.delete(id);
+      const snapshot = rebuildDerived({
+        ...source,
+        children,
+        toggles: this.toggles.get(id) ?? DEFAULT_WASTE_TOGGLES,
+      });
+      rebuilt.set(id, snapshot);
+      return snapshot;
+    };
+
+    for (const id of this.sources.keys()) build(id);
+    this.snapshots = rebuilt;
+  }
+
+  private refreshLiveFlags(): void {
+    let changed = false;
+    for (const [id, source] of this.sources) {
+      let live = source.live;
+      try {
+        if (existsSync(source.path)) live = isLive(statSync(source.path).mtimeMs);
+      } catch {
+        // Keep the previous state when a file is being replaced.
+      }
+      if (live !== source.live) {
+        this.sources.set(id, { ...source, live });
+        changed = true;
+      }
+    }
+    if (changed) this.rebuildAll();
+  }
+
   refresh(paths: string[]): void {
     const ingested: SessionSnapshot[] = [];
     for (const p of paths) {
       if (!p.endsWith(".jsonl")) continue;
-      const base = p.split("/").pop() ?? p;
+      const base = path.basename(p);
       if (!base.startsWith("rollout-")) continue;
-      ingested.push(ingestFile(p, { cacheHome: this.cacheHome }));
-    }
-
-    this.snapshots.clear();
-    for (const snap of ingested) {
-      this.snapshots.set(snap.id, { ...snap, children: [] });
-    }
-
-    for (const snap of ingested) {
-      if (snap.parentId && this.snapshots.has(snap.parentId)) {
-        const parent = this.snapshots.get(snap.parentId)!;
-        const child = this.snapshots.get(snap.id)!;
-        parent.children.push(child);
+      try {
+        ingested.push(ingestFile(p, { cacheHome: this.cacheHome }));
+      } catch {
+        // A file can disappear between directory scan and ingestion.
+        // Continue loading the remaining sessions.
       }
     }
 
-    for (const snap of this.snapshots.values()) {
-      if (snap.children.length > 0) {
-        const rebuilt = rebuildDerived(snap);
-        this.snapshots.set(snap.id, rebuilt);
-        for (const child of rebuilt.children) {
-          this.snapshots.set(child.id, child);
-        }
-      }
+    const ids = new Set(ingested.map((snap) => snap.id));
+    for (const id of this.toggles.keys()) {
+      if (!ids.has(id)) this.toggles.delete(id);
     }
+    this.sources.clear();
+    for (const snap of ingested) {
+      this.sources.set(snap.id, { ...snap, children: [] });
+    }
+    this.rebuildAll();
   }
 
-  ingestPath(filePath: string): string | undefined {
-    const snap = ingestFile(filePath, { cacheHome: this.cacheHome });
-    const existing = this.snapshots.get(snap.id);
-    const next: SessionSnapshot = {
-      ...snap,
-      children: existing?.children ?? [],
-    };
-    this.snapshots.set(next.id, next);
-
-    if (next.parentId && this.snapshots.has(next.parentId)) {
-      const parent = this.snapshots.get(next.parentId)!;
-      const idx = parent.children.findIndex((c) => c.id === next.id);
-      if (idx === -1) {
-        parent.children.push(next);
-      } else {
-        parent.children[idx] = next;
-      }
-      const rebuilt = rebuildDerived(parent);
-      this.snapshots.set(parent.id, rebuilt);
-      for (const c of rebuilt.children) {
-        this.snapshots.set(c.id, c);
-      }
-    } else if (next.children.length > 0) {
-      const rebuilt = rebuildDerived(next);
-      this.snapshots.set(rebuilt.id, rebuilt);
-      for (const c of rebuilt.children) {
-        this.snapshots.set(c.id, c);
-      }
-    }
-
-    return next.id;
+  ingestPath(
+    filePath: string,
+    opts?: SessionIngestOptions,
+  ): string | undefined {
+    const snap = ingestFile(filePath, {
+      cacheHome: this.cacheHome,
+      allowAppend: opts?.allowAppend,
+    });
+    const currentToggles = this.toggles.get(snap.id);
+    if (!currentToggles) this.toggles.set(snap.id, { ...snap.toggles });
+    this.sources.set(snap.id, { ...snap, children: [] });
+    this.rebuildAll();
+    return snap.id;
   }
 
   list(): SessionListItem[] {
-    const roots = [...this.snapshots.values()].filter((s) => s.parentId == null);
+    this.refreshLiveFlags();
+    const roots = [...this.snapshots.values()].filter(
+      (s) => s.parentId == null || !this.sources.has(s.parentId),
+    );
     roots.sort((a, b) => {
       if (a.live !== b.live) return a.live ? -1 : 1;
       const aTime = a.lastEventAt ?? "";
@@ -137,25 +175,20 @@ export class SessionStore {
   }
 
   get(id: string): SessionSnapshot | undefined {
+    this.refreshLiveFlags();
     const snap = this.snapshots.get(id);
     if (!snap) return undefined;
-    if (snap.children.length > 0) {
-      return {
-        ...snap,
-        children: snap.children.map(
-          (c) => this.snapshots.get(c.id) ?? c,
-        ),
-      };
-    }
     return snap;
   }
 
-  setToggles(id: string, toggles: Record<WasteToggleId, boolean>): void {
-    const snap = this.snapshots.get(id);
-    if (!snap) return;
-
-    const updated = rebuildDerived({ ...snap, toggles });
-    this.snapshots.set(id, updated);
+  setToggles(
+    id: string,
+    toggles: Partial<Record<WasteToggleId, boolean>>,
+  ): void {
+    if (!this.sources.has(id)) return;
+    const previous = this.toggles.get(id) ?? { ...DEFAULT_WASTE_TOGGLES };
+    this.toggles.set(id, { ...previous, ...toggles });
+    this.rebuildAll();
   }
 }
 
