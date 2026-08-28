@@ -2,6 +2,7 @@ import { allocatePercents } from "./format";
 
 export type MixSegment = {
   key: string;
+  label?: string;
   value: number;
   className: string;
 };
@@ -19,7 +20,7 @@ export function MixBar({ segments, label, className, testId }: Props) {
   const percents = allocatePercents(values);
   const classes = className ? `mix-bar ${className}` : "mix-bar";
   const detail = segments
-    .map((seg, i) => `${seg.key} ${percents[i].toFixed(1)}%`)
+    .map((seg, i) => `${seg.label ?? seg.key} ${percents[i].toFixed(1)}%`)
     .join(" · ");
 
   return (

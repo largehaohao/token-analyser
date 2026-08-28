@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SessionSnapshot, Turn } from "./api";
 import { useUnit } from "./UnitContext";
 import {
@@ -16,6 +16,7 @@ import { MixBar } from "./MixBar";
 import { RateLimits } from "./RateLimits";
 import { WasteToggles } from "./WasteToggles";
 import { TurnTable } from "./TurnTable";
+import { useNow } from "./useNow";
 
 type Props = {
   snapshot: SessionSnapshot;
@@ -39,7 +40,12 @@ export function SessionView({
   onContextOpen,
 }: Props) {
   const { unit } = useUnit();
+  const now = useNow();
   const [highlightTurnId, setHighlightTurnId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setHighlightTurnId(null);
+  }, [snapshot.id]);
 
   const selectedNode = selectedNodeId
     ? findNodeById(snapshot.tree, selectedNodeId)
@@ -108,7 +114,7 @@ export function SessionView({
         <span
           title={formatAbsoluteTime(snapshot.startedAt ?? snapshot.lastEventAt)}
         >
-          · {formatRelativeTime(snapshot.startedAt ?? snapshot.lastEventAt)}
+          · {formatRelativeTime(snapshot.startedAt ?? snapshot.lastEventAt, now)}
         </span>
         {hit != null && <span>· 缓存命中 {formatPercent(100 * hit)}</span>}
       </p>
@@ -130,14 +136,15 @@ export function SessionView({
           <MixBar
             className="headline-mix"
             testId="headline-mix"
-            label={`Waste ${tokenWaste} of tokens`}
+            label={`浪费 ${tokenWaste}（按 token）`}
             segments={[
               {
                 key: "useful",
+                label: "有效",
                 value: Math.max(0, snapshot.cost.raw - snapshot.waste.raw),
                 className: "useful",
               },
-              { key: "waste", value: snapshot.waste.raw, className: "waste" },
+              { key: "waste", label: "浪费", value: snapshot.waste.raw, className: "waste" },
             ]}
           />
           <div className="headline-legend">
@@ -193,6 +200,7 @@ export function SessionView({
           turns={flattenTurns(snapshot)}
           turnIds={turnIds}
           highlightTurnId={highlightTurnId}
+          resetKey={`${snapshot.id}:${selectedNodeId ?? ""}`}
         />
       </div>
     </div>

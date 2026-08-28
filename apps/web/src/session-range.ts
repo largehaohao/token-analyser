@@ -56,6 +56,6 @@ export function filterSessionsByRange<T extends DatedSession>(
   if (cutoff == null) return sessions;
   return sessions.filter((session) => {
     const t = sessionTimeMs(session);
-    return t == null || t >= cutoff;
+    return t != null && t >= cutoff;
   });
 }

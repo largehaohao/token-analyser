@@ -65,6 +65,7 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
   const { unit } = useUnit();
   const hit = cacheHitRatio(overview.cost);
   const wastePct = wasteShare(overview.waste, overview.cost, unit);
+  const costUnit = unit === "tokens" ? "credits" : unit;
 
   return (
     <div className="overview" data-testid="overview-page">
@@ -74,16 +75,19 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
             <IconDiamond /> 预估总费用
           </div>
           <div className="kpi-value">
-            {formatCost(overview.cost, unit)}{" "}
-            <small>{formatUnitSuffix(unit)}</small>
+            {formatCost(overview.cost, costUnit)}{" "}
+            <small>{formatUnitSuffix(costUnit)}</small>
           </div>
           <div className="kpi-sub">
             本地费率估算
-            {unit !== "tokens"
+            {costUnit !== "tokens"
               ? ` · ${formatExactTokens(overview.cost.raw)} tokens`
               : hit != null
                 ? ` · 缓存命中 ${formatPercent(100 * hit)}`
                 : ""}
+            {hit != null && costUnit !== "tokens"
+              ? ` · 缓存命中 ${formatPercent(100 * hit)}`
+              : ""}
           </div>
         </article>
         <article className="kpi-card">
@@ -146,20 +150,23 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
         </div>
         <MixBar
           className="headline-mix"
-          label="uncached / cached / output"
+          label="未缓存 / 缓存 / 输出"
           segments={[
             {
               key: "uncached",
+              label: "未缓存",
               value: overview.cost.uncached_input,
               className: "uncached",
             },
             {
               key: "cached",
+              label: "缓存",
               value: overview.cost.cached_input,
               className: "cached",
             },
             {
               key: "output",
+              label: "输出",
               value: overview.cost.output,
               className: "output",
             },
