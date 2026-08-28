@@ -1,14 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionListItem } from "./api";
 import { MixBar } from "./MixBar";
 import {
+  activityTimestamp,
   formatCompactTokens,
   formatCost,
   formatRelativeTime,
   formatAbsoluteTime,
+  unpricedNote,
   wasteShare,
 } from "./format";
 import { useUnit } from "./UnitContext";
+import { useNow } from "./useNow";
+import {
+  SESSION_PAGE_SIZE,
+  nextSessionIndex,
+  nextSessionLimit,
+  sessionListIdentity,
+  shouldResetSessionLimit,
+  visibleSessions,
+} from "./session-page";
 
 const EMPTY_COPY =
   "No Codex sessions found. Run Codex locally, then sessions appear from ~/.codex/sessions/**/rollout-*.jsonl";
@@ -36,8 +47,11 @@ export function SessionList({
   onImport,
 }: Props) {
   const { unit } = useUnit();
+  const now = useNow();
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [limit, setLimit] = useState(SESSION_PAGE_SIZE);
+  const listIdentity = sessionListIdentity(sessions);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -50,12 +64,18 @@ export function SessionList({
   }, [sessions, query]);
 
   useEffect(() => {
-    if (sessions.length === 0) return;
-    if (selectedId && sessions.some((session) => session.id === selectedId)) {
-      return;
+    setLimit(SESSION_PAGE_SIZE);
+  }, [query]);
+
+  const prevIdentity = useRef(listIdentity);
+  useEffect(() => {
+    if (shouldResetSessionLimit(prevIdentity.current, listIdentity)) {
+      setLimit(SESSION_PAGE_SIZE);
     }
-    onSelect(sessions[0].id);
-  }, [sessions, selectedId, onSelect]);
+    prevIdentity.current = listIdentity;
+  }, [listIdentity]);
+
+  const page = visibleSessions(filtered, limit);
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
@@ -76,19 +96,32 @@ export function SessionList({
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement
+    ) {
+      return;
+    }
     if (filtered.length === 0) return;
     e.preventDefault();
     const index = filtered.findIndex((s) => s.id === selectedId);
-    const next =
-      e.key === "ArrowDown"
-        ? filtered[Math.min(filtered.length - 1, Math.max(0, index) + 1)]
-        : filtered[Math.max(0, (index < 0 ? 1 : index) - 1)];
-    if (next) onSelect(next.id);
+    const nextIndex = nextSessionIndex(
+      filtered.length,
+      index,
+      e.key === "ArrowDown" ? "ArrowDown" : "ArrowUp",
+    );
+    const next = nextIndex >= 0 ? filtered[nextIndex] : undefined;
+    if (next) {
+      const needed = filtered.findIndex((s) => s.id === next.id) + 1;
+      if (needed > limit) setLimit(nextSessionLimit(limit, filtered.length));
+      onSelect(next.id);
+    }
   }
 
   return (
     <aside
       className={`session-list${dragging ? " dragging" : ""}`}
+      tabIndex={0}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragEnter={() => setDragging(true)}
@@ -122,100 +155,129 @@ export function SessionList({
           {sessions.length === 0 ? EMPTY_RANGE_COPY : "没有匹配的会话"}
         </p>
       ) : (
-        <ul>
-          {filtered.map((s) => (
-            <li
-              key={s.id}
-              className={[
-                selectedId === s.id ? "selected" : "",
-                s.parse_error ? "parse-error" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-            >
-              <div className="session-card">
-                <button
-                  type="button"
-                  className="session-main"
-                  onClick={() => onSelect(s.id)}
+        <>
+          <ul>
+            {page.map((s) => {
+              const activity = activityTimestamp(s);
+              return (
+                <li
+                  key={s.id}
+                  className={[
+                    selectedId === s.id ? "selected" : "",
+                    s.parse_error ? "parse-error" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                 >
-                  <div className="row-top">
-                    <span className="session-id">{s.nickname ?? s.id}</span>
-                    {s.live && <span className="badge live">LIVE</span>}
-                    {s.ledger_warning && (
-                      <span className="badge warn">账本</span>
-                    )}
-                  </div>
-                  <div className="session-meta" title={s.cwd ?? undefined}>
-                    {s.cwd ?? "—"}
-                  </div>
-                  <div className="session-meta">
-                    {s.model ?? "—"}
-                    {s.effort ? ` · ${s.effort}` : ""}
-                  </div>
-                  <div
-                    className="session-meta"
-                    title={formatAbsoluteTime(s.startedAt ?? s.lastEventAt)}
-                  >
-                    {formatRelativeTime(s.startedAt ?? s.lastEventAt)}
-                  </div>
-                  <div className="session-costs">
-                    <span>{formatCost(s.cost, unit)}</span>
-                    <span className="waste-share">
-                      waste {wasteShare(s.waste, s.cost, unit)}
-                    </span>
-                  </div>
-                  <MixBar
-                    className="waste-bar"
-                    label={`waste ${wasteShare(s.waste, s.cost)} of tokens`}
-                    segments={[
-                      {
-                        key: "useful",
-                        value: Math.max(0, s.cost.raw - s.waste.raw),
-                        className: "useful",
-                      },
-                      { key: "waste", value: s.waste.raw, className: "waste" },
-                    ]}
-                  />
-                  {s.parse_error && s.parse_error_message != null && (
-                    <div
-                      className="session-meta parse-error-detail"
-                      title={`offset ${s.parse_error_offset}: ${s.parse_error_message}`}
+                  <div className="session-card">
+                    <button
+                      type="button"
+                      className="session-main"
+                      onClick={() => onSelect(s.id)}
                     >
-                      offset {s.parse_error_offset}: {s.parse_error_message}
+                      <div className="row-top">
+                        <span className="session-id">{s.nickname ?? s.id}</span>
+                        {s.live && <span className="badge live">LIVE</span>}
+                        {s.parentId && <span className="badge child">子会话</span>}
+                        {s.ledger_warning && (
+                          <span className="badge warn">账本</span>
+                        )}
+                      </div>
+                      <div className="session-meta" title={s.cwd ?? undefined}>
+                        {s.cwd ?? "—"}
+                      </div>
+                      <div className="session-meta">
+                        {s.model ?? "—"}
+                        {s.effort ? ` · ${s.effort}` : ""}
+                      </div>
+                      <div
+                        className="session-meta"
+                        title={formatAbsoluteTime(activity)}
+                      >
+                        {formatRelativeTime(activity, now)}
+                      </div>
+                      <div className="session-costs">
+                        <span>{formatCost(s.cost, unit)}</span>
+                        <span className="waste-share">
+                          waste {wasteShare(s.waste, s.cost, unit)}
+                        </span>
+                      </div>
+                      {(s.unpricedRaw ?? 0) > 0 && (
+                        <div className="session-meta">
+                          {unpricedNote(s.unpricedRaw ?? 0)}
+                        </div>
+                      )}
+                      <MixBar
+                        className="waste-bar"
+                        label={`浪费 ${wasteShare(s.waste, s.cost)}（按 token）`}
+                        segments={[
+                          {
+                            key: "useful",
+                            label: "有效",
+                            value: Math.max(0, s.cost.raw - s.waste.raw),
+                            className: "useful",
+                          },
+                          {
+                            key: "waste",
+                            label: "浪费",
+                            value: s.waste.raw,
+                            className: "waste",
+                          },
+                        ]}
+                      />
+                      {s.parse_error && s.parse_error_message != null && (
+                        <div
+                          className="session-meta parse-error-detail"
+                          title={`offset ${s.parse_error_offset}: ${s.parse_error_message}`}
+                        >
+                          offset {s.parse_error_offset}: {s.parse_error_message}
+                        </div>
+                      )}
+                    </button>
+                    <div className="session-context-meta">
+                      <button
+                        type="button"
+                        className={
+                          selectedId === s.id && contextOpen === "skills"
+                            ? "active"
+                            : ""
+                        }
+                        onClick={() => onInspectContext(s.id, "skills")}
+                      >
+                        技能 {formatCompactTokens(s.skillsChars ?? 0)}
+                        {(s.skillsCount ?? 0) > 0 ? ` · ${s.skillsCount}` : ""}
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          selectedId === s.id && contextOpen === "tools"
+                            ? "active"
+                            : ""
+                        }
+                        onClick={() => onInspectContext(s.id, "tools")}
+                      >
+                        工具 {formatCompactTokens(s.toolsChars ?? 0)}
+                        {(s.toolsCount ?? 0) > 0 ? ` · ${s.toolsCount}` : ""}
+                      </button>
                     </div>
-                  )}
-                </button>
-                <div className="session-context-meta">
-                  <button
-                    type="button"
-                    className={
-                      selectedId === s.id && contextOpen === "skills"
-                        ? "active"
-                        : ""
-                    }
-                    onClick={() => onInspectContext(s.id, "skills")}
-                  >
-                    技能 {formatCompactTokens(s.skillsChars ?? 0)}
-                    {(s.skillsCount ?? 0) > 0 ? ` · ${s.skillsCount}` : ""}
-                  </button>
-                  <button
-                    type="button"
-                    className={
-                      selectedId === s.id && contextOpen === "tools"
-                        ? "active"
-                        : ""
-                    }
-                    onClick={() => onInspectContext(s.id, "tools")}
-                  >
-                    工具 {formatCompactTokens(s.toolsChars ?? 0)}
-                    {(s.toolsCount ?? 0) > 0 ? ` · ${s.toolsCount}` : ""}
-                  </button>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          {page.length < filtered.length && (
+            <button
+              type="button"
+              className="load-more"
+              data-testid="session-load-more"
+              onClick={() =>
+                setLimit(nextSessionLimit(limit, filtered.length))
+              }
+            >
+              加载更多（还有 {filtered.length - page.length} 个会话）
+            </button>
+          )}
+        </>
       )}
     </aside>
   );

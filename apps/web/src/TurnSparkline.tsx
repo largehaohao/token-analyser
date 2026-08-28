@@ -1,35 +1,30 @@
 import type { Turn } from "./api";
+import { downsampleValues, sparklinePoints } from "./sparkline";
 
 type Props = {
   turns: Turn[];
 };
 
-export function TurnSparkline({ turns }: Props) {
-  const values = [...turns]
-    .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
-    .map((t) => t.cost.raw);
-  if (values.length < 2) return null;
+const WIDTH = 220;
+const HEIGHT = 36;
+const MAX_POINTS = 80;
 
-  const max = Math.max(...values, 1);
-  const width = 220;
-  const height = 36;
-  const pad = 2;
-  const innerW = width - pad * 2;
-  const innerH = height - pad * 2;
-  const points = values
-    .map((value, i) => {
-      const x = pad + (i / (values.length - 1)) * innerW;
-      const y = height - pad - (value / max) * innerH;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+export function TurnSparkline({ turns }: Props) {
+  const values = downsampleValues(
+    [...turns]
+      .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+      .map((t) => t.cost.raw),
+    MAX_POINTS,
+  );
+  const points = sparklinePoints(values, WIDTH, HEIGHT);
+  if (!points) return null;
 
   return (
     <svg
       className="turn-sparkline"
-      viewBox={`0 0 ${width} ${height}`}
+      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
       role="img"
-      aria-label="Token use over turns"
+      aria-label="各轮 token 用量"
     >
       <polyline
         fill="none"

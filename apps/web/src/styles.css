@@ -278,7 +278,8 @@ input {
 
 .badge.live,
 .badge.warn,
-.badge.fast {
+.badge.fast,
+.badge.child {
   font-size: 10px;
   padding: 0.12rem 0.4rem;
   border-radius: 999px;
@@ -299,6 +300,11 @@ input {
 .badge.fast {
   background: #2a1f3d;
   color: #c49bff;
+}
+
+.badge.child {
+  background: #1a1630;
+  color: #a78bfa;
 }
 
 .session-meta {
@@ -517,6 +523,16 @@ input {
 .swatch.output,
 .mix-seg.output {
   background: #c49bff;
+}
+
+.swatch.unpriced {
+  background: repeating-linear-gradient(
+    -45deg,
+    #3d4a3d,
+    #3d4a3d 3px,
+    #7dffb3 3px,
+    #7dffb3 6px
+  );
 }
 
 .mix-bar {
@@ -845,7 +861,35 @@ input {
 
 .turn-table-wrap {
   min-width: 0;
-  overflow-x: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.turn-table-scroll {
+  overflow: auto;
+  max-height: min(70vh, 42rem);
+}
+
+.load-more {
+  margin-top: 0.65rem;
+  align-self: flex-start;
+  background: #0e120e;
+  border: 1px solid #243024;
+  color: #7dffb3;
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.load-more:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.session-list:focus-visible {
+  outline: 1px solid #3d5a40;
 }
 
 .turn-table {
@@ -1127,6 +1171,7 @@ input {
   justify-content: flex-end;
   overflow: hidden;
   border-radius: 3px 3px 0 0;
+  position: relative;
 }
 
 .trend-fill {
@@ -1139,6 +1184,42 @@ input {
   display: block;
   width: 100%;
   background: #e8b48a;
+}
+
+.trend-stack.unpriced .trend-fill {
+  background: repeating-linear-gradient(
+    -45deg,
+    #243024,
+    #243024 3px,
+    #7dffb3 3px,
+    #7dffb3 6px
+  );
+  opacity: 0.85;
+}
+
+.trend-unpriced-mix {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 5px;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    -45deg,
+    #243024,
+    #243024 2px,
+    #7dffb3 2px,
+    #7dffb3 4px
+  );
+}
+
+.trend-col.overflow .trend-stack {
+  outline: 1px dashed #3d4a3d;
+  outline-offset: 1px;
+}
+
+.trend-col.overflow .trend-label {
+  color: #a8b4a8;
 }
 
 .trend-label {
@@ -1194,16 +1275,36 @@ input {
 .donut-legend li {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
   margin-bottom: 0.45rem;
   font-size: 13px;
   color: #c5d0c5;
-  cursor: default;
   border-radius: 8px;
-  padding: 0.15rem 0.25rem;
+  padding: 0;
 }
 
-.donut-legend li.hot {
+.donut-legend button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.15rem 0.25rem;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.donut-legend button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.donut-legend li.hot,
+.donut-legend li.hot button {
   background: #1c261c;
 }
 
@@ -1310,8 +1411,16 @@ input {
   display: block;
 }
 
-.trend-col:hover .chart-tooltip {
+.trend-col:hover .chart-tooltip,
+.trend-col:focus .chart-tooltip,
+.trend-col:focus-within .chart-tooltip {
   display: block;
+}
+
+.headline-note {
+  margin: 0 0 0.45rem;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .kpi-button:hover,

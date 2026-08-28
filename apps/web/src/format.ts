@@ -2,6 +2,14 @@ import type { Cost } from "./api";
 
 export type CostUnit = "tokens" | "credits" | "usd";
 
+const relativeFormatter = new Intl.RelativeTimeFormat("zh-CN", {
+  numeric: "auto",
+});
+
+function relativeTimeFormat(): Intl.RelativeTimeFormat {
+  return relativeFormatter;
+}
+
 export function costValue(cost: Cost, unit: CostUnit): number | null {
   if (unit === "tokens") return cost.raw;
   if (unit === "credits") return cost.credits;
@@ -34,6 +42,9 @@ export function formatUnitSuffix(unit: CostUnit): string {
 
 export function formatPercent(n: number, digits = 1): string {
   if (!Number.isFinite(n)) return "—";
+  if (n === 0) return `${(0).toFixed(digits)}%`;
+  const min = 10 ** -digits;
+  if (Math.abs(n) < min) return `<${min.toFixed(digits)}%`;
   return `${n.toFixed(digits)}%`;
 }
 
@@ -57,6 +68,25 @@ export function allocatePercents(values: number[], digits = 1): number[] {
   return out.map((value) => value / factor);
 }
 
+export function headlineCostUnit(unit: CostUnit): CostUnit {
+  return unit === "tokens" ? "credits" : unit;
+}
+
+export function unpricedNote(unpricedRaw: number): string {
+  if (unpricedRaw <= 0) return "";
+  return `另有 ${formatExactTokens(unpricedRaw)} tokens 未定价`;
+}
+
+export function unpricedRawFromTurns(
+  turns: Array<{ cost: { raw: number; credits: number | null } }>,
+): number {
+  let raw = 0;
+  for (const turn of turns) {
+    if (turn.cost.credits == null) raw += turn.cost.raw;
+  }
+  return raw;
+}
+
 export function wasteShare(
   waste: Cost,
   total: Cost,
@@ -65,9 +95,9 @@ export function wasteShare(
   const totalValue = costValue(total, unit);
   const wasteValue = costValue(waste, unit);
   if (totalValue == null || wasteValue == null) {
-    return unit === "tokens" ? "0%" : wasteShare(waste, total, "tokens");
+    return unit === "tokens" ? formatPercent(0) : "—";
   }
-  if (totalValue === 0) return "0%";
+  if (totalValue === 0) return formatPercent(0);
   return formatPercent((100 * wasteValue) / totalValue);
 }
 
@@ -106,6 +136,13 @@ export function formatChartNumber(
   return `$${n.toFixed(2)}`;
 }
 
+export function activityTimestamp(session: {
+  startedAt: string | null;
+  lastEventAt: string | null;
+}): string | null {
+  return session.lastEventAt ?? session.startedAt;
+}
+
 export function formatRelativeTime(
   iso: string | null,
   nowMs = Date.now(),
@@ -115,7 +152,7 @@ export function formatRelativeTime(
   if (!Number.isFinite(t)) return "—";
   const deltaSec = Math.round((nowMs - t) / 1000);
   const abs = Math.abs(deltaSec);
-  const rtf = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
+  const rtf = relativeTimeFormat();
   if (abs < 60) return rtf.format(-deltaSec, "second");
   if (abs < 3600) return rtf.format(-Math.round(deltaSec / 60), "minute");
   if (abs < 86_400) return rtf.format(-Math.round(deltaSec / 3600), "hour");

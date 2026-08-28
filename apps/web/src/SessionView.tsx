@@ -1,21 +1,22 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SessionSnapshot, Turn } from "./api";
 import { useUnit } from "./UnitContext";
 import {
   cacheHitRatio,
   disclaimer,
-  formatAbsoluteTime,
   formatCost,
   formatPercent,
-  formatRelativeTime,
+  unpricedNote,
+  unpricedRawFromTurns,
   wasteShare,
 } from "./format";
 import { ContextProfileCard } from "./ContextProfile";
-import { CostTree, collectTurnIds, findNodeById } from "./CostTree";
+import { CostTree, collectTurnIds, findNodeById, suggestionTarget } from "./CostTree";
 import { MixBar } from "./MixBar";
 import { RateLimits } from "./RateLimits";
 import { WasteToggles } from "./WasteToggles";
 import { TurnTable } from "./TurnTable";
+import { RelativeTime } from "./RelativeTime";
 
 type Props = {
   snapshot: SessionSnapshot;
@@ -40,7 +41,13 @@ export function SessionView({
 }: Props) {
   const { unit } = useUnit();
   const [highlightTurnId, setHighlightTurnId] = useState<string | null>(null);
+  const [highlightNonce, setHighlightNonce] = useState(0);
 
+  useEffect(() => {
+    setHighlightTurnId(null);
+  }, [snapshot.id]);
+
+  const turns = useMemo(() => flattenTurns(snapshot), [snapshot]);
   const selectedNode = selectedNodeId
     ? findNodeById(snapshot.tree, selectedNodeId)
     : snapshot.tree;
@@ -52,26 +59,14 @@ export function SessionView({
   const tokenWaste = wasteShare(snapshot.waste, snapshot.cost, "tokens");
   const unitWaste = wasteShare(snapshot.waste, snapshot.cost, unit);
   const suggestions = snapshot.suggestions.slice(0, 3);
+  const unpriced = unpricedNote(unpricedRawFromTurns(turns));
 
   function handleSuggestionClick(ids: string[]) {
-    const first = ids[0];
-    if (!first) return;
-    setHighlightTurnId(first);
-    function findNode(node: typeof snapshot.tree): string | null {
-      if (node.turnIds.includes(first)) return node.id;
-      for (const child of node.children) {
-        const found = findNode(child);
-        if (found) return found;
-      }
-      return null;
-    }
-    for (const child of snapshot.tree.children) {
-      const id = findNode(child);
-      if (id) {
-        onSelectNode(id);
-        return;
-      }
-    }
+    const target = suggestionTarget(snapshot.tree, ids);
+    if (!target) return;
+    setHighlightTurnId(target.turnId);
+    setHighlightNonce((n) => n + 1);
+    onSelectNode(target.nodeId);
   }
 
   return (
@@ -105,10 +100,9 @@ export function SessionView({
             · {snapshot.cwd}
           </span>
         )}
-        <span
-          title={formatAbsoluteTime(snapshot.startedAt ?? snapshot.lastEventAt)}
-        >
-          · {formatRelativeTime(snapshot.startedAt ?? snapshot.lastEventAt)}
+        <span>
+          · 最近活动{" "}
+          <RelativeTime iso={snapshot.lastEventAt ?? snapshot.startedAt} />
         </span>
         {hit != null && <span>· 缓存命中 {formatPercent(100 * hit)}</span>}
       </p>
@@ -121,6 +115,7 @@ export function SessionView({
               {formatCost(snapshot.cost, unit)}
             </span>
           </div>
+          {unpriced ? <p className="headline-note">{unpriced}</p> : null}
           <div className="headline-row">
             <span className="headline-label">浪费</span>
             <span className="headline-value waste" data-testid="waste-headline">
@@ -130,14 +125,15 @@ export function SessionView({
           <MixBar
             className="headline-mix"
             testId="headline-mix"
-            label={`Waste ${tokenWaste} of tokens`}
+            label={`浪费 ${tokenWaste}（按 token）`}
             segments={[
               {
                 key: "useful",
+                label: "有效",
                 value: Math.max(0, snapshot.cost.raw - snapshot.waste.raw),
                 className: "useful",
               },
-              { key: "waste", value: snapshot.waste.raw, className: "waste" },
+              { key: "waste", label: "浪费", value: snapshot.waste.raw, className: "waste" },
             ]}
           />
           <div className="headline-legend">
@@ -190,9 +186,11 @@ export function SessionView({
           )}
         </div>
         <TurnTable
-          turns={flattenTurns(snapshot)}
+          turns={turns}
           turnIds={turnIds}
           highlightTurnId={highlightTurnId}
+          highlightNonce={highlightNonce}
+          resetKey={`${snapshot.id}:${selectedNodeId ?? ""}`}
         />
       </div>
     </div>

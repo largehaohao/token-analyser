@@ -41,9 +41,20 @@ describe("filterSessionsByRange", () => {
     expect(filterSessionsByRange(sessions, "5h", NOW)).toEqual(sessions);
   });
 
-  it("keeps sessions with no timestamps so they stay selectable", () => {
+  it("keeps a session that started before the window but is still active", () => {
+    const longRunning = session(
+      "2026-07-19T09:00:00.000Z",
+      "2026-08-28T11:00:00.000Z",
+    );
+    expect(filterSessionsByRange([longRunning], "7d", NOW)).toEqual([
+      longRunning,
+    ]);
+  });
+
+  it("drops sessions with no timestamps from bounded ranges, keeps them in all", () => {
     const sessions = [session(null, null)];
-    expect(filterSessionsByRange(sessions, "5h", NOW)).toEqual(sessions);
+    expect(filterSessionsByRange(sessions, "5h", NOW)).toEqual([]);
+    expect(filterSessionsByRange(sessions, "all", NOW)).toEqual(sessions);
   });
 
   it("includes a session that starts exactly at the cutoff", () => {
@@ -68,5 +79,12 @@ describe("filterSessionsByRange", () => {
     expect(overviewQuery("5h", NOW).days).toBe(2);
     expect(overviewQuery("1d", NOW).days).toBe(2);
     expect(overviewQuery("30d", NOW).days).toBe(31);
+  });
+
+  it("advances the overview since cutoff when now moves", () => {
+    const earlier = overviewQuery("7d", NOW);
+    const later = overviewQuery("7d", NOW + 60_000);
+    expect(later.since).not.toBe(earlier.since);
+    expect(Date.parse(later.since!)).toBe(Date.parse(earlier.since!) + 60_000);
   });
 });

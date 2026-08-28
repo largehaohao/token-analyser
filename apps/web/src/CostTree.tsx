@@ -121,12 +121,22 @@ export function findNodeById(root: TreeNode, id: string): TreeNode | null {
 }
 
 export function findNodeForTurnId(root: TreeNode, turnId: string): TreeNode | null {
-  if (root.turnIds.includes(turnId)) return root;
   for (const child of root.children) {
     const found = findNodeForTurnId(child, turnId);
     if (found) return found;
   }
+  if (root.turnIds.includes(turnId)) return root;
   return null;
+}
+
+export function suggestionTarget(
+  tree: TreeNode,
+  turnIds: string[],
+): { turnId: string; nodeId: string } | null {
+  const turnId = turnIds[0];
+  if (!turnId) return null;
+  const node = findNodeForTurnId(tree, turnId);
+  return { turnId, nodeId: node?.id ?? tree.id };
 }
 
 export function collectTurnIds(node: TreeNode): Set<string> {

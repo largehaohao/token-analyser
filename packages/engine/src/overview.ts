@@ -1,9 +1,12 @@
 import {
-  addCost,
+  addKnownCost,
   emptyCost,
+  emptyMaybeCost,
   type Cost,
   type SessionSnapshot,
+  type Turn,
 } from "./types.ts";
+import { computeWaste } from "./waste.ts";
 
 export const OVERVIEW_SLICE_KEYS = [
   "planning",
@@ -27,6 +30,7 @@ export type OverviewDay = {
   date: string;
   cost: Cost;
   flaggedCost: Cost;
+  unpricedRaw: number;
 };
 
 export type Overview = {
@@ -37,6 +41,7 @@ export type Overview = {
   watchPath: string;
   cost: Cost;
   waste: Cost;
+  unpricedRaw: number;
   days: OverviewDay[];
   slices: OverviewSlice[];
 };
@@ -48,6 +53,9 @@ export type OverviewOptions = {
   dayCount?: number;
   sinceMs?: number;
 };
+
+export const OVERVIEW_EARLIER_DATE = "earlier";
+export const OVERVIEW_LATER_DATE = "later";
 
 const SLICE_SET = new Set<string>(OVERVIEW_SLICE_KEYS);
 
@@ -76,26 +84,126 @@ function dayRange(nowIso: string, count: number): string[] {
 
 function emptySliceMap(): Record<OverviewSliceKey, Cost> {
   return {
-    planning: emptyCost(),
-    code: emptyCost(),
-    reread: emptyCost(),
-    subagents: emptyCost(),
-    waiting: emptyCost(),
-    other: emptyCost(),
+    planning: emptyMaybeCost(),
+    code: emptyMaybeCost(),
+    reread: emptyMaybeCost(),
+    subagents: emptyMaybeCost(),
+    waiting: emptyMaybeCost(),
+    other: emptyMaybeCost(),
   };
 }
 
-function sessionTimeMs(session: SessionSnapshot): number | null {
-  const iso = session.startedAt ?? session.lastEventAt ?? "";
+function parseTimeMs(iso: string | null | undefined): number | null {
   if (!iso) return null;
   const t = Date.parse(iso);
   return Number.isFinite(t) ? t : null;
 }
 
+function sessionTimeMs(session: SessionSnapshot): number | null {
+  let best = parseTimeMs(session.lastEventAt ?? session.startedAt);
+  for (const child of session.children) {
+    const childMs = sessionTimeMs(child);
+    if (childMs != null && (best == null || childMs > best)) best = childMs;
+  }
+  return best;
+}
+
 function inRange(session: SessionSnapshot, sinceMs?: number): boolean {
   if (sinceMs == null) return true;
   const t = sessionTimeMs(session);
-  return t == null || t >= sinceMs;
+  return t != null && t >= sinceMs;
+}
+
+function turnTimeMs(turn: Turn): number | null {
+  const iso = turn.endedAt || turn.startedAt;
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : null;
+}
+
+function turnInRange(turn: Turn, sinceMs?: number): boolean {
+  if (sinceMs == null) return true;
+  const t = turnTimeMs(turn);
+  return t != null && t >= sinceMs;
+}
+
+function walkTurns(
+  session: SessionSnapshot,
+  visit: (turn: Turn, flagged: boolean, nested: boolean) => void,
+  nested = false,
+): void {
+  const flagged =
+    session.ledger_warning || session.parse_errors.length > 0;
+  for (const turn of session.turns) visit(turn, flagged, nested);
+  for (const child of session.children) walkTurns(child, visit, true);
+}
+
+function collectTurnsById(
+  session: SessionSnapshot,
+  map = new Map<string, Turn>(),
+): Map<string, Turn> {
+  for (const turn of session.turns) map.set(turn.id, turn);
+  for (const child of session.children) collectTurnsById(child, map);
+  return map;
+}
+
+function windowTurnIds(session: SessionSnapshot, sinceMs?: number): Set<string> {
+  const ids = new Set<string>();
+  walkTurns(session, (turn) => {
+    if (turnInRange(turn, sinceMs)) ids.add(turn.id);
+  });
+  return ids;
+}
+
+function windowedWaste(session: SessionSnapshot, sinceMs?: number): Cost {
+  const { turnIds } = computeWaste({
+    turns: session.turns,
+    children: session.children,
+    toggles: session.toggles,
+  });
+  const inWindow = windowTurnIds(session, sinceMs);
+  const byId = collectTurnsById(session);
+  let waste = emptyMaybeCost();
+  for (const id of turnIds) {
+    if (!inWindow.has(id)) continue;
+    waste = addKnownCost(waste, byId.get(id)!.cost);
+  }
+  return waste.raw === 0 ? emptyCost() : waste;
+}
+
+function filterSessionTurns(
+  session: SessionSnapshot,
+  sinceMs?: number,
+): SessionSnapshot {
+  if (sinceMs == null) return session;
+  return {
+    ...session,
+    turns: session.turns.filter((turn) => turnInRange(turn, sinceMs)),
+    children: session.children.map((child) =>
+      filterSessionTurns(child, sinceMs),
+    ),
+  };
+}
+
+function sliceKey(turn: Turn, nested: boolean): OverviewSliceKey {
+  if (nested) return "subagents";
+  const bucket = turn.bucket ?? "other";
+  if (bucket === "waiting.poll" || bucket === "waiting.coord") return "waiting";
+  if (SLICE_SET.has(bucket)) return bucket as OverviewSliceKey;
+  return "other";
+}
+
+function normalizeCost(cost: Cost): Cost {
+  return cost.raw === 0 ? emptyCost() : cost;
+}
+
+function makeDay(date: string, cost: Cost, flagged: Cost, unpricedRaw: number): OverviewDay {
+  return {
+    date,
+    cost: normalizeCost(cost),
+    flaggedCost: normalizeCost(flagged),
+    unpricedRaw,
+  };
 }
 
 export function buildOverview(
@@ -106,33 +214,69 @@ export function buildOverview(
   const included = sessions.filter((session) => inRange(session, opts.sinceMs));
   const dayCount = opts.dayCount ?? 8;
   const days = dayRange(now, dayCount);
-  const dayCosts = new Map(days.map((date) => [date, emptyCost()]));
-  const dayFlagged = new Map(days.map((date) => [date, emptyCost()]));
+  const lastDay = days[days.length - 1] ?? "";
+  const dayCosts = new Map(days.map((date) => [date, emptyMaybeCost()]));
+  const dayFlagged = new Map(days.map((date) => [date, emptyMaybeCost()]));
+  const dayUnpriced = new Map(days.map((date) => [date, 0]));
   const slices = emptySliceMap();
 
-  let cost = emptyCost();
-  let waste = emptyCost();
+  let cost = emptyMaybeCost();
+  let waste = emptyMaybeCost();
   let turnCount = 0;
+  let unpricedRaw = 0;
+  let overflow = emptyMaybeCost();
+  let overflowFlagged = emptyMaybeCost();
+  let overflowUnpriced = 0;
+  let later = emptyMaybeCost();
+  let laterFlagged = emptyMaybeCost();
+  let laterUnpriced = 0;
 
   for (const session of included) {
-    cost = addCost(cost, session.cost);
-    waste = addCost(waste, session.waste);
-    turnCount += countTurns(session);
+    const ranged = filterSessionTurns(session, opts.sinceMs);
+    waste = addKnownCost(waste, windowedWaste(session, opts.sinceMs));
+    turnCount += countTurns(ranged);
 
-    const day = utcDay(session.startedAt ?? session.lastEventAt ?? "");
-    if (day && dayCosts.has(day)) {
-      dayCosts.set(day, addCost(dayCosts.get(day)!, session.cost));
-      if (session.ledger_warning || session.parse_errors.length > 0) {
-        dayFlagged.set(day, addCost(dayFlagged.get(day)!, session.cost));
+    walkTurns(ranged, (turn, flagged, nested) => {
+      if (turn.cost.credits == null) unpricedRaw += turn.cost.raw;
+      cost = addKnownCost(cost, turn.cost);
+      const key = sliceKey(turn, nested);
+      slices[key] = addKnownCost(slices[key], turn.cost);
+
+      const day = utcDay(turn.endedAt || turn.startedAt);
+      const unpriced = turn.cost.credits == null ? turn.cost.raw : 0;
+      if (day && dayCosts.has(day)) {
+        dayCosts.set(day, addKnownCost(dayCosts.get(day)!, turn.cost));
+        dayUnpriced.set(day, (dayUnpriced.get(day) ?? 0) + unpriced);
+        if (flagged) {
+          dayFlagged.set(day, addKnownCost(dayFlagged.get(day)!, turn.cost));
+        }
+      } else if (day && lastDay && day > lastDay) {
+        later = addKnownCost(later, turn.cost);
+        laterUnpriced += unpriced;
+        if (flagged) laterFlagged = addKnownCost(laterFlagged, turn.cost);
+      } else {
+        overflow = addKnownCost(overflow, turn.cost);
+        overflowUnpriced += unpriced;
+        if (flagged) overflowFlagged = addKnownCost(overflowFlagged, turn.cost);
       }
-    }
+    });
+  }
 
-    for (const child of session.tree.children) {
-      const key = SLICE_SET.has(child.label)
-        ? (child.label as OverviewSliceKey)
-        : "other";
-      slices[key] = addCost(slices[key], child.cost);
-    }
+  const chartDays: OverviewDay[] = days.map((date) =>
+    makeDay(
+      date,
+      dayCosts.get(date)!,
+      dayFlagged.get(date)!,
+      dayUnpriced.get(date) ?? 0,
+    ),
+  );
+  if (overflow.raw !== 0 || overflowFlagged.raw !== 0) {
+    chartDays.unshift(
+      makeDay(OVERVIEW_EARLIER_DATE, overflow, overflowFlagged, overflowUnpriced),
+    );
+  }
+  if (later.raw !== 0 || laterFlagged.raw !== 0) {
+    chartDays.push(makeDay(OVERVIEW_LATER_DATE, later, laterFlagged, laterUnpriced));
   }
 
   return {
@@ -141,18 +285,15 @@ export function buildOverview(
     live: included.some((session) => session.live),
     collecting: opts.collecting ?? true,
     watchPath: opts.watchPath,
-    cost,
-    waste,
-    days: days.map((date) => ({
-      date,
-      cost: dayCosts.get(date)!,
-      flaggedCost: dayFlagged.get(date)!,
-    })),
+    cost: normalizeCost(cost),
+    waste: normalizeCost(waste),
+    unpricedRaw,
+    days: chartDays,
     slices: OVERVIEW_SLICE_KEYS.map((key) => ({
       key,
       raw: slices[key].raw,
-      credits: slices[key].credits,
-      usd: slices[key].usd,
+      credits: slices[key].raw === 0 ? 0 : slices[key].credits,
+      usd: slices[key].raw === 0 ? 0 : slices[key].usd,
     })),
   };
 }

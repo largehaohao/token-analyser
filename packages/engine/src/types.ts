@@ -157,6 +157,7 @@ export type SessionListItem = {
   toolsCount: number;
   skillsChars: number;
   skillsCount: number;
+  unpricedRaw: number;
 };
 
 export type SessionMeta = {
@@ -196,5 +197,49 @@ export function addCost(a: Cost, b: Cost): Cost {
     output: a.output + b.output,
     credits,
     usd,
+  };
+}
+
+/** Sum tokens always; keep known money and skip unpriced children. */
+export function addKnownCost(a: Cost, b: Cost): Cost {
+  const aMoney = moneyFields(a);
+  const bMoney = moneyFields(b);
+  const credits =
+    aMoney.credits == null
+      ? bMoney.credits
+      : bMoney.credits == null
+        ? aMoney.credits
+        : aMoney.credits + bMoney.credits;
+  const usd =
+    aMoney.usd == null
+      ? bMoney.usd
+      : bMoney.usd == null
+        ? aMoney.usd
+        : aMoney.usd + bMoney.usd;
+  return {
+    raw: a.raw + b.raw,
+    uncached_input: a.uncached_input + b.uncached_input,
+    cached_input: a.cached_input + b.cached_input,
+    output: a.output + b.output,
+    credits,
+    usd,
+  };
+}
+
+function moneyFields(cost: Cost): { credits: number | null; usd: number | null } {
+  if (cost.raw === 0 && cost.credits === 0 && cost.usd === 0) {
+    return { credits: null, usd: null };
+  }
+  return { credits: cost.credits, usd: cost.usd };
+}
+
+export function emptyMaybeCost(): Cost {
+  return {
+    raw: 0,
+    uncached_input: 0,
+    cached_input: 0,
+    output: 0,
+    credits: null,
+    usd: null,
   };
 }

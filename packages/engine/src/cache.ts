@@ -6,13 +6,14 @@ import {
   mkdirSync,
   renameSync,
   statSync,
+  readdirSync,
 } from "node:fs";
 import path from "node:path";
 import { sha256 } from "./hash.ts";
 import { tokenAnalyserHome } from "./config.ts";
 import type { SessionSnapshot } from "./types.ts";
 
-export const CACHE_VERSION = 3;
+export const CACHE_VERSION = 4;
 
 export function cacheDir(home?: string): string {
   return path.join(home ?? tokenAnalyserHome(), "cache");
@@ -60,6 +61,54 @@ export function readCache(
     }
     return undefined;
   }
+}
+
+export function pruneStaleCache(home?: string, context = ""): number {
+  const dir = cacheDir(home);
+  if (!existsSync(dir)) return 0;
+  let removed = 0;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    const file = path.join(dir, name);
+    try {
+      const value = JSON.parse(readFileSync(file, "utf8")) as {
+        version?: unknown;
+      };
+      if (value.version !== CACHE_VERSION) {
+        unlinkSync(file);
+        removed += 1;
+        continue;
+      }
+      const snapshot = (value as { snapshot?: { path?: unknown } }).snapshot;
+      const filePath = typeof snapshot?.path === "string" ? snapshot.path : "";
+      if (!filePath || !existsSync(filePath)) {
+        unlinkSync(file);
+        removed += 1;
+        continue;
+      }
+      try {
+        if (`${cacheKey(filePath, context)}.json` !== name) {
+          unlinkSync(file);
+          removed += 1;
+        }
+      } catch {
+        try {
+          unlinkSync(file);
+          removed += 1;
+        } catch {
+          // ignore concurrent deletes
+        }
+      }
+    } catch {
+      try {
+        unlinkSync(file);
+        removed += 1;
+      } catch {
+        // ignore concurrent deletes
+      }
+    }
+  }
+  return removed;
 }
 
 export function writeCache(

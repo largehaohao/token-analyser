@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { Cost } from "./api";
 import {
   allocatePercents,
+  activityTimestamp,
   cacheHitRatio,
+  formatPercent,
   formatRelativeTime,
+  headlineCostUnit,
+  unpricedNote,
+  unpricedRawFromTurns,
   wasteShare,
 } from "./format";
 
@@ -41,10 +46,37 @@ describe("wasteShare", () => {
     expect(wasteShare(waste, total, "usd")).toBe("25.0%");
   });
 
-  it("falls back to token share when credits are unpriced", () => {
+  it("does not pretend a token share is a credit share when money is unknown", () => {
     const total = cost({ raw: 200, credits: null, usd: null });
     const waste = cost({ raw: 50, credits: null, usd: null });
-    expect(wasteShare(waste, total, "credits")).toBe("25.0%");
+    expect(wasteShare(waste, total, "credits")).toBe("—");
+    expect(wasteShare(waste, total, "usd")).toBe("—");
+    expect(wasteShare(waste, total, "tokens")).toBe("25.0%");
+  });
+
+  it("keeps the headline unit on credits when the page is in tokens", () => {
+    expect(headlineCostUnit("tokens")).toBe("credits");
+    expect(headlineCostUnit("credits")).toBe("credits");
+    expect(headlineCostUnit("usd")).toBe("usd");
+  });
+
+  it("names unpriced leftover tokens instead of hiding them", () => {
+    expect(unpricedNote(0)).toBe("");
+    expect(unpricedNote(5100)).toBe("另有 5,100 tokens 未定价");
+    expect(
+      unpricedRawFromTurns([
+        { cost: { raw: 10_000, credits: 100 } },
+        { cost: { raw: 50, credits: null } },
+      ]),
+    ).toBe(50);
+  });
+
+  it("does not round a non-zero share down to 0.0%", () => {
+    const total = cost({ raw: 7_653_030, credits: 1000, usd: 40 });
+    const waste = cost({ raw: 2_380, credits: 0.2, usd: 0.01 });
+    expect(wasteShare(waste, total, "tokens")).toBe("<0.1%");
+    expect(formatPercent(0)).toBe("0.0%");
+    expect(wasteShare(cost({ raw: 0 }), cost({ raw: 0 }), "tokens")).toBe("0.0%");
   });
 });
 
@@ -75,5 +107,16 @@ describe("formatRelativeTime", () => {
 
   it("returns an em dash for missing timestamps", () => {
     expect(formatRelativeTime(null, now)).toBe("—");
+  });
+});
+
+describe("activityTimestamp", () => {
+  it("prefers last activity so range labels match the filter", () => {
+    expect(
+      activityTimestamp({
+        startedAt: "2026-07-19T09:00:00.000Z",
+        lastEventAt: "2026-08-28T11:00:00.000Z",
+      }),
+    ).toBe("2026-08-28T11:00:00.000Z");
   });
 });

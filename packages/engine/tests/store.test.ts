@@ -140,6 +140,32 @@ describe("SessionStore", () => {
       Date.now = realNow;
     }
   });
+
+  it("rolls child activity into list timestamps and reports unpriced leftover", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "store-list-meta-"));
+    const cacheDir = path.join(dir, "cache");
+    const parentPath = path.join(dir, "rollout-parent.jsonl");
+    const childPath = path.join(dir, "rollout-child.jsonl");
+    writeFileSync(
+      parentPath,
+      parentFixture().replaceAll("gpt-5.6-sol", "mystery-model"),
+    );
+    writeFileSync(
+      childPath,
+      readFileSync(path.join(fixtures, "child-prefix.jsonl"), "utf8").replaceAll(
+        "2026-08-27T00:00:",
+        "2026-08-28T12:00:",
+      ),
+    );
+
+    const store = new SessionStore({ cacheDir });
+    store.refresh([parentPath, childPath]);
+
+    const item = store.list()[0]!;
+    expect(item.id).toBe("parent-1");
+    expect(item.lastEventAt).toMatch(/^2026-08-28T12:00:/);
+    expect(item.unpricedRaw).toBeGreaterThan(0);
+  });
 });
 
 describe("watchSessions", () => {

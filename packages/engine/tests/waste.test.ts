@@ -126,4 +126,23 @@ describe("computeWaste", () => {
     });
     expect(waste.raw).toBe(80);
   });
+
+  it("keeps known credits when one waste turn is unpriced", () => {
+    const priced = turn({ id: "1", bucket: "waiting.poll", raw: 100 });
+    priced.cost = {
+      ...priced.cost,
+      credits: 1,
+      usd: 0.04,
+    };
+    const unknown = turn({ id: "2", bucket: "waiting.poll", raw: 200 });
+    unknown.cost = { ...unknown.cost, credits: null, usd: null };
+    const { waste } = computeWaste({
+      turns: [priced, unknown],
+      children: [],
+      toggles: DEFAULT_WASTE_TOGGLES,
+    });
+    expect(waste.raw).toBe(300);
+    expect(waste.credits).toBeCloseTo(1, 5);
+    expect(waste.usd).toBeCloseTo(0.04, 5);
+  });
 });

@@ -1,6 +1,7 @@
 import {
-  addCost,
+  addKnownCost,
   emptyCost,
+  emptyMaybeCost,
   type Bucket,
   type Cost,
   type SessionSnapshot,
@@ -27,7 +28,11 @@ const ROOT_CHILD_LABELS = [
 ] as const;
 
 export function sumTurns(turns: Turn[]): Cost {
-  return turns.reduce((acc, t) => addCost(acc, t.cost), emptyCost());
+  const summed = turns.reduce(
+    (acc, t) => addKnownCost(acc, t.cost),
+    emptyMaybeCost(),
+  );
+  return summed.raw === 0 ? emptyCost() : summed;
 }
 
 function bucketRaw(turns: Turn[], bucket: Bucket): number {
@@ -71,11 +76,11 @@ export function buildTree(args: {
   const ownCost = sumTurns(args.turns);
 
   const subagentsCost = args.children.reduce(
-    (acc, child) => addCost(acc, child.cost),
-    emptyCost(),
+    (acc, child) => addKnownCost(acc, child.cost),
+    emptyMaybeCost(),
   );
 
-  const rootCost = addCost(ownCost, subagentsCost);
+  const rootCost = addKnownCost(ownCost, subagentsCost);
 
   const bucketNodes = new Map<Bucket, TreeNode>();
   for (const bucket of BUCKET_ORDER) {
@@ -116,7 +121,7 @@ export function buildTree(args: {
 
   const pollNode = bucketNodes.get("waiting.poll")!;
   const coordNode = bucketNodes.get("waiting.coord")!;
-  const waitingCost = addCost(pollNode.cost, coordNode.cost);
+  const waitingCost = addKnownCost(pollNode.cost, coordNode.cost);
   pollNode.percentOfParent = percentOf(waitingCost, pollNode.cost);
   coordNode.percentOfParent = percentOf(waitingCost, coordNode.cost);
 

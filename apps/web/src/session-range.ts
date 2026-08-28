@@ -19,7 +19,7 @@ export type DatedSession = {
 };
 
 function sessionTimeMs(session: DatedSession): number | null {
-  const iso = session.startedAt ?? session.lastEventAt;
+  const iso = session.lastEventAt ?? session.startedAt;
   if (!iso) return null;
   const t = Date.parse(iso);
   return Number.isFinite(t) ? t : null;
@@ -56,6 +56,6 @@ export function filterSessionsByRange<T extends DatedSession>(
   if (cutoff == null) return sessions;
   return sessions.filter((session) => {
     const t = sessionTimeMs(session);
-    return t == null || t >= cutoff;
+    return t != null && t >= cutoff;
   });
 }

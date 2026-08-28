@@ -81,6 +81,16 @@ describe("sumTurns", () => {
     ];
     expect(sumTurns(turns).raw).toBe(150);
   });
+
+  it("keeps known credits when one turn is unpriced", () => {
+    const priced = turn({ id: "1", bucket: "code", raw: 100 });
+    priced.cost = { ...priced.cost, credits: 1, usd: 0.04 };
+    const unknown = turn({ id: "2", bucket: "code", raw: 50 });
+    unknown.cost = { ...unknown.cost, credits: null, usd: null };
+    const summed = sumTurns([priced, unknown]);
+    expect(summed.raw).toBe(150);
+    expect(summed.credits).toBe(1);
+  });
 });
 
 describe("buildTree", () => {
