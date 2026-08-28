@@ -20,12 +20,13 @@ function turn(partial: {
   bucket: Bucket;
   raw: number;
   startedAt?: string;
+  endedAt?: string;
 }): Turn {
   return {
     id: partial.id,
     sessionId: "s",
     startedAt: partial.startedAt ?? "2026-08-27T10:00:00.000Z",
-    endedAt: "2026-08-27T10:00:01.000Z",
+    endedAt: partial.endedAt ?? partial.startedAt ?? "2026-08-27T10:00:01.000Z",
     model: "gpt-5.6-luna",
     effort: "max",
     prompt: "",
@@ -201,5 +202,103 @@ describe("buildOverview", () => {
       "2026-08-27",
       "2026-08-28",
     ]);
+  });
+
+  it("splits a session across UTC days by turn endedAt, not startedAt", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "overnight",
+          startedAt: "2026-08-27T23:00:00.000Z",
+          turns: [
+            turn({
+              id: "late",
+              bucket: "code",
+              raw: 100,
+              startedAt: "2026-08-27T23:10:00.000Z",
+              endedAt: "2026-08-27T23:50:00.000Z",
+            }),
+            turn({
+              id: "early",
+              bucket: "code",
+              raw: 200,
+              startedAt: "2026-08-27T23:55:00.000Z",
+              endedAt: "2026-08-28T00:20:00.000Z",
+            }),
+          ],
+        }),
+      ],
+      {
+        watchPath: "/tmp",
+        now: "2026-08-28T12:00:00.000Z",
+        dayCount: 2,
+      },
+    );
+    expect(overview.cost.raw).toBe(300);
+    expect(overview.days.find((d) => d.date === "2026-08-27")?.cost.raw).toBe(100);
+    expect(overview.days.find((d) => d.date === "2026-08-28")?.cost.raw).toBe(200);
+  });
+
+  it("puts spend outside the chart window into an earlier bucket so bars match the KPI", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "old",
+          startedAt: "2026-06-20T10:00:00.000Z",
+          turns: [
+            turn({
+              id: "t-old",
+              bucket: "code",
+              raw: 500,
+              startedAt: "2026-06-20T10:00:00.000Z",
+              endedAt: "2026-06-20T10:01:00.000Z",
+            }),
+          ],
+        }),
+        session({
+          id: "new",
+          startedAt: "2026-08-28T10:00:00.000Z",
+          turns: [turn({ id: "t-new", bucket: "planning", raw: 40 })],
+        }),
+      ],
+      {
+        watchPath: "/tmp",
+        now: "2026-08-28T12:00:00.000Z",
+        dayCount: 8,
+      },
+    );
+    expect(overview.cost.raw).toBe(540);
+    expect(overview.days[0]?.date).toBe("earlier");
+    expect(overview.days[0]?.cost.raw).toBe(500);
+    const barSum = overview.days.reduce((sum, day) => sum + day.cost.raw, 0);
+    expect(barSum).toBe(overview.cost.raw);
+  });
+
+  it("drops undated sessions from bounded windows", () => {
+    const undated = session({
+      id: "ghost",
+      startedAt: "",
+      turns: [turn({ id: "g1", bucket: "other", raw: 999 })],
+    });
+    undated.startedAt = null;
+    undated.lastEventAt = null;
+    const overview = buildOverview(
+      [
+        undated,
+        session({
+          id: "new",
+          startedAt: "2026-08-28T10:00:00.000Z",
+          turns: [turn({ id: "t2", bucket: "planning", raw: 40 })],
+        }),
+      ],
+      {
+        watchPath: "/tmp",
+        now: "2026-08-28T12:00:00.000Z",
+        sinceMs: Date.parse("2026-08-27T12:00:00.000Z"),
+        dayCount: 2,
+      },
+    );
+    expect(overview.sessionCount).toBe(1);
+    expect(overview.cost.raw).toBe(40);
   });
 });

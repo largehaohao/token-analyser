@@ -41,9 +41,10 @@ describe("filterSessionsByRange", () => {
     expect(filterSessionsByRange(sessions, "5h", NOW)).toEqual(sessions);
   });
 
-  it("keeps sessions with no timestamps so they stay selectable", () => {
+  it("drops sessions with no timestamps from bounded ranges, keeps them in all", () => {
     const sessions = [session(null, null)];
-    expect(filterSessionsByRange(sessions, "5h", NOW)).toEqual(sessions);
+    expect(filterSessionsByRange(sessions, "5h", NOW)).toEqual([]);
+    expect(filterSessionsByRange(sessions, "all", NOW)).toEqual(sessions);
   });
 
   it("includes a session that starts exactly at the cutoff", () => {

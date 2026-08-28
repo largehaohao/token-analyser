@@ -3,6 +3,7 @@ import {
   emptyCost,
   type Cost,
   type SessionSnapshot,
+  type Turn,
 } from "./types.ts";
 
 export const OVERVIEW_SLICE_KEYS = [
@@ -48,6 +49,8 @@ export type OverviewOptions = {
   dayCount?: number;
   sinceMs?: number;
 };
+
+export const OVERVIEW_EARLIER_DATE = "earlier";
 
 const SLICE_SET = new Set<string>(OVERVIEW_SLICE_KEYS);
 
@@ -95,7 +98,17 @@ function sessionTimeMs(session: SessionSnapshot): number | null {
 function inRange(session: SessionSnapshot, sinceMs?: number): boolean {
   if (sinceMs == null) return true;
   const t = sessionTimeMs(session);
-  return t == null || t >= sinceMs;
+  return t != null && t >= sinceMs;
+}
+
+function walkTurns(
+  session: SessionSnapshot,
+  visit: (turn: Turn, flagged: boolean) => void,
+): void {
+  const flagged =
+    session.ledger_warning || session.parse_errors.length > 0;
+  for (const turn of session.turns) visit(turn, flagged);
+  for (const child of session.children) walkTurns(child, visit);
 }
 
 export function buildOverview(
@@ -113,19 +126,26 @@ export function buildOverview(
   let cost = emptyCost();
   let waste = emptyCost();
   let turnCount = 0;
+  let overflow = emptyCost();
+  let overflowFlagged = emptyCost();
 
   for (const session of included) {
     cost = addCost(cost, session.cost);
     waste = addCost(waste, session.waste);
     turnCount += countTurns(session);
 
-    const day = utcDay(session.startedAt ?? session.lastEventAt ?? "");
-    if (day && dayCosts.has(day)) {
-      dayCosts.set(day, addCost(dayCosts.get(day)!, session.cost));
-      if (session.ledger_warning || session.parse_errors.length > 0) {
-        dayFlagged.set(day, addCost(dayFlagged.get(day)!, session.cost));
+    walkTurns(session, (turn, flagged) => {
+      const day = utcDay(turn.endedAt || turn.startedAt);
+      if (day && dayCosts.has(day)) {
+        dayCosts.set(day, addCost(dayCosts.get(day)!, turn.cost));
+        if (flagged) {
+          dayFlagged.set(day, addCost(dayFlagged.get(day)!, turn.cost));
+        }
+      } else {
+        overflow = addCost(overflow, turn.cost);
+        if (flagged) overflowFlagged = addCost(overflowFlagged, turn.cost);
       }
-    }
+    });
 
     for (const child of session.tree.children) {
       const key = SLICE_SET.has(child.label)
@@ -133,6 +153,19 @@ export function buildOverview(
         : "other";
       slices[key] = addCost(slices[key], child.cost);
     }
+  }
+
+  const chartDays: OverviewDay[] = days.map((date) => ({
+    date,
+    cost: dayCosts.get(date)!,
+    flaggedCost: dayFlagged.get(date)!,
+  }));
+  if (overflow.raw !== 0 || overflowFlagged.raw !== 0) {
+    chartDays.unshift({
+      date: OVERVIEW_EARLIER_DATE,
+      cost: overflow,
+      flaggedCost: overflowFlagged,
+    });
   }
 
   return {
@@ -143,11 +176,7 @@ export function buildOverview(
     watchPath: opts.watchPath,
     cost,
     waste,
-    days: days.map((date) => ({
-      date,
-      cost: dayCosts.get(date)!,
-      flaggedCost: dayFlagged.get(date)!,
-    })),
+    days: chartDays,
     slices: OVERVIEW_SLICE_KEYS.map((key) => ({
       key,
       raw: slices[key].raw,

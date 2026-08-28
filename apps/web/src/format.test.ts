@@ -3,6 +3,7 @@ import type { Cost } from "./api";
 import {
   allocatePercents,
   cacheHitRatio,
+  formatPercent,
   formatRelativeTime,
   wasteShare,
 } from "./format";
@@ -45,6 +46,14 @@ describe("wasteShare", () => {
     const total = cost({ raw: 200, credits: null, usd: null });
     const waste = cost({ raw: 50, credits: null, usd: null });
     expect(wasteShare(waste, total, "credits")).toBe("25.0%");
+  });
+
+  it("does not round a non-zero share down to 0.0%", () => {
+    const total = cost({ raw: 7_653_030, credits: 1000, usd: 40 });
+    const waste = cost({ raw: 2_380, credits: 0.2, usd: 0.01 });
+    expect(wasteShare(waste, total, "tokens")).toBe("<0.1%");
+    expect(formatPercent(0)).toBe("0.0%");
+    expect(wasteShare(cost({ raw: 0 }), cost({ raw: 0 }), "tokens")).toBe("0.0%");
   });
 });
 

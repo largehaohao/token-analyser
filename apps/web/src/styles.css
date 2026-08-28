@@ -278,7 +278,8 @@ input {
 
 .badge.live,
 .badge.warn,
-.badge.fast {
+.badge.fast,
+.badge.child {
   font-size: 10px;
   padding: 0.12rem 0.4rem;
   border-radius: 999px;
@@ -299,6 +300,11 @@ input {
 .badge.fast {
   background: #2a1f3d;
   color: #c49bff;
+}
+
+.badge.child {
+  background: #1a1630;
+  color: #a78bfa;
 }
 
 .session-meta {
@@ -845,7 +851,30 @@ input {
 
 .turn-table-wrap {
   min-width: 0;
-  overflow-x: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.turn-table-scroll {
+  overflow: auto;
+  max-height: min(70vh, 42rem);
+}
+
+.load-more {
+  margin-top: 0.65rem;
+  align-self: flex-start;
+  background: #0e120e;
+  border: 1px solid #243024;
+  color: #7dffb3;
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.session-list:focus-visible {
+  outline: 1px solid #3d5a40;
 }
 
 .turn-table {

@@ -9,6 +9,7 @@ import {
   wasteShare,
 } from "./format";
 import { useUnit } from "./UnitContext";
+import { useNow } from "./useNow";
 
 const EMPTY_COPY =
   "No Codex sessions found. Run Codex locally, then sessions appear from ~/.codex/sessions/**/rollout-*.jsonl";
@@ -36,6 +37,7 @@ export function SessionList({
   onImport,
 }: Props) {
   const { unit } = useUnit();
+  const now = useNow();
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState(false);
 
@@ -76,6 +78,12 @@ export function SessionList({
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement
+    ) {
+      return;
+    }
     if (filtered.length === 0) return;
     e.preventDefault();
     const index = filtered.findIndex((s) => s.id === selectedId);
@@ -89,6 +97,7 @@ export function SessionList({
   return (
     <aside
       className={`session-list${dragging ? " dragging" : ""}`}
+      tabIndex={0}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragEnter={() => setDragging(true)}
@@ -142,6 +151,7 @@ export function SessionList({
                   <div className="row-top">
                     <span className="session-id">{s.nickname ?? s.id}</span>
                     {s.live && <span className="badge live">LIVE</span>}
+                    {s.parentId && <span className="badge child">子会话</span>}
                     {s.ledger_warning && (
                       <span className="badge warn">账本</span>
                     )}
@@ -157,7 +167,7 @@ export function SessionList({
                     className="session-meta"
                     title={formatAbsoluteTime(s.startedAt ?? s.lastEventAt)}
                   >
-                    {formatRelativeTime(s.startedAt ?? s.lastEventAt)}
+                    {formatRelativeTime(s.startedAt ?? s.lastEventAt, now)}
                   </div>
                   <div className="session-costs">
                     <span>{formatCost(s.cost, unit)}</span>
@@ -167,14 +177,20 @@ export function SessionList({
                   </div>
                   <MixBar
                     className="waste-bar"
-                    label={`waste ${wasteShare(s.waste, s.cost)} of tokens`}
+                    label={`浪费 ${wasteShare(s.waste, s.cost)}（按 token）`}
                     segments={[
                       {
                         key: "useful",
+                        label: "有效",
                         value: Math.max(0, s.cost.raw - s.waste.raw),
                         className: "useful",
                       },
-                      { key: "waste", value: s.waste.raw, className: "waste" },
+                      {
+                        key: "waste",
+                        label: "浪费",
+                        value: s.waste.raw,
+                        className: "waste",
+                      },
                     ]}
                   />
                   {s.parse_error && s.parse_error_message != null && (

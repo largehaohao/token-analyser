@@ -23,6 +23,7 @@ function flaggedValue(day: OverviewDay, metric: ChartMetric): number {
 }
 
 function formatDay(date: string): string {
+  if (date === "earlier") return "更早";
   const parts = date.split("-");
   return `${parts[1]}/${parts[2]}`;
 }
@@ -44,9 +45,9 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
         <div>
           <h2 className="chart-title">消耗趋势</h2>
           <p className="chart-desc">
-            按 UTC 日期归桶
+            按 UTC 日期归桶（跨日会话按每轮结束时间拆分）
             {rangeLabel ? ` · ${rangeLabel}` : ""}
-            。不是逐 token 实时扣费。
+            。窗口外的用量记在「更早」。不是逐 token 实时扣费。
           </p>
         </div>
         <div className="metric-switch" role="group" aria-label="趋势单位">
@@ -101,7 +102,10 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
                 </div>
                 <div className="chart-tooltip">
                   <strong>
-                    {day.date} UTC · {formatChartNumber(total, metric)}
+                    {day.date === "earlier"
+                      ? "窗口之前"
+                      : `${day.date} UTC`}{" "}
+                    · {formatChartNumber(total, metric)}
                   </strong>
                   <span>
                     账本警告 / 解析错误 {formatChartNumber(flagged, metric)}

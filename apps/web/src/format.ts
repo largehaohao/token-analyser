@@ -34,6 +34,9 @@ export function formatUnitSuffix(unit: CostUnit): string {
 
 export function formatPercent(n: number, digits = 1): string {
   if (!Number.isFinite(n)) return "—";
+  if (n === 0) return `${(0).toFixed(digits)}%`;
+  const min = 10 ** -digits;
+  if (Math.abs(n) < min) return `<${min.toFixed(digits)}%`;
   return `${n.toFixed(digits)}%`;
 }
 
@@ -65,9 +68,9 @@ export function wasteShare(
   const totalValue = costValue(total, unit);
   const wasteValue = costValue(waste, unit);
   if (totalValue == null || wasteValue == null) {
-    return unit === "tokens" ? "0%" : wasteShare(waste, total, "tokens");
+    return unit === "tokens" ? formatPercent(0) : wasteShare(waste, total, "tokens");
   }
-  if (totalValue === 0) return "0%";
+  if (totalValue === 0) return formatPercent(0);
   return formatPercent((100 * wasteValue) / totalValue);
 }
 
