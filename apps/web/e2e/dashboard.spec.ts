@@ -177,6 +177,7 @@ function overviewPayload(sessionCount: number) {
 test("ignores a stale overview after the range changes", async ({ page }) => {
   let release7d!: () => void;
   let sevenRequested!: () => void;
+  let sevenFulfilled = false;
   const gate = new Promise<void>((resolve) => {
     release7d = resolve;
   });
@@ -184,16 +185,20 @@ test("ignores a stale overview after the range changes", async ({ page }) => {
     sevenRequested = resolve;
   });
 
-  await page.route("**/overview**", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.get("days") === "8") {
-      sevenRequested();
-      await gate;
-      await route.fulfill({ json: overviewPayload(99) });
-      return;
-    }
-    await route.fulfill({ json: overviewPayload(0) });
-  });
+  await page.route(
+    (url) => url.pathname === "/overview",
+    async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("days") === "8") {
+        sevenRequested();
+        await gate;
+        await route.fulfill({ json: overviewPayload(99) });
+        sevenFulfilled = true;
+        return;
+      }
+      await route.fulfill({ json: overviewPayload(0) });
+    },
+  );
 
   await page.goto("/");
   await sevenReq;
@@ -202,6 +207,7 @@ test("ignores a stale overview after the range changes", async ({ page }) => {
   await expect(sessionKpi).toContainText("0", { timeout: 10_000 });
   await expect(page.getByText("该时间范围内没有会话")).toBeVisible();
   release7d();
+  await expect.poll(() => sevenFulfilled).toBe(true);
   await expect(sessionKpi).toContainText("0");
   await expect(sessionKpi).not.toContainText("99");
   await expect(page.getByTestId("overview-page")).toBeVisible();
