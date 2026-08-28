@@ -60,6 +60,9 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
   return (
     <div className="waste-toggles chart-card">
       <h3>浪费开关</h3>
+      <p className="chart-desc">
+        浪费是轮次集合，同一轮只计一次。默认打开可避免的异常，不是所有贵的工作。
+      </p>
       <div className="toggle-grid">
         {TOGGLE_LABELS.map(({ id, label }) => (
           <label key={id}>

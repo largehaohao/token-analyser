@@ -1,3 +1,5 @@
+import { allocatePercents } from "./format";
+
 export type MixSegment = {
   key: string;
   value: number;
@@ -12,21 +14,27 @@ type Props = {
 };
 
 export function MixBar({ segments, label, className, testId }: Props) {
-  const total = segments.reduce((sum, seg) => sum + Math.max(0, seg.value), 0);
+  const values = segments.map((seg) => Math.max(0, seg.value));
+  const total = values.reduce((sum, value) => sum + value, 0);
+  const percents = allocatePercents(values);
   const classes = className ? `mix-bar ${className}` : "mix-bar";
+  const detail = segments
+    .map((seg, i) => `${seg.key} ${percents[i].toFixed(1)}%`)
+    .join(" · ");
 
   return (
     <div
       className={classes}
       role="img"
-      aria-label={label}
+      aria-label={`${label}. ${detail}`}
+      title={total === 0 ? label : `${label} · ${detail}`}
       data-testid={testId}
     >
       {total === 0 ? (
         <span className="mix-seg empty" style={{ width: "100%" }} />
       ) : (
-        segments.map((seg) => {
-          const pct = (100 * Math.max(0, seg.value)) / total;
+        segments.map((seg, i) => {
+          const pct = percents[i];
           if (pct <= 0) return null;
           return (
             <span
