@@ -6,10 +6,12 @@ import {
   disclaimer,
   formatCost,
   formatPercent,
+  unpricedNote,
+  unpricedRawFromTurns,
   wasteShare,
 } from "./format";
 import { ContextProfileCard } from "./ContextProfile";
-import { CostTree, collectTurnIds, findNodeById, findNodeForTurnId } from "./CostTree";
+import { CostTree, collectTurnIds, findNodeById, suggestionTarget } from "./CostTree";
 import { MixBar } from "./MixBar";
 import { RateLimits } from "./RateLimits";
 import { WasteToggles } from "./WasteToggles";
@@ -39,6 +41,7 @@ export function SessionView({
 }: Props) {
   const { unit } = useUnit();
   const [highlightTurnId, setHighlightTurnId] = useState<string | null>(null);
+  const [highlightNonce, setHighlightNonce] = useState(0);
 
   useEffect(() => {
     setHighlightTurnId(null);
@@ -56,13 +59,14 @@ export function SessionView({
   const tokenWaste = wasteShare(snapshot.waste, snapshot.cost, "tokens");
   const unitWaste = wasteShare(snapshot.waste, snapshot.cost, unit);
   const suggestions = snapshot.suggestions.slice(0, 3);
+  const unpriced = unpricedNote(unpricedRawFromTurns(turns));
 
   function handleSuggestionClick(ids: string[]) {
-    const first = ids[0];
-    if (!first) return;
-    setHighlightTurnId(first);
-    const node = findNodeForTurnId(snapshot.tree, first);
-    if (node && node.kind !== "root") onSelectNode(node.id);
+    const target = suggestionTarget(snapshot.tree, ids);
+    if (!target) return;
+    setHighlightTurnId(target.turnId);
+    setHighlightNonce((n) => n + 1);
+    onSelectNode(target.nodeId);
   }
 
   return (
@@ -97,7 +101,8 @@ export function SessionView({
           </span>
         )}
         <span>
-          · <RelativeTime iso={snapshot.startedAt ?? snapshot.lastEventAt} />
+          · 最近活动{" "}
+          <RelativeTime iso={snapshot.lastEventAt ?? snapshot.startedAt} />
         </span>
         {hit != null && <span>· 缓存命中 {formatPercent(100 * hit)}</span>}
       </p>
@@ -110,6 +115,7 @@ export function SessionView({
               {formatCost(snapshot.cost, unit)}
             </span>
           </div>
+          {unpriced ? <p className="headline-note">{unpriced}</p> : null}
           <div className="headline-row">
             <span className="headline-label">浪费</span>
             <span className="headline-value waste" data-testid="waste-headline">
@@ -183,6 +189,7 @@ export function SessionView({
           turns={turns}
           turnIds={turnIds}
           highlightTurnId={highlightTurnId}
+          highlightNonce={highlightNonce}
           resetKey={`${snapshot.id}:${selectedNodeId ?? ""}`}
         />
       </div>

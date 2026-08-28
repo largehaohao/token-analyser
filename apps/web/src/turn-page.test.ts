@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   TURN_PAGE_SIZE,
+  highlightScrollBehavior,
   limitIncludingId,
   nextTurnLimit,
   visibleTurns,
@@ -22,5 +23,10 @@ describe("turn paging", () => {
   it("expands the prefix far enough to include a highlighted turn", () => {
     expect(limitIncludingId(turns, 200, "t249")).toBe(400);
     expect(limitIncludingId(turns, 200, "t10")).toBe(200);
+  });
+
+  it("skips smooth scrolling when the user prefers reduced motion", () => {
+    expect(highlightScrollBehavior(true)).toBe("auto");
+    expect(highlightScrollBehavior(false)).toBe("smooth");
   });
 });

@@ -1,5 +1,11 @@
 export const TURN_PAGE_SIZE = 200;
 
+export function highlightScrollBehavior(
+  reduceMotion: boolean,
+): ScrollBehavior {
+  return reduceMotion ? "auto" : "smooth";
+}
+
 export function nextTurnLimit(
   current: number,
   total: number,

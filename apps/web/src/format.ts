@@ -2,6 +2,14 @@ import type { Cost } from "./api";
 
 export type CostUnit = "tokens" | "credits" | "usd";
 
+const relativeFormatter = new Intl.RelativeTimeFormat("zh-CN", {
+  numeric: "auto",
+});
+
+function relativeTimeFormat(): Intl.RelativeTimeFormat {
+  return relativeFormatter;
+}
+
 export function costValue(cost: Cost, unit: CostUnit): number | null {
   if (unit === "tokens") return cost.raw;
   if (unit === "credits") return cost.credits;
@@ -69,6 +77,16 @@ export function unpricedNote(unpricedRaw: number): string {
   return `另有 ${formatExactTokens(unpricedRaw)} tokens 未定价`;
 }
 
+export function unpricedRawFromTurns(
+  turns: Array<{ cost: { raw: number; credits: number | null } }>,
+): number {
+  let raw = 0;
+  for (const turn of turns) {
+    if (turn.cost.credits == null) raw += turn.cost.raw;
+  }
+  return raw;
+}
+
 export function wasteShare(
   waste: Cost,
   total: Cost,
@@ -118,6 +136,13 @@ export function formatChartNumber(
   return `$${n.toFixed(2)}`;
 }
 
+export function activityTimestamp(session: {
+  startedAt: string | null;
+  lastEventAt: string | null;
+}): string | null {
+  return session.lastEventAt ?? session.startedAt;
+}
+
 export function formatRelativeTime(
   iso: string | null,
   nowMs = Date.now(),
@@ -127,7 +152,7 @@ export function formatRelativeTime(
   if (!Number.isFinite(t)) return "—";
   const deltaSec = Math.round((nowMs - t) / 1000);
   const abs = Math.abs(deltaSec);
-  const rtf = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
+  const rtf = relativeTimeFormat();
   if (abs < 60) return rtf.format(-deltaSec, "second");
   if (abs < 3600) return rtf.format(-Math.round(deltaSec / 60), "minute");
   if (abs < 86_400) return rtf.format(-Math.round(deltaSec / 3600), "hour");

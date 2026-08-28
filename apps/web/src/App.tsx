@@ -17,6 +17,8 @@ import { RangeSwitcher } from "./RangeSwitcher";
 import { SessionList } from "./SessionList";
 import { SessionView } from "./SessionView";
 import { UnitSwitcher } from "./UnitSwitcher";
+import { NowProvider, useNow } from "./useNow";
+import { resolveSelectedSession } from "./session-page";
 import {
   DEFAULT_SESSION_RANGE,
   SESSION_RANGES,
@@ -32,7 +34,8 @@ const STREAM_LABEL: Record<StreamStatus, string> = {
   error: "未连接",
 };
 
-export function App() {
+function AppShell() {
+  const now = useNow();
   const [view, setView] = useState<View>("overview");
   const [unit, setUnit] = useState<CostUnit>("tokens");
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -48,6 +51,7 @@ export function App() {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const listRequest = useRef(0);
   const sessionRequest = useRef(0);
+  const overviewRequest = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
   const viewRef = useRef<View>(view);
   const rangeRef = useRef<SessionRangeId>(range);
@@ -56,19 +60,23 @@ export function App() {
   rangeRef.current = range;
 
   const visibleSessions = useMemo(
-    () => filterSessionsByRange(sessions, range, Date.now()),
-    [sessions, range],
+    () => filterSessionsByRange(sessions, range, now),
+    [sessions, range, now],
   );
   const rangeLabel =
     SESSION_RANGES.find((item) => item.id === range)?.label ?? range;
 
   const refreshOverview = useCallback(async () => {
+    const requestId = ++overviewRequest.current;
+    const requestedRange = rangeRef.current;
     try {
-      const data = await getOverview(rangeRef.current);
+      const data = await getOverview(requestedRange);
+      if (requestId !== overviewRequest.current) return data;
       setOverview(data);
       setOverviewError(null);
       return data;
     } catch (err) {
+      if (requestId !== overviewRequest.current) throw err;
       setOverviewError(err instanceof Error ? err.message : String(err));
       throw err;
     }
@@ -79,20 +87,6 @@ export function App() {
     const list = await listSessions();
     if (requestId === listRequest.current) {
       setSessions(list);
-      setSelectedId((current) => {
-        if (current && list.some((session) => session.id === current)) {
-          return current;
-        }
-        if (viewRef.current === "sessions") {
-          const visible = filterSessionsByRange(
-            list,
-            rangeRef.current,
-            Date.now(),
-          );
-          return visible[0]?.id ?? null;
-        }
-        return null;
-      });
     }
     return list;
   }, []);
@@ -116,6 +110,16 @@ export function App() {
   useEffect(() => {
     void refreshList().catch(() => undefined);
   }, [refreshList]);
+
+  useEffect(() => {
+    if (view !== "sessions") return;
+    const nextId = resolveSelectedSession(selectedId, visibleSessions);
+    if (nextId === selectedId) return;
+    setSelectedId(nextId);
+    setSelectedNodeId(null);
+    setContextOpen(null);
+    if (!nextId) setSnapshot(null);
+  }, [visibleSessions, selectedId, view]);
 
   useEffect(() => {
     sessionRequest.current += 1;
@@ -166,7 +170,9 @@ export function App() {
 
   function openSessions() {
     setView("sessions");
-    setSelectedId((current) => current ?? visibleSessions[0]?.id ?? null);
+    setSelectedId((current) =>
+      resolveSelectedSession(current, visibleSessions),
+    );
   }
 
   return (
@@ -245,7 +251,7 @@ export function App() {
               onImport={handleImport}
             />
             <main className="main-panel">
-              {snapshot ? (
+              {snapshot && selectedId === snapshot.id ? (
                 <SessionView
                   snapshot={snapshot}
                   selectedNodeId={selectedNodeId}
@@ -262,5 +268,13 @@ export function App() {
         )}
       </div>
     </UnitProvider>
+  );
+}
+
+export function App() {
+  return (
+    <NowProvider>
+      <AppShell />
+    </NowProvider>
   );
 }

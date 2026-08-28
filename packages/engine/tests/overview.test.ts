@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Bucket, Cost, SessionSnapshot, Turn } from "../src/types.ts";
 import { DEFAULT_WASTE_TOGGLES } from "../src/types.ts";
-import { buildTree, sumTurns } from "../src/tree.ts";
+import { buildTree } from "../src/tree.ts";
 import { buildOverview } from "../src/overview.ts";
 
 function cost(raw: number): Cost {
@@ -102,8 +102,15 @@ describe("buildOverview", () => {
         session({
           id: "a",
           startedAt: "2026-08-27T10:00:00.000Z",
-          turns: [turn({ id: "t1", bucket: "code", raw: 1000 })],
-          wasteRaw: 100,
+          turns: [
+            turn({ id: "t1", bucket: "code", raw: 1000 }),
+            turn({
+              id: "w1",
+              bucket: "waiting.poll",
+              raw: 100,
+              startedAt: "2026-08-27T10:00:00.000Z",
+            }),
+          ],
         }),
         session({
           id: "b",
@@ -115,8 +122,8 @@ describe("buildOverview", () => {
     );
 
     expect(overview.sessionCount).toBe(2);
-    expect(overview.turnCount).toBe(2);
-    expect(overview.cost.raw).toBe(1500);
+    expect(overview.turnCount).toBe(3);
+    expect(overview.cost.raw).toBe(1600);
     expect(overview.waste.raw).toBe(100);
     expect(overview.watchPath).toBe("/Users/zhanghao/.codex");
     expect(overview.slices.find((s) => s.key === "code")?.raw).toBe(1000);
@@ -190,7 +197,14 @@ describe("buildOverview", () => {
         session({
           id: "new",
           startedAt: "2026-08-28T10:00:00.000Z",
-          turns: [turn({ id: "t2", bucket: "planning", raw: 500 })],
+          turns: [
+            turn({
+              id: "t2",
+              bucket: "planning",
+              raw: 500,
+              startedAt: "2026-08-28T10:00:00.000Z",
+            }),
+          ],
         }),
       ],
       {
@@ -294,7 +308,14 @@ describe("buildOverview", () => {
         session({
           id: "new",
           startedAt: "2026-08-28T10:00:00.000Z",
-          turns: [turn({ id: "t2", bucket: "planning", raw: 40 })],
+          turns: [
+            turn({
+              id: "t2",
+              bucket: "planning",
+              raw: 40,
+              startedAt: "2026-08-28T10:00:00.000Z",
+            }),
+          ],
         }),
       ],
       {
@@ -339,12 +360,11 @@ describe("buildOverview", () => {
       },
     );
     expect(overview.sessionCount).toBe(1);
-    expect(overview.cost.raw).toBe(9100);
+    expect(overview.cost.raw).toBe(9000);
     expect(overview.days.find((d) => d.date === "2026-08-28")?.cost.raw).toBe(
       9000,
     );
-    expect(overview.days[0]?.date).toBe("earlier");
-    expect(overview.days[0]?.cost.raw).toBe(100);
+    expect(overview.days.find((d) => d.date === "earlier")).toBeUndefined();
   });
 
   it("does not let one unpriced turn wipe a day's known credits", () => {
@@ -379,6 +399,11 @@ describe("buildOverview", () => {
     expect(today.cost.raw).toBe(10_050);
     expect(today.cost.credits).toBeCloseTo(100, 5);
     expect(today.cost.usd).not.toBeNull();
+    expect(today.unpricedRaw).toBe(50);
+    expect(overview.slices.find((s) => s.key === "code")?.credits).toBeCloseTo(
+      100,
+      5,
+    );
   });
 
   it("keeps a fully unpriced day as null money instead of zero", () => {
@@ -431,5 +456,59 @@ describe("buildOverview", () => {
     expect(overview.days.at(-1)?.date).toBe("later");
     expect(overview.days.at(-1)?.cost.raw).toBe(500);
     expect(overview.days.find((d) => d.date === "earlier")).toBeUndefined();
+  });
+
+  it("counts only in-window waste and keeps known waste credits", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "mix-waste",
+          startedAt: "2026-07-19T09:00:00.000Z",
+          lastEventAt: "2026-08-28T11:00:00.000Z",
+          wasteRaw: 0,
+          turns: [
+            turn({
+              id: "old-poll",
+              bucket: "waiting.poll",
+              raw: 80,
+              startedAt: "2026-07-19T09:00:00.000Z",
+            }),
+            turn({
+              id: "today-poll",
+              bucket: "waiting.poll",
+              raw: 20,
+              startedAt: "2026-08-28T11:00:00.000Z",
+            }),
+            turn({
+              id: "today-unknown",
+              bucket: "waiting.poll",
+              raw: 40,
+              startedAt: "2026-08-28T11:30:00.000Z",
+              priced: false,
+            }),
+          ],
+        }),
+      ],
+      {
+        watchPath: "/tmp",
+        now: "2026-08-28T12:00:00.000Z",
+        sinceMs: Date.parse("2026-08-21T12:00:00.000Z"),
+        dayCount: 8,
+      },
+    );
+    expect(overview.cost.raw).toBe(60);
+    expect(overview.waste.raw).toBe(60);
+    expect(overview.waste.credits).toBeCloseTo(0.2, 5);
+  });
+
+  it("uses zero money, not null, on empty chart days", () => {
+    const overview = buildOverview([], {
+      watchPath: "/tmp",
+      now: "2026-08-28T12:00:00.000Z",
+      dayCount: 2,
+    });
+    expect(overview.cost.credits).toBe(0);
+    expect(overview.days[0]?.cost.credits).toBe(0);
+    expect(overview.days[0]?.unpricedRaw).toBe(0);
   });
 });

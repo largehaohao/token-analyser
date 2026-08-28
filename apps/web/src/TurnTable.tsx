@@ -6,6 +6,7 @@ import { MixBar } from "./MixBar";
 import { TurnSparkline } from "./TurnSparkline";
 import {
   TURN_PAGE_SIZE,
+  highlightScrollBehavior,
   limitIncludingId,
   nextTurnLimit,
   visibleTurns,
@@ -15,6 +16,7 @@ type Props = {
   turns: Turn[];
   turnIds: Set<string>;
   highlightTurnId: string | null;
+  highlightNonce?: number;
   resetKey: string;
 };
 
@@ -28,7 +30,13 @@ function formatTools(turn: Turn): string {
   return turn.tools.map((t) => `${t.name}(${t.input})`).join(", ");
 }
 
-export function TurnTable({ turns, turnIds, highlightTurnId, resetKey }: Props) {
+export function TurnTable({
+  turns,
+  turnIds,
+  highlightTurnId,
+  highlightNonce = 0,
+  resetKey,
+}: Props) {
   const filtered = useMemo(
     () =>
       turns
@@ -48,11 +56,14 @@ export function TurnTable({ turns, turnIds, highlightTurnId, resetKey }: Props) 
 
   useEffect(() => {
     if (!highlightTurnId) return;
+    const reduceMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     rowRefs.current.get(highlightTurnId)?.scrollIntoView({
       block: "nearest",
-      behavior: "smooth",
+      behavior: highlightScrollBehavior(reduceMotion),
     });
-  }, [highlightTurnId]);
+  }, [highlightTurnId, highlightNonce]);
 
   return (
     <div className="turn-table-wrap chart-card">

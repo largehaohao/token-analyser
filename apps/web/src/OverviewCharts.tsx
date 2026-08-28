@@ -5,7 +5,10 @@ import {
   barHeightPct,
   chartDayTooltip,
   chartMax,
+  dayHasMixedUnpriced,
   dayMetricValue,
+  dayUnpricedRaw,
+  flaggedValue,
   formatChartDay,
   isOverflowDate,
   shouldLabelChartDay,
@@ -20,11 +23,10 @@ import {
 } from "./format";
 import { useUnit } from "./UnitContext";
 
-function flaggedValue(day: OverviewDay, metric: ChartMetric): number {
-  if (metric === "tokens") return day.flaggedCost.raw;
-  const money =
-    metric === "credits" ? day.flaggedCost.credits : day.flaggedCost.usd;
-  return money ?? 0;
+function flaggedLabel(day: OverviewDay, metric: ChartMetric): string {
+  const flagged = flaggedValue(day, metric);
+  if (flagged == null) return "未定价";
+  return formatChartNumber(flagged, metric);
 }
 
 type TrendProps = {
@@ -40,7 +42,9 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
   const ticks = [max, max / 2, 0];
   const dates = days.map((day) => day.date);
   const hasUnpriced = days.some(
-    (day) => dayMetricValue(day, metric) == null && day.cost.raw > 0,
+    (day) =>
+      (dayMetricValue(day, metric) == null && day.cost.raw > 0) ||
+      dayHasMixedUnpriced(day, metric),
   );
 
   return (
@@ -67,20 +71,26 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
             const total = dayMetricValue(day, metric);
             const flagged = flaggedValue(day, metric);
             const bar = barHeightPct(total, day.cost.raw, max);
+            const mixed = dayHasMixedUnpriced(day, metric);
+            const unpricedRaw = dayUnpricedRaw(day);
             const flagShare =
-              total != null && total > 0 ? (100 * flagged) / total : 0;
+              total != null && total > 0 && flagged != null
+                ? (100 * flagged) / total
+                : 0;
             return (
               <div
                 key={day.date}
                 className={`trend-col${isOverflowDate(day.date) ? " overflow" : ""}`}
+                tabIndex={0}
               >
                 <div
-                  className={`trend-stack${bar.unpriced ? " unpriced" : ""}`}
+                  className={`trend-stack${bar.unpriced ? " unpriced" : ""}${mixed ? " mixed-unpriced" : ""}`}
                   style={{
                     height: `${Math.max(bar.height, bar.unpriced || (total ?? 0) > 0 ? 2 : 0)}%`,
                   }}
                 >
-                  {!bar.unpriced && flagged > 0 && (
+                  {mixed && <span className="trend-unpriced-mix" />}
+                  {!bar.unpriced && flagged != null && flagged > 0 && (
                     <span
                       className="trend-flag"
                       style={{ height: `${flagShare}%` }}
@@ -101,10 +111,11 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
                       ? "未定价"
                       : formatChartNumber(total, metric)}
                   </strong>
-                  <span>
-                    账本警告 / 解析错误 {formatChartNumber(flagged, metric)}
-                  </span>
+                  <span>账本警告 / 解析错误 {flaggedLabel(day, metric)}</span>
                   <span>{formatExactTokens(day.cost.raw)} tokens</span>
+                  {unpricedRaw > 0 && total != null && (
+                    <span>另有 {formatExactTokens(unpricedRaw)} tokens 未定价</span>
+                  )}
                 </div>
                 <span className="trend-label">
                   {shouldLabelChartDay(day.date, dates)
@@ -157,7 +168,7 @@ export function DonutChart({
           className="donut"
           viewBox="0 0 200 200"
           role="img"
-          aria-label="Token allocation"
+          aria-label="Token 花在哪里"
         >
           <circle
             cx="100"
@@ -213,20 +224,22 @@ export function DonutChart({
         </svg>
         <ul className="donut-legend">
           {slices.map((slice, i) => (
-            <li
-              key={slice.key}
-              className={hoverKey === slice.key ? "hot" : ""}
-              onMouseEnter={() => setHoverKey(slice.key)}
-              onMouseLeave={() => setHoverKey(null)}
-              title={`${formatExactTokens(slice.raw)} tokens`}
-            >
-              <i
-                className="legend-dot"
-                style={{ background: SLICE_META[slice.key].color }}
-              />
-              <span>{SLICE_META[slice.key].label}</span>
-              <em>{formatExactTokens(slice.raw)}</em>
-              <strong>{formatPercent(percents[i])}</strong>
+            <li key={slice.key} className={hoverKey === slice.key ? "hot" : ""}>
+              <button
+                type="button"
+                onMouseEnter={() => setHoverKey(slice.key)}
+                onMouseLeave={() => setHoverKey(null)}
+                onFocus={() => setHoverKey(slice.key)}
+                onBlur={() => setHoverKey(null)}
+              >
+                <i
+                  className="legend-dot"
+                  style={{ background: SLICE_META[slice.key].color }}
+                />
+                <span>{SLICE_META[slice.key].label}</span>
+                <em>{formatExactTokens(slice.raw)}</em>
+                <strong>{formatPercent(percents[i])}</strong>
+              </button>
             </li>
           ))}
         </ul>

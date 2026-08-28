@@ -3,7 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { buildTree } from "./tree.ts";
 import { computeWaste } from "./waste.ts";
 import { ingestFile, type IngestOptions } from "./ingest.ts";
-import { isLive } from "./cache.ts";
+import { isLive, pruneStaleCache } from "./cache.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
   type SessionListItem,
@@ -69,6 +69,7 @@ export class SessionStore {
     if (opts?.cacheDir) {
       this.cacheHome = path.dirname(opts.cacheDir);
     }
+    pruneStaleCache(this.cacheHome);
   }
 
   private rebuildAll(): void {

@@ -883,6 +883,11 @@ input {
   cursor: pointer;
 }
 
+.load-more:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .session-list:focus-visible {
   outline: 1px solid #3d5a40;
 }
@@ -1191,6 +1196,19 @@ input {
   opacity: 0.85;
 }
 
+.trend-unpriced-mix {
+  display: block;
+  width: 100%;
+  height: 5px;
+  background: repeating-linear-gradient(
+    -45deg,
+    #243024,
+    #243024 2px,
+    #7dffb3 2px,
+    #7dffb3 4px
+  );
+}
+
 .trend-col.overflow .trend-stack {
   outline: 1px dashed #3d4a3d;
   outline-offset: 1px;
@@ -1253,16 +1271,36 @@ input {
 .donut-legend li {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
   margin-bottom: 0.45rem;
   font-size: 13px;
   color: #c5d0c5;
-  cursor: default;
   border-radius: 8px;
-  padding: 0.15rem 0.25rem;
+  padding: 0;
 }
 
-.donut-legend li.hot {
+.donut-legend button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.15rem 0.25rem;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.donut-legend button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.donut-legend li.hot,
+.donut-legend li.hot button {
   background: #1c261c;
 }
 
@@ -1369,8 +1407,16 @@ input {
   display: block;
 }
 
-.trend-col:hover .chart-tooltip {
+.trend-col:hover .chart-tooltip,
+.trend-col:focus .chart-tooltip,
+.trend-col:focus-within .chart-tooltip {
   display: block;
+}
+
+.headline-note {
+  margin: 0 0 0.45rem;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .kpi-button:hover,

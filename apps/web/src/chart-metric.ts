@@ -17,6 +17,32 @@ export function dayMetricValue(
   return money;
 }
 
+export function flaggedValue(
+  day: OverviewDay,
+  metric: ChartMetric,
+): number | null {
+  if (metric === "tokens") return day.flaggedCost.raw;
+  const money =
+    metric === "credits" ? day.flaggedCost.credits : day.flaggedCost.usd;
+  if (money == null && day.flaggedCost.raw === 0) return 0;
+  return money;
+}
+
+export function dayUnpricedRaw(day: OverviewDay): number {
+  return day.unpricedRaw ?? 0;
+}
+
+export function dayHasMixedUnpriced(
+  day: OverviewDay,
+  metric: ChartMetric,
+): boolean {
+  return (
+    dayUnpricedRaw(day) > 0 &&
+    dayMetricValue(day, metric) != null &&
+    day.cost.raw > 0
+  );
+}
+
 export function chartMax(values: Array<number | null>): number {
   const known = values.filter((value): value is number => value != null && value > 0);
   return Math.max(...known, 1);
