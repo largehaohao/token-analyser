@@ -363,6 +363,28 @@ export async function startServer(opts?: {
       return;
     }
 
+    if (req.method === "GET" && parts[0] === "overview" && parts.length === 1) {
+      const config = loadUserConfig();
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const sinceRaw = url.searchParams.get("since");
+      const daysRaw = url.searchParams.get("days");
+      const sinceMs = sinceRaw ? Date.parse(sinceRaw) : Number.NaN;
+      const dayCount = daysRaw ? Number(daysRaw) : Number.NaN;
+      sendJson(
+        res,
+        200,
+        store.overview({
+          watchPath: config.watch_paths[0] ?? "",
+          collecting: process.env.FIXTURE_DIR == null,
+          ...(Number.isFinite(sinceMs) ? { sinceMs } : {}),
+          ...(Number.isFinite(dayCount) && dayCount > 0
+            ? { dayCount: Math.min(60, Math.floor(dayCount)) }
+            : {}),
+        }),
+      );
+      return;
+    }
+
     if (req.method === "GET" && parts[0] === "sessions" && parts.length === 2) {
       const snap = store.get(parts[1]!);
       if (!snap) {

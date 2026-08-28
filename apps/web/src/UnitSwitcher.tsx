@@ -2,16 +2,16 @@ import { useUnit } from "./UnitContext";
 import type { CostUnit } from "./format";
 
 const UNITS: { id: CostUnit; label: string }[] = [
-  { id: "tokens", label: "tokens" },
-  { id: "credits", label: "credits" },
-  { id: "usd", label: "usd" },
+  { id: "tokens", label: "Tokens" },
+  { id: "credits", label: "Credits" },
+  { id: "usd", label: "费用" },
 ];
 
 export function UnitSwitcher() {
   const { unit, setUnit } = useUnit();
 
   return (
-    <div className="unit-switcher">
+    <div className="metric-switch">
       {UNITS.map((u) => (
         <button
           key={u.id}

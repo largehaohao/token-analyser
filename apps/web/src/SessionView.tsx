@@ -1,7 +1,10 @@
 import type { SessionSnapshot, Turn } from "./api";
 import { useUnit } from "./UnitContext";
-import { formatCost, disclaimer } from "./format";
+import { formatCost, disclaimer, wasteShare } from "./format";
+import { ContextProfileCard } from "./ContextProfile";
 import { CostTree, collectTurnIds, findNodeById } from "./CostTree";
+import { MixBar } from "./MixBar";
+import { RateLimits } from "./RateLimits";
 import { WasteToggles } from "./WasteToggles";
 import { TurnTable } from "./TurnTable";
 
@@ -10,6 +13,8 @@ type Props = {
   selectedNodeId: string | null;
   onSelectNode: (id: string) => void;
   onUpdate: (snap: SessionSnapshot) => void;
+  contextOpen: "tools" | "skills" | null;
+  onContextOpen: (id: "tools" | "skills" | null) => void;
 };
 
 function flattenTurns(snap: SessionSnapshot): Turn[] {
@@ -21,6 +26,8 @@ export function SessionView({
   selectedNodeId,
   onSelectNode,
   onUpdate,
+  contextOpen,
+  onContextOpen,
 }: Props) {
   const { unit } = useUnit();
 
@@ -57,7 +64,7 @@ export function SessionView({
     <div className="session-view">
       {snapshot.ledger_warning && (
         <div className="banner ledger-warning">
-          Ledger warning: token usage may not reconcile with recorded costs.
+          账本警告：用量可能与记录费用对不上。
         </div>
       )}
       {(snapshot.parse_errors ?? []).length > 0 && (
@@ -71,28 +78,50 @@ export function SessionView({
       )}
 
       <header className="session-headline">
-        <div className="headline-main">
+        <div className="chart-card headline-main">
           <div className="headline-row">
-            <span className="headline-label">Total</span>
+            <span className="headline-label">总量</span>
             <span className="headline-value">
               {formatCost(snapshot.cost, unit)}
             </span>
           </div>
           <div className="headline-row">
-            <span className="headline-label">Waste</span>
+            <span className="headline-label">浪费</span>
             <span className="headline-value waste" data-testid="waste-headline">
               {formatCost(snapshot.waste, unit)}
             </span>
           </div>
+          <MixBar
+            className="headline-mix"
+            testId="headline-mix"
+            label={`Waste ${wasteShare(snapshot.waste, snapshot.cost)}`}
+            segments={[
+              {
+                key: "useful",
+                value: Math.max(0, snapshot.cost.raw - snapshot.waste.raw),
+                className: "useful",
+              },
+              { key: "waste", value: snapshot.waste.raw, className: "waste" },
+            ]}
+          />
+          <div className="headline-legend">
+            <span className="swatch useful" /> 有效
+            <span className="swatch waste" /> 浪费 {wasteShare(snapshot.waste, snapshot.cost)}
+          </div>
           <p className="disclaimer">{disclaimer(snapshot.rateCardAsOf)}</p>
         </div>
-        {snapshot.rate_limits != null && (
-          <aside className="rate-limits">
-            <h3>Rate limits</h3>
-            <pre>{JSON.stringify(snapshot.rate_limits, null, 2)}</pre>
-          </aside>
-        )}
+        {snapshot.rate_limits != null && <RateLimits raw={snapshot.rate_limits} />}
       </header>
+      <ContextProfileCard
+        profile={
+          snapshot.context ?? {
+            tools: { chars: 0, items: [] },
+            skills: { chars: 0, items: [] },
+          }
+        }
+        open={contextOpen}
+        onOpen={onContextOpen}
+      />
 
       <div className="session-body">
         <div className="session-left">
@@ -103,8 +132,8 @@ export function SessionView({
           />
           <WasteToggles snapshot={snapshot} onUpdate={onUpdate} />
           {suggestions.length > 0 && (
-            <div className="suggestions">
-              <h3>Suggestions</h3>
+            <div className="suggestions chart-card">
+              <h3>建议</h3>
               <ul>
                 {suggestions.map((s) => (
                   <li key={s.id}>

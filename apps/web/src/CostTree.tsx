@@ -36,6 +36,12 @@ function TreeRow({
       >
         <span className="tree-prefix">{prefix}{branch}</span>
         <span className="tree-label">{node.label}</span>
+        <span className="tree-bar" aria-hidden="true">
+          <span
+            className="tree-bar-fill"
+            style={{ width: `${Math.min(100, Math.max(0, node.percentOfParent))}%` }}
+          />
+        </span>
         <span
           className="tree-percent"
           {...(isRootChild ? { "data-percent": true } : {})}
@@ -61,8 +67,8 @@ function TreeRow({
 
 export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
   return (
-    <div className="cost-tree">
-      <h3>Cost tree</h3>
+    <div className="cost-tree chart-card">
+      <h3>成本树</h3>
       {tree.children.map((child, i) => (
         <TreeRow
           key={child.id}

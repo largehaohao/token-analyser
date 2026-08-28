@@ -134,6 +134,39 @@ describe("startServer", () => {
     }
   });
 
+  it("returns an overview of root sessions", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-overview-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    homes.push(dir);
+
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    seedStore(store, dir);
+
+    const server = await startServer({ port: 0, store });
+
+    try {
+      const res = await fetch(`${server.url}/overview`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        sessionCount: number;
+        turnCount: number;
+        slices: { key: string; raw: number }[];
+      };
+      expect(body.sessionCount).toBe(1);
+      expect(body.turnCount).toBeGreaterThan(0);
+      expect(body.slices.some((s) => s.key === "waiting" && s.raw > 0)).toBe(true);
+
+      const emptyRes = await fetch(
+        `${server.url}/overview?since=2099-01-01T00:00:00.000Z`,
+      );
+      expect(emptyRes.status).toBe(200);
+      const emptyBody = (await emptyRes.json()) as { sessionCount: number };
+      expect(emptyBody.sessionCount).toBe(0);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("returns 404 for unknown session", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "server-404-"));
     const store = new SessionStore({ cacheDir: path.join(dir, "cache") });

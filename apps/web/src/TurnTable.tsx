@@ -1,5 +1,7 @@
 import type { Turn } from "./api";
 import { formatCost } from "./format";
+import { MixBar } from "./MixBar";
+import { TurnSparkline } from "./TurnSparkline";
 
 type Props = {
   turns: Turn[];
@@ -22,20 +24,31 @@ export function TurnTable({ turns, turnIds }: Props) {
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 
   return (
-    <div className="turn-table-wrap">
-      <h3>Turns ({filtered.length})</h3>
+    <div className="turn-table-wrap chart-card">
+      <div className="turn-table-head">
+        <h3>轮次 ({filtered.length})</h3>
+        <TurnSparkline turns={filtered} />
+        {filtered.length > 0 && (
+          <div className="mix-legend">
+            <span className="swatch uncached" /> 未缓存
+            <span className="swatch cached" /> 缓存
+            <span className="swatch output" /> 输出
+          </div>
+        )}
+      </div>
       {filtered.length === 0 ? (
-        <p className="empty-turns">Select a tree node to view turns.</p>
+        <p className="empty-turns">选择成本树节点查看轮次。</p>
       ) : (
         <table className="turn-table">
           <thead>
             <tr>
-              <th>Time</th>
-              <th>Tools</th>
-              <th>Prompt</th>
-              <th>Uncached</th>
-              <th>Cached</th>
-              <th>Output</th>
+              <th>时间</th>
+              <th>工具</th>
+              <th>提示</th>
+              <th>构成</th>
+              <th>未缓存</th>
+              <th>缓存</th>
+              <th>输出</th>
               <th>Credits</th>
               <th>$</th>
             </tr>
@@ -46,6 +59,29 @@ export function TurnTable({ turns, turnIds }: Props) {
                 <td>{new Date(t.startedAt).toLocaleTimeString()}</td>
                 <td className="tools-col">{formatTools(t)}</td>
                 <td className="prompt-col">{excerpt(t.prompt, 80)}</td>
+                <td className="mix-col">
+                  <MixBar
+                    className="turn-mix"
+                    label="uncached / cached / output"
+                    segments={[
+                      {
+                        key: "uncached",
+                        value: t.cost.uncached_input,
+                        className: "uncached",
+                      },
+                      {
+                        key: "cached",
+                        value: t.cost.cached_input,
+                        className: "cached",
+                      },
+                      {
+                        key: "output",
+                        value: t.cost.output,
+                        className: "output",
+                      },
+                    ]}
+                  />
+                </td>
                 <td>{t.cost.uncached_input.toLocaleString()}</td>
                 <td>{t.cost.cached_input.toLocaleString()}</td>
                 <td>{t.cost.output.toLocaleString()}</td>

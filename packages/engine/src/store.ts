@@ -10,6 +10,7 @@ import {
   type SessionSnapshot,
   type WasteToggleId,
 } from "./types.ts";
+import { buildOverview, type Overview, type OverviewOptions } from "./overview.ts";
 
 function rebuildDerived(snap: SessionSnapshot): SessionSnapshot {
   const label = snap.nickname ?? snap.id;
@@ -44,6 +45,10 @@ function toListItem(snap: SessionSnapshot): SessionListItem {
     parse_error_offset: snap.parse_errors[0]?.offset,
     parse_error_message: snap.parse_errors[0]?.message,
     ledger_warning: snap.ledger_warning,
+    toolsChars: snap.context?.tools.chars ?? 0,
+    toolsCount: snap.context?.tools.items.length ?? 0,
+    skillsChars: snap.context?.skills.chars ?? 0,
+    skillsCount: snap.context?.skills.items.length ?? 0,
   };
 }
 
@@ -160,7 +165,7 @@ export class SessionStore {
     return snap.id;
   }
 
-  list(): SessionListItem[] {
+  private rootSnapshots(): SessionSnapshot[] {
     this.refreshLiveFlags();
     const roots = [...this.snapshots.values()].filter(
       (s) => s.parentId == null || !this.sources.has(s.parentId),
@@ -171,7 +176,17 @@ export class SessionStore {
       const bTime = b.lastEventAt ?? "";
       return bTime.localeCompare(aTime);
     });
-    return roots.map(toListItem);
+    return roots;
+  }
+
+  list(): SessionListItem[] {
+    return this.rootSnapshots().map(toListItem);
+  }
+
+  overview(
+    opts: Pick<OverviewOptions, "watchPath" | "collecting" | "sinceMs" | "dayCount">,
+  ): Overview {
+    return buildOverview(this.rootSnapshots(), opts);
   }
 
   get(id: string): SessionSnapshot | undefined {

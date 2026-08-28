@@ -1,3 +1,5 @@
+import { overviewQuery, type SessionRangeId } from "./session-range";
+
 export type Cost = {
   raw: number;
   uncached_input: number;
@@ -63,6 +65,23 @@ export type Suggestion = {
   turnIds: string[];
 };
 
+export type ContextItem = {
+  name: string;
+  chars: number;
+  source?: string;
+  description?: string;
+};
+
+export type ContextBucket = {
+  chars: number;
+  items: ContextItem[];
+};
+
+export type ContextProfile = {
+  tools: ContextBucket;
+  skills: ContextBucket;
+};
+
 export type SessionSnapshot = {
   id: string;
   parentId: string | null;
@@ -86,6 +105,32 @@ export type SessionSnapshot = {
   turns: Turn[];
   children: SessionSnapshot[];
   suggestions: Suggestion[];
+  context?: ContextProfile;
+};
+
+export type OverviewSlice = {
+  key: "planning" | "code" | "reread" | "subagents" | "waiting" | "other";
+  raw: number;
+  credits: number | null;
+  usd: number | null;
+};
+
+export type OverviewDay = {
+  date: string;
+  cost: Cost;
+  flaggedCost: Cost;
+};
+
+export type Overview = {
+  sessionCount: number;
+  turnCount: number;
+  live: boolean;
+  collecting: boolean;
+  watchPath: string;
+  cost: Cost;
+  waste: Cost;
+  days: OverviewDay[];
+  slices: OverviewSlice[];
 };
 
 export type SessionListItem = {
@@ -104,6 +149,10 @@ export type SessionListItem = {
   parse_error_offset?: number;
   parse_error_message?: string;
   ledger_warning: boolean;
+  toolsChars: number;
+  toolsCount: number;
+  skillsChars: number;
+  skillsCount: number;
 };
 
 async function parseJson<T>(res: Response): Promise<T> {
@@ -118,6 +167,14 @@ export async function listSessions(): Promise<SessionListItem[]> {
     await fetch("/sessions"),
   );
   return body.sessions;
+}
+
+export async function getOverview(range: SessionRangeId = "7d"): Promise<Overview> {
+  const query = overviewQuery(range);
+  const params = new URLSearchParams();
+  if (query.since) params.set("since", query.since);
+  params.set("days", String(query.days));
+  return parseJson<Overview>(await fetch(`/overview?${params.toString()}`));
 }
 
 export async function getSession(id: string): Promise<SessionSnapshot> {

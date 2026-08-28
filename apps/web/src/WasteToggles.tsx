@@ -58,8 +58,8 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
   }
 
   return (
-    <div className="waste-toggles">
-      <h3>Waste toggles</h3>
+    <div className="waste-toggles chart-card">
+      <h3>浪费开关</h3>
       <div className="toggle-grid">
         {TOGGLE_LABELS.map(({ id, label }) => (
           <label key={id}>

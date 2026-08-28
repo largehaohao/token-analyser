@@ -3,6 +3,7 @@ import { classifyTurns } from "./classify.ts";
 import { detect } from "./detect.ts";
 import { buildTree } from "./tree.ts";
 import { computeWaste } from "./waste.ts";
+import { extractContextProfile } from "./context-profile.ts";
 import { loadRateCard } from "./rate-card.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
@@ -116,5 +117,6 @@ export function analyseSession(args: {
     turns,
     children,
     suggestions,
+    context: extractContextProfile(args.events),
   };
 }

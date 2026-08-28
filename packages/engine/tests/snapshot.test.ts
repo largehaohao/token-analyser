@@ -23,6 +23,10 @@ describe("analyseSession", () => {
     });
     expect(snap.turns[0].bucket).toBe("waiting.poll");
     expect(snap.waste.raw).toBe(snap.cost.raw);
+    expect(snap.context).toEqual({
+      tools: { chars: 0, items: [] },
+      skills: { chars: 0, items: [] },
+    });
     expect(
       snap.tree.children.find((c) => c.label === "waiting")!.percentOfParent,
     ).toBeCloseTo(100, 5);

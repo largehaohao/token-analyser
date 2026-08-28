@@ -1,3 +1,11 @@
+import type { ContextProfile } from "./context-profile.ts";
+
+export type {
+  ContextBucket,
+  ContextItem,
+  ContextProfile,
+} from "./context-profile.ts";
+
 export type TokenUsage = {
   input_tokens: number;
   cached_input_tokens: number;
@@ -126,6 +134,7 @@ export type SessionSnapshot = {
   turns: Turn[];
   children: SessionSnapshot[];
   suggestions: Suggestion[];
+  context?: ContextProfile;
 };
 
 export type SessionListItem = {
@@ -144,6 +153,10 @@ export type SessionListItem = {
   parse_error_offset?: number;
   parse_error_message?: string;
   ledger_warning: boolean;
+  toolsChars: number;
+  toolsCount: number;
+  skillsChars: number;
+  skillsCount: number;
 };
 
 export type SessionMeta = {
