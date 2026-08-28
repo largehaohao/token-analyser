@@ -12,6 +12,7 @@ import {
   formatChartDay,
   isOverflowDate,
   shouldLabelChartDay,
+  trendColumnAriaLabel,
   unitToChartMetric,
   type ChartMetric,
 } from "./chart-metric";
@@ -82,6 +83,8 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
                 key={day.date}
                 className={`trend-col${isOverflowDate(day.date) ? " overflow" : ""}`}
                 tabIndex={0}
+                role="img"
+                aria-label={trendColumnAriaLabel(day, metric)}
               >
                 <div
                   className={`trend-stack${bar.unpriced ? " unpriced" : ""}${mixed ? " mixed-unpriced" : ""}`}

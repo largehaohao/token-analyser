@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionListItem } from "./api";
 import { MixBar } from "./MixBar";
 import {
@@ -7,13 +7,17 @@ import {
   formatCost,
   formatRelativeTime,
   formatAbsoluteTime,
+  unpricedNote,
   wasteShare,
 } from "./format";
 import { useUnit } from "./UnitContext";
 import { useNow } from "./useNow";
 import {
   SESSION_PAGE_SIZE,
+  nextSessionIndex,
   nextSessionLimit,
+  sessionListIdentity,
+  shouldResetSessionLimit,
   visibleSessions,
 } from "./session-page";
 
@@ -47,6 +51,7 @@ export function SessionList({
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState(false);
   const [limit, setLimit] = useState(SESSION_PAGE_SIZE);
+  const listIdentity = sessionListIdentity(sessions);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -60,7 +65,15 @@ export function SessionList({
 
   useEffect(() => {
     setLimit(SESSION_PAGE_SIZE);
-  }, [sessions, query]);
+  }, [query]);
+
+  const prevIdentity = useRef(listIdentity);
+  useEffect(() => {
+    if (shouldResetSessionLimit(prevIdentity.current, listIdentity)) {
+      setLimit(SESSION_PAGE_SIZE);
+    }
+    prevIdentity.current = listIdentity;
+  }, [listIdentity]);
 
   const page = visibleSessions(filtered, limit);
 
@@ -92,10 +105,12 @@ export function SessionList({
     if (filtered.length === 0) return;
     e.preventDefault();
     const index = filtered.findIndex((s) => s.id === selectedId);
-    const next =
-      e.key === "ArrowDown"
-        ? filtered[Math.min(filtered.length - 1, Math.max(0, index) + 1)]
-        : filtered[Math.max(0, (index < 0 ? 1 : index) - 1)];
+    const nextIndex = nextSessionIndex(
+      filtered.length,
+      index,
+      e.key === "ArrowDown" ? "ArrowDown" : "ArrowUp",
+    );
+    const next = nextIndex >= 0 ? filtered[nextIndex] : undefined;
     if (next) {
       const needed = filtered.findIndex((s) => s.id === next.id) + 1;
       if (needed > limit) setLimit(nextSessionLimit(limit, filtered.length));
@@ -187,6 +202,11 @@ export function SessionList({
                           waste {wasteShare(s.waste, s.cost, unit)}
                         </span>
                       </div>
+                      {(s.unpricedRaw ?? 0) > 0 && (
+                        <div className="session-meta">
+                          {unpricedNote(s.unpricedRaw ?? 0)}
+                        </div>
+                      )}
                       <MixBar
                         className="waste-bar"
                         label={`浪费 ${wasteShare(s.waste, s.cost)}（按 token）`}

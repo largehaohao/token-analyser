@@ -511,4 +511,90 @@ describe("buildOverview", () => {
     expect(overview.days[0]?.cost.credits).toBe(0);
     expect(overview.days[0]?.unpricedRaw).toBe(0);
   });
+
+  it("keeps a parent whose child is still active in the window", () => {
+    const child = session({
+      id: "child",
+      startedAt: "2026-08-28T11:00:00.000Z",
+      lastEventAt: "2026-08-28T11:00:00.000Z",
+      turns: [
+        turn({
+          id: "c1",
+          bucket: "code",
+          raw: 80,
+          startedAt: "2026-08-28T11:00:00.000Z",
+        }),
+      ],
+    });
+    child.parentId = "parent";
+    const overview = buildOverview(
+      [
+        session({
+          id: "parent",
+          startedAt: "2026-07-01T10:00:00.000Z",
+          lastEventAt: "2026-07-01T10:00:00.000Z",
+          turns: [
+            turn({
+              id: "p1",
+              bucket: "planning",
+              raw: 20,
+              startedAt: "2026-07-01T10:00:00.000Z",
+            }),
+          ],
+          children: [child],
+        }),
+      ],
+      {
+        watchPath: "/tmp",
+        now: "2026-08-28T12:00:00.000Z",
+        sinceMs: Date.parse("2026-08-21T12:00:00.000Z"),
+        dayCount: 8,
+      },
+    );
+    expect(overview.sessionCount).toBe(1);
+    expect(overview.cost.raw).toBe(80);
+    expect(overview.days.find((d) => d.date === "earlier")).toBeUndefined();
+  });
+
+  it("classifies idle subagents from the full session, then keeps in-window waste", () => {
+    const child = session({
+      id: "child",
+      startedAt: "2026-07-19T09:00:00.000Z",
+      lastEventAt: "2026-08-28T11:00:00.000Z",
+      turns: [
+        turn({
+          id: "old-code",
+          bucket: "code",
+          raw: 200,
+          startedAt: "2026-07-19T09:00:00.000Z",
+        }),
+        turn({
+          id: "today-poll",
+          bucket: "waiting.poll",
+          raw: 80,
+          startedAt: "2026-08-28T11:00:00.000Z",
+        }),
+      ],
+    });
+    child.parentId = "parent";
+    const overview = buildOverview(
+      [
+        session({
+          id: "parent",
+          startedAt: "2026-07-19T09:00:00.000Z",
+          lastEventAt: "2026-08-28T11:00:00.000Z",
+          turns: [],
+          children: [child],
+        }),
+      ],
+      {
+        watchPath: "/tmp",
+        now: "2026-08-28T12:00:00.000Z",
+        sinceMs: Date.parse("2026-08-21T12:00:00.000Z"),
+        dayCount: 8,
+      },
+    );
+    expect(overview.cost.raw).toBe(80);
+    expect(overview.waste.raw).toBe(0);
+  });
 });

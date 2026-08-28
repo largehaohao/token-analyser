@@ -22,3 +22,26 @@ export function resolveSelectedSession(
   }
   return sessions[0]?.id ?? null;
 }
+
+export function sessionListIdentity(sessions: { id: string }[]): string {
+  return sessions
+    .map((session) => session.id)
+    .slice()
+    .sort()
+    .join("\n");
+}
+
+export function shouldResetSessionLimit(prev: string, next: string): boolean {
+  return prev !== next;
+}
+
+export function nextSessionIndex(
+  length: number,
+  currentIndex: number,
+  key: "ArrowDown" | "ArrowUp",
+): number {
+  if (length <= 0) return -1;
+  if (currentIndex < 0) return key === "ArrowDown" ? 0 : length - 1;
+  if (key === "ArrowDown") return Math.min(length - 1, currentIndex + 1);
+  return Math.max(0, currentIndex - 1);
+}

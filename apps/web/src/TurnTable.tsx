@@ -7,9 +7,8 @@ import { TurnSparkline } from "./TurnSparkline";
 import {
   TURN_PAGE_SIZE,
   highlightScrollBehavior,
-  limitIncludingId,
   nextTurnLimit,
-  visibleTurns,
+  visibleTurnWindow,
 } from "./turn-page";
 
 type Props = {
@@ -51,8 +50,7 @@ export function TurnTable({
     setLimit(TURN_PAGE_SIZE);
   }, [resetKey]);
 
-  const shownLimit = limitIncludingId(filtered, limit, highlightTurnId);
-  const visible = visibleTurns(filtered, shownLimit);
+  const visible = visibleTurnWindow(filtered, limit, highlightTurnId);
 
   useEffect(() => {
     if (!highlightTurnId) return;
@@ -192,7 +190,7 @@ export function TurnTable({
               type="button"
               className="load-more"
               onClick={() =>
-                setLimit(nextTurnLimit(shownLimit, filtered.length))
+                setLimit(nextTurnLimit(limit, filtered.length))
               }
             >
               加载更多（还有 {filtered.length - visible.length} 轮）

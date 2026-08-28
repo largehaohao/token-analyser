@@ -1171,6 +1171,7 @@ input {
   justify-content: flex-end;
   overflow: hidden;
   border-radius: 3px 3px 0 0;
+  position: relative;
 }
 
 .trend-fill {
@@ -1197,9 +1198,12 @@ input {
 }
 
 .trend-unpriced-mix {
-  display: block;
-  width: 100%;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
   height: 5px;
+  pointer-events: none;
   background: repeating-linear-gradient(
     -45deg,
     #243024,

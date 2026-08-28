@@ -1,5 +1,9 @@
 import type { OverviewDay } from "./api";
-import type { CostUnit } from "./format";
+import {
+  formatChartNumber,
+  formatExactTokens,
+  type CostUnit,
+} from "./format";
 
 export type ChartMetric = "usd" | "tokens" | "credits";
 
@@ -75,6 +79,21 @@ export function chartDayTooltip(date: string): string {
   if (date === "earlier") return "窗口之前";
   if (date === "later") return "窗口之后";
   return `${date} UTC`;
+}
+
+export function trendColumnAriaLabel(
+  day: OverviewDay,
+  metric: ChartMetric,
+): string {
+  const total = dayMetricValue(day, metric);
+  const value =
+    total == null ? "未定价" : formatChartNumber(total, metric);
+  const unpriced = dayUnpricedRaw(day);
+  const extra =
+    unpriced > 0 && total != null
+      ? `，另有 ${formatExactTokens(unpriced)} tokens 未定价`
+      : "";
+  return `${chartDayTooltip(day.date)} ${value}${extra}`;
 }
 
 export function shouldLabelChartDay(

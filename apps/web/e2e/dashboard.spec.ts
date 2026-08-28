@@ -144,6 +144,36 @@ test("ignores a stale session response after selection changes", async ({ page }
   await expect(total).toHaveText(second!.cost.raw.toLocaleString("en-US"));
 });
 
+function overviewPayload(sessionCount: number) {
+  const emptyCost = {
+    raw: sessionCount > 0 ? 100 : 0,
+    uncached_input: 0,
+    cached_input: 0,
+    output: 0,
+    credits: 0,
+    usd: 0,
+  };
+  return {
+    sessionCount,
+    turnCount: sessionCount > 0 ? 4 : 0,
+    live: false,
+    collecting: true,
+    watchPath: "/tmp",
+    cost: emptyCost,
+    waste: { ...emptyCost, raw: 0 },
+    unpricedRaw: 0,
+    days: [],
+    slices: [
+      "planning",
+      "code",
+      "reread",
+      "subagents",
+      "waiting",
+      "other",
+    ].map((key) => ({ key, raw: 0, credits: 0, usd: 0 })),
+  };
+}
+
 test("ignores a stale overview after the range changes", async ({ page }) => {
   let release7d!: () => void;
   let sevenRequested!: () => void;
@@ -159,18 +189,21 @@ test("ignores a stale overview after the range changes", async ({ page }) => {
     if (url.searchParams.get("days") === "8") {
       sevenRequested();
       await gate;
+      await route.fulfill({ json: overviewPayload(99) });
+      return;
     }
-    await route.continue();
+    await route.fulfill({ json: overviewPayload(0) });
   });
 
   await page.goto("/");
   await sevenReq;
   await page.getByRole("button", { name: "5小时" }).click();
-  await expect(page.getByText("该时间范围内没有会话")).toBeVisible({
-    timeout: 10_000,
-  });
-  release7d();
+  const sessionKpi = page.getByRole("button", { name: /已分析会话/ });
+  await expect(sessionKpi).toContainText("0", { timeout: 10_000 });
   await expect(page.getByText("该时间范围内没有会话")).toBeVisible();
+  release7d();
+  await expect(sessionKpi).toContainText("0");
+  await expect(sessionKpi).not.toContainText("99");
   await expect(page.getByTestId("overview-page")).toBeVisible();
 });
 
@@ -241,19 +274,20 @@ test("suggestion copy is Chinese and clicking it selects a tree node", async ({
   await page.goto("/");
   await expect(page.getByTestId("overview-page")).toBeVisible({ timeout: 10_000 });
   await openSessionDetail(page);
-  await page.getByRole("button", { name: /s-compact-reread/ }).click();
+  await page.getByRole("button", { name: /s-reread-same/ }).click();
   await expect(page.getByText(/Not OpenAI's bill/)).toBeVisible();
-  const suggestion = page.locator(".suggestions button").first();
+  const suggestion = page.getByRole("button", { name: /相同文件被重复读取/ });
   await expect(suggestion).toBeVisible();
-  await expect(suggestion).toContainText(/压缩循环|重复|读取/);
   await suggestion.click();
-  await expect(page.locator(".tree-row.selected")).not.toHaveCount(0);
+  await expect(page.locator(".tree-row.selected")).toContainText("重复读取");
+  await expect(page.locator(".turn-table tr.highlighted")).toBeVisible();
 });
 
 test("trend columns expose a keyboard tooltip", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("trend-chart")).toBeVisible({ timeout: 10_000 });
   const col = page.locator(".trend-col").first();
+  await expect(col).toHaveAttribute("aria-label", /./);
   await col.focus();
   await expect(col.locator(".chart-tooltip")).toBeVisible();
 });

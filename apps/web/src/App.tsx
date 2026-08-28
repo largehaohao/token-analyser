@@ -19,6 +19,7 @@ import { SessionView } from "./SessionView";
 import { UnitSwitcher } from "./UnitSwitcher";
 import { NowProvider, useNow } from "./useNow";
 import { resolveSelectedSession } from "./session-page";
+import { overviewDisplayState } from "./overview-state";
 import {
   DEFAULT_SESSION_RANGE,
   SESSION_RANGES,
@@ -40,6 +41,7 @@ function AppShell() {
   const [unit, setUnit] = useState<CostUnit>("tokens");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [appliedRange, setAppliedRange] = useState<SessionRangeId | null>(null);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
@@ -69,10 +71,12 @@ function AppShell() {
   const refreshOverview = useCallback(async () => {
     const requestId = ++overviewRequest.current;
     const requestedRange = rangeRef.current;
+    setOverviewError(null);
     try {
-      const data = await getOverview(requestedRange);
+      const data = await getOverview(requestedRange, Date.now());
       if (requestId !== overviewRequest.current) return data;
       setOverview(data);
+      setAppliedRange(requestedRange);
       setOverviewError(null);
       return data;
     } catch (err) {
@@ -105,7 +109,7 @@ function AppShell() {
 
   useEffect(() => {
     void refreshOverview().catch(() => undefined);
-  }, [range, refreshOverview]);
+  }, [range, now, refreshOverview]);
 
   useEffect(() => {
     void refreshList().catch(() => undefined);
@@ -168,6 +172,13 @@ function AppShell() {
     setContextOpen(bucket);
   }
 
+  const overviewState = overviewDisplayState({
+    requestedRange: range,
+    appliedRange,
+    hasOverview: overview != null,
+    error: overviewError,
+  });
+
   function openSessions() {
     setView("sessions");
     setSelectedId((current) =>
@@ -222,7 +233,7 @@ function AppShell() {
           </div>
         </header>
         {view === "overview" ? (
-          overview ? (
+          overviewState === "ready" && overview ? (
             <OverviewPage
               overview={overview}
               onOpenSessions={openSessions}
@@ -233,7 +244,7 @@ function AppShell() {
           ) : (
             <div className="overview">
               <p className="empty-main">
-                {overviewError
+                {overviewState === "error"
                   ? `总览加载失败：${overviewError}`
                   : "加载中…"}
               </p>

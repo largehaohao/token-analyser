@@ -4,6 +4,7 @@ import {
   barHeightPct,
   chartDayTooltip,
   chartMax,
+  trendColumnAriaLabel,
   dayHasMixedUnpriced,
   dayMetricValue,
   flaggedValue,
@@ -123,6 +124,12 @@ describe("chart labels", () => {
     expect(formatChartDay("earlier")).toBe("更早");
     expect(formatChartDay("later")).toBe("之后");
     expect(chartDayTooltip("later")).toBe("窗口之后");
+  });
+
+  it("names a focused trend column for assistive tech", () => {
+    const labeled = day({ date: "2026-08-28", raw: 1000, credits: 10, usd: 0.4 });
+    expect(trendColumnAriaLabel(labeled, "credits")).toMatch(/2026-08-28/);
+    expect(trendColumnAriaLabel(labeled, "credits")).toMatch(/10/);
   });
 
   it("follows the page unit instead of a second chart unit", () => {

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   SESSION_PAGE_SIZE,
+  nextSessionIndex,
   nextSessionLimit,
   resolveSelectedSession,
+  sessionListIdentity,
+  shouldResetSessionLimit,
   visibleSessions,
 } from "./session-page";
 
@@ -25,5 +28,27 @@ describe("session paging", () => {
   it("keeps a still-visible session and otherwise selects the first", () => {
     expect(resolveSelectedSession("s2", sessions.slice(0, 3))).toBe("s2");
     expect(resolveSelectedSession("missing", sessions.slice(0, 3))).toBe("s0");
+  });
+
+  it("does not reset paging when only object identity or order changed", () => {
+    const ids = sessionListIdentity(sessions.slice(0, 3));
+    expect(
+      shouldResetSessionLimit(ids, sessionListIdentity(sessions.slice(0, 3))),
+    ).toBe(false);
+    expect(
+      shouldResetSessionLimit(
+        ids,
+        sessionListIdentity([...sessions.slice(0, 3)].reverse()),
+      ),
+    ).toBe(false);
+    expect(
+      shouldResetSessionLimit(ids, sessionListIdentity(sessions.slice(0, 2))),
+    ).toBe(true);
+  });
+
+  it("starts keyboard movement at the first or last row when nothing is selected", () => {
+    expect(nextSessionIndex(3, -1, "ArrowDown")).toBe(0);
+    expect(nextSessionIndex(3, -1, "ArrowUp")).toBe(2);
+    expect(nextSessionIndex(3, 0, "ArrowDown")).toBe(1);
   });
 });

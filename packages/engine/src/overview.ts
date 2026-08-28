@@ -93,11 +93,19 @@ function emptySliceMap(): Record<OverviewSliceKey, Cost> {
   };
 }
 
-function sessionTimeMs(session: SessionSnapshot): number | null {
-  const iso = session.lastEventAt ?? session.startedAt ?? "";
+function parseTimeMs(iso: string | null | undefined): number | null {
   if (!iso) return null;
   const t = Date.parse(iso);
   return Number.isFinite(t) ? t : null;
+}
+
+function sessionTimeMs(session: SessionSnapshot): number | null {
+  let best = parseTimeMs(session.lastEventAt ?? session.startedAt);
+  for (const child of session.children) {
+    const childMs = sessionTimeMs(child);
+    if (childMs != null && (best == null || childMs > best)) best = childMs;
+  }
+  return best;
 }
 
 function inRange(session: SessionSnapshot, sinceMs?: number): boolean {
@@ -128,6 +136,39 @@ function walkTurns(
     session.ledger_warning || session.parse_errors.length > 0;
   for (const turn of session.turns) visit(turn, flagged, nested);
   for (const child of session.children) walkTurns(child, visit, true);
+}
+
+function collectTurnsById(
+  session: SessionSnapshot,
+  map = new Map<string, Turn>(),
+): Map<string, Turn> {
+  for (const turn of session.turns) map.set(turn.id, turn);
+  for (const child of session.children) collectTurnsById(child, map);
+  return map;
+}
+
+function windowTurnIds(session: SessionSnapshot, sinceMs?: number): Set<string> {
+  const ids = new Set<string>();
+  walkTurns(session, (turn) => {
+    if (turnInRange(turn, sinceMs)) ids.add(turn.id);
+  });
+  return ids;
+}
+
+function windowedWaste(session: SessionSnapshot, sinceMs?: number): Cost {
+  const { turnIds } = computeWaste({
+    turns: session.turns,
+    children: session.children,
+    toggles: session.toggles,
+  });
+  const inWindow = windowTurnIds(session, sinceMs);
+  const byId = collectTurnsById(session);
+  let waste = emptyMaybeCost();
+  for (const id of turnIds) {
+    if (!inWindow.has(id)) continue;
+    waste = addKnownCost(waste, byId.get(id)!.cost);
+  }
+  return waste.raw === 0 ? emptyCost() : waste;
 }
 
 function filterSessionTurns(
@@ -192,12 +233,7 @@ export function buildOverview(
 
   for (const session of included) {
     const ranged = filterSessionTurns(session, opts.sinceMs);
-    const sessionWaste = computeWaste({
-      turns: ranged.turns,
-      children: ranged.children,
-      toggles: session.toggles,
-    }).waste;
-    waste = addKnownCost(waste, sessionWaste);
+    waste = addKnownCost(waste, windowedWaste(session, opts.sinceMs));
     turnCount += countTurns(ranged);
 
     walkTurns(ranged, (turn, flagged, nested) => {

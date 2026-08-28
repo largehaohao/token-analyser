@@ -18,16 +18,18 @@ export function visibleTurns<T>(turns: T[], limit: number): T[] {
   return turns.slice(0, Math.max(0, limit));
 }
 
-export function limitIncludingId<T extends { id: string }>(
+export function visibleTurnWindow<T extends { id: string }>(
   turns: T[],
   limit: number,
   highlightId: string | null,
   page = TURN_PAGE_SIZE,
-): number {
-  const capped = Math.min(Math.max(limit, 0), turns.length);
-  if (!highlightId) return capped;
+): T[] {
+  if (!highlightId) return visibleTurns(turns, limit);
   const index = turns.findIndex((turn) => turn.id === highlightId);
-  if (index < 0) return capped;
-  const needed = Math.ceil((index + 1) / page) * page;
-  return Math.min(turns.length, Math.max(capped, needed));
+  if (index < 0) return visibleTurns(turns, limit);
+  const start = Math.max(
+    0,
+    Math.min(index - Math.floor((page - 1) / 2), Math.max(0, turns.length - page)),
+  );
+  return turns.slice(start, start + page);
 }

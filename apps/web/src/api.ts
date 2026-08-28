@@ -157,6 +157,7 @@ export type SessionListItem = {
   toolsCount: number;
   skillsChars: number;
   skillsCount: number;
+  unpricedRaw?: number;
 };
 
 async function parseJson<T>(res: Response): Promise<T> {
@@ -173,8 +174,11 @@ export async function listSessions(): Promise<SessionListItem[]> {
   return body.sessions;
 }
 
-export async function getOverview(range: SessionRangeId = "7d"): Promise<Overview> {
-  const query = overviewQuery(range);
+export async function getOverview(
+  range: SessionRangeId = "7d",
+  nowMs = Date.now(),
+): Promise<Overview> {
+  const query = overviewQuery(range, nowMs);
   const params = new URLSearchParams();
   if (query.since) params.set("since", query.since);
   params.set("days", String(query.days));

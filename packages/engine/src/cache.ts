@@ -63,7 +63,7 @@ export function readCache(
   }
 }
 
-export function pruneStaleCache(home?: string): number {
+export function pruneStaleCache(home?: string, context = ""): number {
   const dir = cacheDir(home);
   if (!existsSync(dir)) return 0;
   let removed = 0;
@@ -77,6 +77,27 @@ export function pruneStaleCache(home?: string): number {
       if (value.version !== CACHE_VERSION) {
         unlinkSync(file);
         removed += 1;
+        continue;
+      }
+      const snapshot = (value as { snapshot?: { path?: unknown } }).snapshot;
+      const filePath = typeof snapshot?.path === "string" ? snapshot.path : "";
+      if (!filePath || !existsSync(filePath)) {
+        unlinkSync(file);
+        removed += 1;
+        continue;
+      }
+      try {
+        if (`${cacheKey(filePath, context)}.json` !== name) {
+          unlinkSync(file);
+          removed += 1;
+        }
+      } catch {
+        try {
+          unlinkSync(file);
+          removed += 1;
+        } catch {
+          // ignore concurrent deletes
+        }
       }
     } catch {
       try {

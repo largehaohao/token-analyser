@@ -80,4 +80,11 @@ describe("filterSessionsByRange", () => {
     expect(overviewQuery("1d", NOW).days).toBe(2);
     expect(overviewQuery("30d", NOW).days).toBe(31);
   });
+
+  it("advances the overview since cutoff when now moves", () => {
+    const earlier = overviewQuery("7d", NOW);
+    const later = overviewQuery("7d", NOW + 60_000);
+    expect(later.since).not.toBe(earlier.since);
+    expect(Date.parse(later.since!)).toBe(Date.parse(earlier.since!) + 60_000);
+  });
 });

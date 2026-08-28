@@ -4,6 +4,7 @@ import { buildTree } from "./tree.ts";
 import { computeWaste } from "./waste.ts";
 import { ingestFile, type IngestOptions } from "./ingest.ts";
 import { isLive, pruneStaleCache } from "./cache.ts";
+import { effectiveRateCard } from "./rate-card.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
   type SessionListItem,
@@ -11,6 +12,29 @@ import {
   type WasteToggleId,
 } from "./types.ts";
 import { buildOverview, type Overview, type OverviewOptions } from "./overview.ts";
+
+function latestActivityIso(session: SessionSnapshot): string | null {
+  let best = session.lastEventAt ?? session.startedAt;
+  let bestMs = best ? Date.parse(best) : Number.NaN;
+  for (const child of session.children) {
+    const childIso = latestActivityIso(child);
+    const childMs = childIso ? Date.parse(childIso) : Number.NaN;
+    if (Number.isFinite(childMs) && (!Number.isFinite(bestMs) || childMs > bestMs)) {
+      best = childIso;
+      bestMs = childMs;
+    }
+  }
+  return best && Number.isFinite(bestMs) ? best : null;
+}
+
+function unpricedRawFromSession(session: SessionSnapshot): number {
+  let raw = 0;
+  for (const turn of session.turns) {
+    if (turn.cost.credits == null) raw += turn.cost.raw;
+  }
+  for (const child of session.children) raw += unpricedRawFromSession(child);
+  return raw;
+}
 
 function rebuildDerived(snap: SessionSnapshot): SessionSnapshot {
   const label = snap.nickname ?? snap.id;
@@ -25,7 +49,11 @@ function rebuildDerived(snap: SessionSnapshot): SessionSnapshot {
     children: snap.children,
     toggles: snap.toggles,
   });
-  return { ...snap, tree, cost: tree.cost, waste };
+  const derived = { ...snap, tree, cost: tree.cost, waste };
+  return {
+    ...derived,
+    lastEventAt: latestActivityIso(derived),
+  };
 }
 
 function toListItem(snap: SessionSnapshot): SessionListItem {
@@ -41,6 +69,7 @@ function toListItem(snap: SessionSnapshot): SessionListItem {
     lastEventAt: snap.lastEventAt,
     cost: snap.cost,
     waste: snap.waste,
+    unpricedRaw: unpricedRawFromSession(snap),
     parse_error: snap.parse_errors.length > 0,
     parse_error_offset: snap.parse_errors[0]?.offset,
     parse_error_message: snap.parse_errors[0]?.message,
@@ -69,7 +98,7 @@ export class SessionStore {
     if (opts?.cacheDir) {
       this.cacheHome = path.dirname(opts.cacheDir);
     }
-    pruneStaleCache(this.cacheHome);
+    pruneStaleCache(this.cacheHome, JSON.stringify(effectiveRateCard()));
   }
 
   private rebuildAll(): void {

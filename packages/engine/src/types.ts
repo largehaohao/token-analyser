@@ -157,6 +157,7 @@ export type SessionListItem = {
   toolsCount: number;
   skillsChars: number;
   skillsCount: number;
+  unpricedRaw: number;
 };
 
 export type SessionMeta = {

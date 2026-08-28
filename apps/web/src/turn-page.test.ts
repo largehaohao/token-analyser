@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   TURN_PAGE_SIZE,
   highlightScrollBehavior,
-  limitIncludingId,
   nextTurnLimit,
+  visibleTurnWindow,
   visibleTurns,
 } from "./turn-page";
 
@@ -20,13 +20,20 @@ describe("turn paging", () => {
     expect(nextTurnLimit(2900, 3000)).toBe(3000);
   });
 
-  it("expands the prefix far enough to include a highlighted turn", () => {
-    expect(limitIncludingId(turns, 200, "t249")).toBe(400);
-    expect(limitIncludingId(turns, 200, "t10")).toBe(200);
-  });
-
   it("skips smooth scrolling when the user prefers reduced motion", () => {
     expect(highlightScrollBehavior(true)).toBe("auto");
     expect(highlightScrollBehavior(false)).toBe("smooth");
+  });
+
+  it("does not mount thousands of rows to reach a highlighted turn", () => {
+    const window = visibleTurnWindow(turns, TURN_PAGE_SIZE, "t2499");
+    expect(window.length).toBe(TURN_PAGE_SIZE);
+    expect(window.some((turn) => turn.id === "t2499")).toBe(true);
+    expect(visibleTurnWindow(turns, TURN_PAGE_SIZE, "t0")[0]?.id).toBe("t0");
+    expect(
+      visibleTurnWindow(turns, TURN_PAGE_SIZE, "t2999").some(
+        (turn) => turn.id === "t2999",
+      ),
+    ).toBe(true);
   });
 });
