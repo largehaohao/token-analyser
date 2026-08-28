@@ -1,5 +1,6 @@
 import {
   createContext,
+  createElement,
   useContext,
   useEffect,
   useState,
@@ -26,7 +27,7 @@ export function NowProvider({
   intervalMs?: number;
 }) {
   const now = useTickingNow(intervalMs, true);
-  return <NowContext.Provider value={now}>{children}</NowContext.Provider>;
+  return createElement(NowContext.Provider, { value: now }, children);
 }
 
 export function useNow(intervalMs = 30_000): number {
