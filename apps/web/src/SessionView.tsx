@@ -1,6 +1,15 @@
+import { useMemo, useState } from "react";
 import type { SessionSnapshot, Turn } from "./api";
 import { useUnit } from "./UnitContext";
-import { formatCost, disclaimer, wasteShare } from "./format";
+import {
+  cacheHitRatio,
+  disclaimer,
+  formatAbsoluteTime,
+  formatCost,
+  formatPercent,
+  formatRelativeTime,
+  wasteShare,
+} from "./format";
 import { ContextProfileCard } from "./ContextProfile";
 import { CostTree, collectTurnIds, findNodeById } from "./CostTree";
 import { MixBar } from "./MixBar";
@@ -30,19 +39,24 @@ export function SessionView({
   onContextOpen,
 }: Props) {
   const { unit } = useUnit();
+  const [highlightTurnId, setHighlightTurnId] = useState<string | null>(null);
 
   const selectedNode = selectedNodeId
     ? findNodeById(snapshot.tree, selectedNodeId)
-    : null;
-  const turnIds = selectedNode
-    ? collectTurnIds(selectedNode)
-    : new Set<string>();
-
+    : snapshot.tree;
+  const turnIds = useMemo(
+    () => (selectedNode ? collectTurnIds(selectedNode) : new Set<string>()),
+    [selectedNode],
+  );
+  const hit = cacheHitRatio(snapshot.cost);
+  const tokenWaste = wasteShare(snapshot.waste, snapshot.cost, "tokens");
+  const unitWaste = wasteShare(snapshot.waste, snapshot.cost, unit);
   const suggestions = snapshot.suggestions.slice(0, 3);
 
-  function handleSuggestionClick(turnIds: string[]) {
-    const first = turnIds[0];
+  function handleSuggestionClick(ids: string[]) {
+    const first = ids[0];
     if (!first) return;
+    setHighlightTurnId(first);
     function findNode(node: typeof snapshot.tree): string | null {
       if (node.turnIds.includes(first)) return node.id;
       for (const child of node.children) {
@@ -64,7 +78,7 @@ export function SessionView({
     <div className="session-view">
       {snapshot.ledger_warning && (
         <div className="banner ledger-warning">
-          账本警告：用量可能与记录费用对不上。
+          账本警告：各轮 last_token_usage 之和与 cumulative total 对不上（允许 ±1）。数字仍按原始记录显示，没有改写。
         </div>
       )}
       {(snapshot.parse_errors ?? []).length > 0 && (
@@ -76,6 +90,28 @@ export function SessionView({
           ))}
         </div>
       )}
+
+      <p className="session-kicker">
+        {snapshot.live && <span className="badge live">LIVE</span>}
+        {snapshot.fastMode && (
+          <span className="badge fast" title="Fast multiplier 2.5 from session telemetry">
+            Fast ×2.5
+          </span>
+        )}
+        <span>{snapshot.model ?? "未知模型"}</span>
+        {snapshot.effort && <span>· {snapshot.effort}</span>}
+        {snapshot.cwd && (
+          <span className="session-kicker-cwd" title={snapshot.cwd}>
+            · {snapshot.cwd}
+          </span>
+        )}
+        <span
+          title={formatAbsoluteTime(snapshot.startedAt ?? snapshot.lastEventAt)}
+        >
+          · {formatRelativeTime(snapshot.startedAt ?? snapshot.lastEventAt)}
+        </span>
+        {hit != null && <span>· 缓存命中 {formatPercent(100 * hit)}</span>}
+      </p>
 
       <header className="session-headline">
         <div className="chart-card headline-main">
@@ -94,7 +130,7 @@ export function SessionView({
           <MixBar
             className="headline-mix"
             testId="headline-mix"
-            label={`Waste ${wasteShare(snapshot.waste, snapshot.cost)}`}
+            label={`Waste ${tokenWaste} of tokens`}
             segments={[
               {
                 key: "useful",
@@ -106,7 +142,10 @@ export function SessionView({
           />
           <div className="headline-legend">
             <span className="swatch useful" /> 有效
-            <span className="swatch waste" /> 浪费 {wasteShare(snapshot.waste, snapshot.cost)}
+            <span className="swatch waste" /> 浪费 {unitWaste}
+            {unit !== "tokens" && unitWaste !== tokenWaste && (
+              <span className="legend-note">token {tokenWaste}</span>
+            )}
           </div>
           <p className="disclaimer">{disclaimer(snapshot.rateCardAsOf)}</p>
         </div>
@@ -150,7 +189,11 @@ export function SessionView({
             </div>
           )}
         </div>
-        <TurnTable turns={flattenTurns(snapshot)} turnIds={turnIds} />
+        <TurnTable
+          turns={flattenTurns(snapshot)}
+          turnIds={turnIds}
+          highlightTurnId={highlightTurnId}
+        />
       </div>
     </div>
   );

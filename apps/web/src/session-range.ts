@@ -1,8 +1,11 @@
+// `days` is the UTC calendar span a rolling window can cover (window + 1
+// midnight crossing). The trend chart must include every day a session in
+// range can land on, otherwise KPIs and bars disagree.
 export const SESSION_RANGES = [
-  { id: "5h", label: "5小时", ms: 5 * 60 * 60 * 1000, days: 1 },
+  { id: "5h", label: "5小时", ms: 5 * 60 * 60 * 1000, days: 2 },
   { id: "1d", label: "1天", ms: 24 * 60 * 60 * 1000, days: 2 },
   { id: "7d", label: "7天", ms: 7 * 24 * 60 * 60 * 1000, days: 8 },
-  { id: "30d", label: "30天", ms: 30 * 24 * 60 * 60 * 1000, days: 30 },
+  { id: "30d", label: "30天", ms: 30 * 24 * 60 * 60 * 1000, days: 31 },
   { id: "all", label: "全部", ms: null, days: 30 },
 ] as const;
 

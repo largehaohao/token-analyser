@@ -63,4 +63,10 @@ describe("filterSessionsByRange", () => {
       since: new Date(NOW - 7 * 24 * 60 * 60 * 1000).toISOString(),
     });
   });
+
+  it("spans two UTC days for a 5-hour window that can cross midnight", () => {
+    expect(overviewQuery("5h", NOW).days).toBe(2);
+    expect(overviewQuery("1d", NOW).days).toBe(2);
+    expect(overviewQuery("30d", NOW).days).toBe(31);
+  });
 });

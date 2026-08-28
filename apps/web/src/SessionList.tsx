@@ -1,7 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SessionListItem } from "./api";
 import { MixBar } from "./MixBar";
-import { formatCompactTokens, formatCost, wasteShare } from "./format";
+import {
+  formatCompactTokens,
+  formatCost,
+  formatRelativeTime,
+  formatAbsoluteTime,
+  wasteShare,
+} from "./format";
 import { useUnit } from "./UnitContext";
 
 const EMPTY_COPY =
@@ -20,11 +26,6 @@ type Props = {
   onImport: (filename: string, text: string) => void;
 };
 
-function formatStart(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString();
-}
-
 export function SessionList({
   sessions,
   totalCount,
@@ -35,6 +36,18 @@ export function SessionList({
   onImport,
 }: Props) {
   const { unit } = useUnit();
+  const [query, setQuery] = useState("");
+  const [dragging, setDragging] = useState(false);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((s) =>
+      [s.id, s.nickname, s.cwd, s.model, s.effort]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q)),
+    );
+  }, [sessions, query]);
 
   useEffect(() => {
     if (sessions.length === 0) return;
@@ -46,6 +59,7 @@ export function SessionList({
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
+    setDragging(false);
     const file = e.dataTransfer.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -57,22 +71,59 @@ export function SessionList({
 
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault();
+    setDragging(true);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (filtered.length === 0) return;
+    e.preventDefault();
+    const index = filtered.findIndex((s) => s.id === selectedId);
+    const next =
+      e.key === "ArrowDown"
+        ? filtered[Math.min(filtered.length - 1, Math.max(0, index) + 1)]
+        : filtered[Math.max(0, (index < 0 ? 1 : index) - 1)];
+    if (next) onSelect(next.id);
   }
 
   return (
     <aside
-      className="session-list"
+      className={`session-list${dragging ? " dragging" : ""}`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
+      onDragEnter={() => setDragging(true)}
+      onDragLeave={() => setDragging(false)}
+      onKeyDown={handleKeyDown}
     >
-      <h2>会话</h2>
+      <div className="session-list-head">
+        <h2>会话</h2>
+        <span className="session-count">
+          {filtered.length}
+          {filtered.length !== totalCount ? ` / ${totalCount}` : ""}
+        </span>
+      </div>
+      {totalCount > 0 && (
+        <input
+          className="session-search"
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="筛选 id / 目录 / 模型"
+          aria-label="筛选会话"
+        />
+      )}
+      <p className={`drop-hint${dragging ? " active" : ""}`}>
+        {dragging ? "放开以导入 JSONL" : "拖入 rollout JSONL 导入"}
+      </p>
       {totalCount === 0 ? (
         <p className="empty-copy">{EMPTY_COPY}</p>
-      ) : sessions.length === 0 ? (
-        <p className="empty-copy">{EMPTY_RANGE_COPY}</p>
+      ) : filtered.length === 0 ? (
+        <p className="empty-copy">
+          {sessions.length === 0 ? EMPTY_RANGE_COPY : "没有匹配的会话"}
+        </p>
       ) : (
         <ul>
-          {sessions.map((s) => (
+          {filtered.map((s) => (
             <li
               key={s.id}
               className={[
@@ -91,21 +142,32 @@ export function SessionList({
                   <div className="row-top">
                     <span className="session-id">{s.nickname ?? s.id}</span>
                     {s.live && <span className="badge live">LIVE</span>}
+                    {s.ledger_warning && (
+                      <span className="badge warn">账本</span>
+                    )}
                   </div>
-                  <div className="session-meta">{s.cwd ?? "—"}</div>
+                  <div className="session-meta" title={s.cwd ?? undefined}>
+                    {s.cwd ?? "—"}
+                  </div>
                   <div className="session-meta">
-                    {s.model ?? "—"} · {s.effort ?? "—"}
+                    {s.model ?? "—"}
+                    {s.effort ? ` · ${s.effort}` : ""}
                   </div>
-                  <div className="session-meta">{formatStart(s.startedAt)}</div>
+                  <div
+                    className="session-meta"
+                    title={formatAbsoluteTime(s.startedAt ?? s.lastEventAt)}
+                  >
+                    {formatRelativeTime(s.startedAt ?? s.lastEventAt)}
+                  </div>
                   <div className="session-costs">
                     <span>{formatCost(s.cost, unit)}</span>
                     <span className="waste-share">
-                      waste {wasteShare(s.waste, s.cost)}
+                      waste {wasteShare(s.waste, s.cost, unit)}
                     </span>
                   </div>
                   <MixBar
                     className="waste-bar"
-                    label={`waste ${wasteShare(s.waste, s.cost)}`}
+                    label={`waste ${wasteShare(s.waste, s.cost)} of tokens`}
                     segments={[
                       {
                         key: "useful",

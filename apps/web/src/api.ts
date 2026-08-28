@@ -55,6 +55,8 @@ export type Turn = {
     total_tokens: number;
   };
   cost: Cost;
+  bucket?: string;
+  labels?: string[];
 };
 
 export type Suggestion = {
@@ -210,10 +212,18 @@ export async function importNdjson(
   );
 }
 
+export type StreamStatus = "connecting" | "open" | "error";
+
 export function openStream(
   onEvent: (e: { type: string; id: string }) => void,
+  onStatus?: (status: StreamStatus) => void,
 ): () => void {
   const es = new EventSource("/stream");
+  onStatus?.("connecting");
+  es.onopen = () => onStatus?.("open");
+  es.onerror = () => {
+    onStatus?.(es.readyState === EventSource.CLOSED ? "error" : "connecting");
+  };
 
   const handler =
     (type: string) =>

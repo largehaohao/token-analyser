@@ -1,14 +1,21 @@
 import type { Overview } from "./api";
 import {
+  cacheHitRatio,
   formatCompactTokens,
-  formatCreditsLabel,
+  formatCost,
+  formatExactTokens,
+  formatPercent,
+  formatUnitSuffix,
   wasteShare,
 } from "./format";
+import { MixBar } from "./MixBar";
 import { DonutChart, TrendChart } from "./OverviewCharts";
+import { useUnit } from "./UnitContext";
 
 type Props = {
   overview: Overview;
   onOpenSessions: () => void;
+  rangeLabel: string;
 };
 
 function IconDiamond() {
@@ -54,12 +61,10 @@ function IconDoc() {
   );
 }
 
-export function OverviewPage({ overview, onOpenSessions }: Props) {
-  const wastePct = wasteShare(overview.waste, overview.cost);
-  const wasteOfKnown =
-    overview.cost.credits && overview.cost.credits > 0
-      ? `${((100 * (overview.waste.credits ?? 0)) / overview.cost.credits).toFixed(0)}%`
-      : wastePct;
+export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
+  const { unit } = useUnit();
+  const hit = cacheHitRatio(overview.cost);
+  const wastePct = wasteShare(overview.waste, overview.cost, unit);
 
   return (
     <div className="overview" data-testid="overview-page">
@@ -69,10 +74,17 @@ export function OverviewPage({ overview, onOpenSessions }: Props) {
             <IconDiamond /> 预估总费用
           </div>
           <div className="kpi-value">
-            {formatCreditsLabel(overview.cost.credits)}{" "}
-            <small>credits</small>
+            {formatCost(overview.cost, unit)}{" "}
+            <small>{formatUnitSuffix(unit)}</small>
           </div>
-          <div className="kpi-sub">已知小计 · 仍有缺口</div>
+          <div className="kpi-sub">
+            本地费率估算
+            {unit !== "tokens"
+              ? ` · ${formatExactTokens(overview.cost.raw)} tokens`
+              : hit != null
+                ? ` · 缓存命中 ${formatPercent(100 * hit)}`
+                : ""}
+          </div>
         </article>
         <article className="kpi-card">
           <div className="kpi-label">
@@ -82,7 +94,8 @@ export function OverviewPage({ overview, onOpenSessions }: Props) {
             {formatCompactTokens(overview.cost.raw)}
           </div>
           <div className="kpi-sub">
-            {overview.turnCount.toLocaleString("en-US")} 个可辨识模型调用
+            {formatExactTokens(overview.cost.raw)} ·{" "}
+            {overview.turnCount.toLocaleString("en-US")} 次模型调用
           </div>
         </article>
         <article className="kpi-card warn">
@@ -90,10 +103,12 @@ export function OverviewPage({ overview, onOpenSessions }: Props) {
             <IconBolt /> 疑似可优化费用
           </div>
           <div className="kpi-value">
-            {formatCreditsLabel(overview.waste.credits)}{" "}
-            <small>credits</small>
+            {formatCost(overview.waste, unit)}{" "}
+            <small>{formatUnitSuffix(unit)}</small>
           </div>
-          <div className="kpi-sub">{wasteOfKnown} 的已知费用值得检查</div>
+          <div className="kpi-sub">
+            {wastePct} 的已知{unit === "tokens" ? " token" : "费用"}（默认浪费开关）
+          </div>
         </article>
         <button
           type="button"
@@ -104,14 +119,63 @@ export function OverviewPage({ overview, onOpenSessions }: Props) {
             <IconDoc /> 已分析会话
           </div>
           <div className="kpi-value">{overview.sessionCount}</div>
-          <div className="kpi-sub">
-            部分数据 · 实时目录 · {overview.watchPath}
+          <div className="kpi-sub" title={overview.watchPath}>
+            点击查看明细 · {overview.watchPath}
           </div>
         </button>
       </div>
 
+      <section className="chart-card token-mix-card">
+        <div className="chart-head">
+          <div>
+            <h2 className="chart-title">Token 构成</h2>
+            <p className="chart-desc">
+              未缓存输入 / 缓存命中 / 输出。input 已含 cached，不再把 reasoning 加进总量。
+            </p>
+          </div>
+          {hit != null && (
+            <span className="cache-pill">缓存命中 {formatPercent(100 * hit)}</span>
+          )}
+        </div>
+        <MixBar
+          className="headline-mix"
+          label="uncached / cached / output"
+          segments={[
+            {
+              key: "uncached",
+              value: overview.cost.uncached_input,
+              className: "uncached",
+            },
+            {
+              key: "cached",
+              value: overview.cost.cached_input,
+              className: "cached",
+            },
+            {
+              key: "output",
+              value: overview.cost.output,
+              className: "output",
+            },
+          ]}
+        />
+        <div className="mix-legend token-mix-legend">
+          <span>
+            <i className="swatch uncached" /> 未缓存{" "}
+            {formatExactTokens(overview.cost.uncached_input)}
+          </span>
+          <span>
+            <i className="swatch cached" /> 缓存{" "}
+            {formatExactTokens(overview.cost.cached_input)}
+          </span>
+          <span>
+            <i className="swatch output" /> 输出{" "}
+            {formatExactTokens(overview.cost.output)}
+          </span>
+        </div>
+      </section>
+
       <div className="charts-grid">
-        <TrendChart days={overview.days} />
+        <TrendChart days={overview.days} rangeLabel={rangeLabel} />
         <DonutChart slices={overview.slices} totalRaw={overview.cost.raw} />
       </div>
     </div>

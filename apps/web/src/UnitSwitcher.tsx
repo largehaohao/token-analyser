@@ -11,7 +11,7 @@ export function UnitSwitcher() {
   const { unit, setUnit } = useUnit();
 
   return (
-    <div className="metric-switch">
+    <div className="metric-switch" role="group" aria-label="显示单位">
       {UNITS.map((u) => (
         <button
           key={u.id}

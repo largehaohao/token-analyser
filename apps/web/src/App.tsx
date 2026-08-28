@@ -8,6 +8,7 @@ import {
   type Overview,
   type SessionListItem,
   type SessionSnapshot,
+  type StreamStatus,
 } from "./api";
 import { UnitProvider } from "./UnitContext";
 import type { CostUnit } from "./format";
@@ -18,16 +19,24 @@ import { SessionView } from "./SessionView";
 import { UnitSwitcher } from "./UnitSwitcher";
 import {
   DEFAULT_SESSION_RANGE,
+  SESSION_RANGES,
   filterSessionsByRange,
   type SessionRangeId,
 } from "./session-range";
 
 type View = "overview" | "sessions";
 
+const STREAM_LABEL: Record<StreamStatus, string> = {
+  connecting: "连接中",
+  open: "已连接",
+  error: "未连接",
+};
+
 export function App() {
   const [view, setView] = useState<View>("overview");
   const [unit, setUnit] = useState<CostUnit>("tokens");
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null);
@@ -36,6 +45,7 @@ export function App() {
     null,
   );
   const [range, setRange] = useState<SessionRangeId>(DEFAULT_SESSION_RANGE);
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const listRequest = useRef(0);
   const sessionRequest = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
@@ -49,11 +59,19 @@ export function App() {
     () => filterSessionsByRange(sessions, range, Date.now()),
     [sessions, range],
   );
+  const rangeLabel =
+    SESSION_RANGES.find((item) => item.id === range)?.label ?? range;
 
   const refreshOverview = useCallback(async () => {
-    const data = await getOverview(rangeRef.current);
-    setOverview(data);
-    return data;
+    try {
+      const data = await getOverview(rangeRef.current);
+      setOverview(data);
+      setOverviewError(null);
+      return data;
+    } catch (err) {
+      setOverviewError(err instanceof Error ? err.message : String(err));
+      throw err;
+    }
   }, []);
 
   const refreshList = useCallback(async () => {
@@ -109,14 +127,17 @@ export function App() {
   }, [selectedId, refreshSession, view]);
 
   useEffect(() => {
-    return openStream(() => {
-      void refreshOverview().catch(() => undefined);
-      void refreshList().catch(() => undefined);
-      const currentId = selectedIdRef.current;
-      if (currentId && viewRef.current === "sessions") {
-        void refreshSession(currentId).catch(() => undefined);
-      }
-    });
+    return openStream(
+      () => {
+        void refreshOverview().catch(() => undefined);
+        void refreshList().catch(() => undefined);
+        const currentId = selectedIdRef.current;
+        if (currentId && viewRef.current === "sessions") {
+          void refreshSession(currentId).catch(() => undefined);
+        }
+      },
+      setStreamStatus,
+    );
   }, [refreshList, refreshOverview, refreshSession]);
 
   async function handleImport(filename: string, text: string) {
@@ -152,23 +173,28 @@ export function App() {
     <UnitProvider unit={unit} setUnit={setUnit}>
       <div className="app">
         <header className="app-header">
-          <p className="crumb">
-            工作空间 /{" "}
-            <strong>{view === "overview" ? "成本总览" : "会话明细"}</strong>
-          </p>
+          <div className="brand">
+            <p className="brand-name">Token Analyser</p>
+            <p className="crumb">
+              工作空间 /{" "}
+              <strong>{view === "overview" ? "成本总览" : "会话明细"}</strong>
+            </p>
+          </div>
           <div className="header-right">
-            {view === "overview" && overview && (
-              <div className="status-pills">
+            <div className="status-pills">
+              <span>
+                <i
+                  className={`dot ${streamStatus === "open" ? "live" : streamStatus === "error" ? "err" : "idle"}`}
+                />
+                {STREAM_LABEL[streamStatus]}
+              </span>
+              {overview?.live && (
                 <span>
-                  <i className={`dot ${overview.live ? "live" : "idle"}`} />
+                  <i className="dot live" />
                   实时采集
                 </span>
-                <span>
-                  <i className={`dot ${overview.collecting ? "live" : "idle"}`} />
-                  采集中
-                </span>
-              </div>
-            )}
+              )}
+            </div>
             <div className="nav-pills">
               <button
                 type="button"
@@ -186,14 +212,26 @@ export function App() {
               </button>
             </div>
             <RangeSwitcher range={range} onChange={setRange} />
-            {view === "sessions" && <UnitSwitcher />}
+            <UnitSwitcher />
           </div>
         </header>
         {view === "overview" ? (
           overview ? (
-            <OverviewPage overview={overview} onOpenSessions={openSessions} />
+            <OverviewPage
+              overview={overview}
+              onOpenSessions={openSessions}
+              rangeLabel={
+                range === "all" ? `${rangeLabel}（趋势为近 30 天 UTC）` : rangeLabel
+              }
+            />
           ) : (
-            <p className="empty-main">加载中…</p>
+            <div className="overview">
+              <p className="empty-main">
+                {overviewError
+                  ? `总览加载失败：${overviewError}`
+                  : "加载中…"}
+              </p>
+            </div>
           )
         ) : (
           <div className="layout">

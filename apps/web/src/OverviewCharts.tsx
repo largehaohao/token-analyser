@@ -1,18 +1,12 @@
 import { useState } from "react";
-import type { Overview, OverviewDay, OverviewSlice } from "./api";
-import { formatChartNumber } from "./format";
-
-const SLICE_META: Record<
-  OverviewSlice["key"],
-  { label: string; color: string }
-> = {
-  code: { label: "代码与执行", color: "#7dffb3" },
-  subagents: { label: "子 Agent", color: "#9b7dff" },
-  reread: { label: "读取", color: "#ff9f5a" },
-  waiting: { label: "等待 / 轮询", color: "#7dc8ff" },
-  planning: { label: "规划与思考", color: "#4d6bff" },
-  other: { label: "其他 / 未知", color: "#e89b8c" },
-};
+import type { OverviewDay, OverviewSlice } from "./api";
+import { SLICE_META, type SliceKey } from "./buckets";
+import {
+  allocatePercents,
+  formatChartNumber,
+  formatExactTokens,
+  formatPercent,
+} from "./format";
 
 export type ChartMetric = "usd" | "tokens" | "credits";
 
@@ -33,7 +27,12 @@ function formatDay(date: string): string {
   return `${parts[1]}/${parts[2]}`;
 }
 
-export function TrendChart({ days }: { days: OverviewDay[] }) {
+type TrendProps = {
+  days: OverviewDay[];
+  rangeLabel?: string;
+};
+
+export function TrendChart({ days, rangeLabel }: TrendProps) {
   const [metric, setMetric] = useState<ChartMetric>("usd");
   const values = days.map((day) => dayValue(day, metric));
   const max = Math.max(...values, 1);
@@ -44,9 +43,13 @@ export function TrendChart({ days }: { days: OverviewDay[] }) {
       <div className="chart-head">
         <div>
           <h2 className="chart-title">消耗趋势</h2>
-          <p className="chart-desc">基于已记录用量，不代表逐 Token 实时扣费</p>
+          <p className="chart-desc">
+            按 UTC 日期归桶
+            {rangeLabel ? ` · ${rangeLabel}` : ""}
+            。不是逐 token 实时扣费。
+          </p>
         </div>
-        <div className="metric-switch">
+        <div className="metric-switch" role="group" aria-label="趋势单位">
           {(
             [
               ["usd", "费用"],
@@ -58,6 +61,7 @@ export function TrendChart({ days }: { days: OverviewDay[] }) {
               key={id}
               type="button"
               className={metric === id ? "active" : ""}
+              aria-pressed={metric === id}
               onClick={() => setMetric(id)}
             >
               {label}
@@ -83,7 +87,6 @@ export function TrendChart({ days }: { days: OverviewDay[] }) {
                 <div
                   className="trend-stack"
                   style={{ height: `${Math.max(height, total > 0 ? 2 : 0)}%` }}
-                  title={`${formatDay(day.date)} ${formatChartNumber(total, metric)}`}
                 >
                   {flagged > 0 && (
                     <span
@@ -95,6 +98,15 @@ export function TrendChart({ days }: { days: OverviewDay[] }) {
                     className="trend-fill"
                     style={{ height: `${100 - flagShare}%` }}
                   />
+                </div>
+                <div className="chart-tooltip">
+                  <strong>
+                    {day.date} UTC · {formatChartNumber(total, metric)}
+                  </strong>
+                  <span>
+                    账本警告 / 解析错误 {formatChartNumber(flagged, metric)}
+                  </span>
+                  <span>{formatExactTokens(day.cost.raw)} tokens</span>
                 </div>
                 <span className="trend-label">
                   {index % labelEvery === 0 ? formatDay(day.date) : ""}
@@ -109,7 +121,7 @@ export function TrendChart({ days }: { days: OverviewDay[] }) {
           <i className="swatch useful" /> 已记录用量
         </span>
         <span>
-          <i className="swatch waste" /> 包含异常关联
+          <i className="swatch waste" /> 含账本警告或解析错误（不是浪费开关）
         </span>
       </div>
     </section>
@@ -127,11 +139,14 @@ export function DonutChart({
   const circ = 2 * Math.PI * radius;
   let offset = circ * 0.25;
   const visible = slices.filter((s) => s.raw > 0);
+  const percents = allocatePercents(slices.map((s) => s.raw));
+  const sliceSum = slices.reduce((sum, s) => sum + s.raw, 0);
+  const [hoverKey, setHoverKey] = useState<SliceKey | null>(null);
 
   return (
     <section className="chart-card">
       <h2 className="chart-title">Token 花在哪里?</h2>
-      <p className="chart-desc">按行为归因，不等同于服务商账单分类</p>
+      <p className="chart-desc">按行为归因的原始 token 划分，不是服务商账单分类</p>
       <div className="donut-wrap" data-testid="donut-chart">
         <svg
           className="donut"
@@ -157,10 +172,12 @@ export function DonutChart({
                 r={radius}
                 fill="none"
                 stroke={SLICE_META[slice.key].color}
-                strokeWidth="22"
+                strokeWidth={hoverKey === slice.key ? 26 : 22}
                 strokeDasharray={`${dash} ${circ - dash}`}
                 strokeDashoffset={offset}
                 strokeLinecap="butt"
+                onMouseEnter={() => setHoverKey(slice.key)}
+                onMouseLeave={() => setHoverKey(null)}
               />
             );
             offset -= dash;
@@ -172,7 +189,7 @@ export function DonutChart({
             textAnchor="middle"
             className="donut-center-label"
           >
-            总用量
+            {hoverKey ? SLICE_META[hoverKey].label : "总用量"}
           </text>
           <text
             x="100"
@@ -180,29 +197,40 @@ export function DonutChart({
             textAnchor="middle"
             className="donut-center-value"
           >
-            {totalRaw >= 1_000_000
-              ? `${(totalRaw / 1_000_000).toFixed(1)}M tokens`
-              : `${totalRaw.toLocaleString("en-US")} tokens`}
+            {hoverKey
+              ? `${formatExactTokens(slices.find((s) => s.key === hoverKey)?.raw ?? 0)} · ${formatPercent(
+                  percents[slices.findIndex((s) => s.key === hoverKey)] ?? 0,
+                )}`
+              : totalRaw >= 1_000_000
+                ? `${(totalRaw / 1_000_000).toFixed(1)}M tokens`
+                : `${totalRaw.toLocaleString("en-US")} tokens`}
           </text>
         </svg>
         <ul className="donut-legend">
-          {slices.map((slice) => {
-            const pct =
-              totalRaw > 0 ? Math.round((100 * slice.raw) / totalRaw) : 0;
-            return (
-              <li key={slice.key}>
-                <i
-                  className="legend-dot"
-                  style={{ background: SLICE_META[slice.key].color }}
-                />
-                <span>{SLICE_META[slice.key].label}</span>
-                <strong>{pct}%</strong>
-              </li>
-            );
-          })}
+          {slices.map((slice, i) => (
+            <li
+              key={slice.key}
+              className={hoverKey === slice.key ? "hot" : ""}
+              onMouseEnter={() => setHoverKey(slice.key)}
+              onMouseLeave={() => setHoverKey(null)}
+              title={`${formatExactTokens(slice.raw)} tokens`}
+            >
+              <i
+                className="legend-dot"
+                style={{ background: SLICE_META[slice.key].color }}
+              />
+              <span>{SLICE_META[slice.key].label}</span>
+              <em>{formatExactTokens(slice.raw)}</em>
+              <strong>{formatPercent(percents[i])}</strong>
+            </li>
+          ))}
         </ul>
       </div>
-      <p className="chart-foot">部分记录缺失，百分比可能不完整</p>
+      <p className="chart-foot">
+        {sliceSum === totalRaw
+          ? "兄弟节点合计 100%。百分比用最大余数法显示，避免四舍五入加总偏差。"
+          : `切片合计 ${formatExactTokens(sliceSum)}，与总量 ${formatExactTokens(totalRaw)} 不一致。`}
+      </p>
     </section>
   );
 }
