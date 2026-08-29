@@ -16,6 +16,7 @@ import {
   SESSION_PAGE_SIZE,
   nextSessionIndex,
   nextSessionLimit,
+  pageLimitIncludingId,
   sessionListIdentity,
   shouldResetSessionLimit,
   visibleSessions,
@@ -64,13 +65,13 @@ export function SessionList({
   }, [sessions, query]);
 
   useEffect(() => {
-    setLimit(SESSION_PAGE_SIZE);
+    setLimit(pageLimitIncludingId(filtered, selectedId));
   }, [query]);
 
   const prevIdentity = useRef(listIdentity);
   useEffect(() => {
     if (shouldResetSessionLimit(prevIdentity.current, listIdentity)) {
-      setLimit(SESSION_PAGE_SIZE);
+      setLimit(pageLimitIncludingId(filtered, selectedId));
     }
     prevIdentity.current = listIdentity;
   }, [listIdentity]);

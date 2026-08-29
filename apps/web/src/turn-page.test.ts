@@ -36,4 +36,17 @@ describe("turn paging", () => {
       ),
     ).toBe(true);
   });
+
+  it("grows the highlighted window when the user loads more", () => {
+    const first = visibleTurnWindow(turns, TURN_PAGE_SIZE, "t2499");
+    const next = visibleTurnWindow(
+      turns,
+      nextTurnLimit(TURN_PAGE_SIZE, turns.length),
+      "t2499",
+    );
+    expect(first).toHaveLength(200);
+    expect(next).toHaveLength(400);
+    expect(next.some((turn) => turn.id === "t2499")).toBe(true);
+    expect(next.length).toBeGreaterThan(first.length);
+  });
 });

@@ -27,9 +27,13 @@ export function visibleTurnWindow<T extends { id: string }>(
   if (!highlightId) return visibleTurns(turns, limit);
   const index = turns.findIndex((turn) => turn.id === highlightId);
   if (index < 0) return visibleTurns(turns, limit);
+  const size = Math.min(turns.length, Math.max(limit, page, 0));
   const start = Math.max(
     0,
-    Math.min(index - Math.floor((page - 1) / 2), Math.max(0, turns.length - page)),
+    Math.min(
+      index - Math.floor((size - 1) / 2),
+      Math.max(0, turns.length - size),
+    ),
   );
-  return turns.slice(start, start + page);
+  return turns.slice(start, start + size);
 }

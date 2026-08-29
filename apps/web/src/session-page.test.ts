@@ -3,6 +3,7 @@ import {
   SESSION_PAGE_SIZE,
   nextSessionIndex,
   nextSessionLimit,
+  pageLimitIncludingId,
   resolveSelectedSession,
   sessionListIdentity,
   shouldResetSessionLimit,
@@ -50,5 +51,14 @@ describe("session paging", () => {
     expect(nextSessionIndex(3, -1, "ArrowDown")).toBe(0);
     expect(nextSessionIndex(3, -1, "ArrowUp")).toBe(2);
     expect(nextSessionIndex(3, 0, "ArrowDown")).toBe(1);
+  });
+
+  it("keeps a selected session on-page after the list membership changes", () => {
+    expect(pageLimitIncludingId(sessions, "s150")).toBe(200);
+    expect(pageLimitIncludingId(sessions, "s99")).toBe(100);
+    expect(pageLimitIncludingId(sessions, null)).toBe(100);
+    expect(visibleSessions(sessions, pageLimitIncludingId(sessions, "s150")).map((s) => s.id)).toContain(
+      "s150",
+    );
   });
 });

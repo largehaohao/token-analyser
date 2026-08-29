@@ -35,6 +35,17 @@ export function shouldResetSessionLimit(prev: string, next: string): boolean {
   return prev !== next;
 }
 
+export function pageLimitIncludingId<T extends { id: string }>(
+  items: T[],
+  selectedId: string | null,
+  page = SESSION_PAGE_SIZE,
+): number {
+  if (!selectedId) return page;
+  const index = items.findIndex((item) => item.id === selectedId);
+  if (index < 0) return page;
+  return Math.min(items.length, Math.ceil((index + 1) / page) * page);
+}
+
 export function nextSessionIndex(
   length: number,
   currentIndex: number,
