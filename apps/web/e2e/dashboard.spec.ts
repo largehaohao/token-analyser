@@ -36,8 +36,13 @@ test("tree percents sum to ~100 and waste moves when poll is unchecked", async (
   expect(sum).toBeGreaterThan(99);
   expect(sum).toBeLessThan(101);
   const waste = page.getByTestId("waste-headline");
+  const poll = page.getByLabel("轮询等待");
+  if (!(await poll.isChecked())) {
+    await poll.check();
+  }
+  await expect(waste).not.toHaveText("0");
   const before = await waste.textContent();
-  await page.getByLabel("轮询等待").uncheck();
+  await poll.uncheck();
   await expect(waste).not.toHaveText(before ?? "");
 });
 
