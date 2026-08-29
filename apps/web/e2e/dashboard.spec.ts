@@ -272,6 +272,13 @@ test("session list pages instead of rendering thousands of rows", async ({
   });
   await page.getByTestId("session-load-more").click();
   await expect(page.locator(".session-list li")).toHaveCount(200);
+  await page.getByRole("button", { name: /^bulk-150$/ }).click();
+  await expect(page.locator(".session-list li.selected")).toContainText("bulk-150");
+  await page.getByLabel("筛选会话").fill("no-such-session");
+  await expect(page.getByText("没有匹配的会话")).toBeVisible();
+  await page.getByLabel("筛选会话").fill("");
+  await expect(page.locator(".session-list li.selected")).toContainText("bulk-150");
+  await expect(page.locator(".session-list li")).toHaveCount(200);
 });
 
 test("suggestion copy is Chinese and clicking it selects a tree node", async ({
