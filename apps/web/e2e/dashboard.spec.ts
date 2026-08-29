@@ -18,6 +18,43 @@ test("overview shows KPIs and charts", async ({ page }) => {
   await expect(page.getByTestId("model-mix")).toBeVisible();
 });
 
+test("unit switcher keeps tokens paired with credits instead of duplicating tokens", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByTestId("overview-page")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Tokens" })).toHaveClass(/active/);
+  const tokenKpi = page.locator(".kpi-card").filter({
+    has: page.locator(".kpi-label", { hasText: "总用量" }),
+  });
+  const moneyKpi = page.locator(".kpi-card").filter({
+    has: page.locator(".kpi-label", { hasText: "预估总费用" }),
+  });
+  await expect(tokenKpi.locator(".kpi-value")).toContainText("tokens");
+  await expect(moneyKpi.locator(".kpi-value")).toContainText("credits");
+  const tokenText = await tokenKpi.locator(".kpi-value").innerText();
+  const moneyText = await moneyKpi.locator(".kpi-value").innerText();
+  expect(tokenText).not.toEqual(moneyText);
+
+  await page.getByRole("button", { name: "Credits" }).click();
+  await expect(
+    page.locator(".kpi-label", { hasText: "总 Token 用量" }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".kpi-card").filter({
+      has: page.locator(".kpi-label", { hasText: "预估总费用" }),
+    }).locator(".kpi-value"),
+  ).toContainText("credits");
+
+  await page.getByRole("button", { name: "USD" }).click();
+  await expect(
+    page.locator(".kpi-card").filter({
+      has: page.locator(".kpi-label", { hasText: "预估总费用" }),
+    }).locator(".kpi-value"),
+  ).toContainText("USD");
+  await page.getByRole("button", { name: "Tokens" }).click();
+});
+
 test("tree percents sum to ~100 and waste moves when poll is unchecked", async ({
   page,
 }) => {
