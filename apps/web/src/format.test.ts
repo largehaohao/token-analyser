@@ -7,6 +7,7 @@ import {
   disclaimer,
   formatCost,
   formatCostTitle,
+  companionMoneyUnit,
   formatPercent,
   formatRelativeTime,
   headlineCostUnit,
@@ -62,6 +63,12 @@ describe("wasteShare", () => {
     expect(headlineCostUnit("tokens")).toBe("tokens");
     expect(headlineCostUnit("credits")).toBe("credits");
     expect(headlineCostUnit("usd")).toBe("usd");
+  });
+
+  it("pairs a tokens headline with credits so both KPIs are not the same unit", () => {
+    expect(companionMoneyUnit("tokens")).toBe("credits");
+    expect(companionMoneyUnit("credits")).toBe("tokens");
+    expect(companionMoneyUnit("usd")).toBe("tokens");
   });
 
   it("includes the rate-card date in the billing disclaimer", () => {

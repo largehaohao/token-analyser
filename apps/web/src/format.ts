@@ -124,6 +124,11 @@ export function headlineCostUnit(unit: CostUnit): CostUnit {
   return unit;
 }
 
+/** Other dimension for a dual KPI: tokens stay paired with credits. */
+export function companionMoneyUnit(unit: CostUnit): CostUnit {
+  return unit === "tokens" ? "credits" : "tokens";
+}
+
 export function unpricedNote(unpricedRaw: number): string {
   if (unpricedRaw <= 0) return "";
   return `另有 ${formatExactTokens(unpricedRaw)} tokens 未定价`;

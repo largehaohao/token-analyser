@@ -1,7 +1,6 @@
 import type { Overview } from "./api";
 import {
   cacheHitRatio,
-  type CostUnit,
   disclaimer,
   formatCompactTokens,
   formatCost,
@@ -9,6 +8,7 @@ import {
   formatExactTokens,
   formatPercent,
   formatUnitSuffix,
+  companionMoneyUnit,
   tokenIdentity,
   unpricedNote,
   wasteShare,
@@ -70,8 +70,7 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
   const { unit } = useUnit();
   const hit = cacheHitRatio(overview.cost);
   const wastePct = wasteShare(overview.waste, overview.cost, unit);
-  // Tokens headlines keep a credits companion; money units already show tokens in KPI 2.
-  const moneyUnit: CostUnit = "credits";
+  const moneyUnit = companionMoneyUnit(unit);
   const unpriced = unpricedNote(overview.unpricedRaw ?? 0);
   const identity = tokenIdentity(overview.cost);
   const models = overview.models ?? [];

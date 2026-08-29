@@ -182,6 +182,7 @@ function overviewPayload(sessionCount: number) {
       "waiting",
       "other",
     ].map((key) => ({ key, raw: 0, credits: 0, usd: 0 })),
+    models: [],
   };
 }
 

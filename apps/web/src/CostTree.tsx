@@ -1,7 +1,7 @@
 import type { TreeNode } from "./api";
 import { treeAppearance } from "./buckets";
 import { useUnit } from "./UnitContext";
-import { allocatePercents, formatCost } from "./format";
+import { allocatePercents, formatCost, formatCostTitle } from "./format";
 
 export function siblingDisplayPercents(
   children: Array<{ cost: { raw: number } }>,
@@ -70,7 +70,7 @@ function TreeRow({
         >
           {displayPercent.toFixed(1)}%
         </span>
-        <span className="tree-cost" title={formatCost(node.cost, unit)}>
+        <span className="tree-cost" title={formatCostTitle(node.cost, unit)}>
           {formatCost(node.cost, unit)}
         </span>
       </button>
