@@ -61,6 +61,7 @@ function session(partial: {
   ledger_warning?: boolean;
   live?: boolean;
   wasteRaw?: number;
+  toggles?: Partial<SessionSnapshot["toggles"]>;
 }): SessionSnapshot {
   const children = partial.children ?? [];
   const tree = buildTree({
@@ -87,7 +88,7 @@ function session(partial: {
     fastMode: false,
     cost: tree.cost,
     waste: cost(partial.wasteRaw ?? 0),
-    toggles: { ...DEFAULT_WASTE_TOGGLES },
+    toggles: { ...DEFAULT_WASTE_TOGGLES, ...partial.toggles },
     tree,
     turns: partial.turns,
     children,
@@ -578,7 +579,30 @@ describe("buildOverview", () => {
       ],
     });
     child.parentId = "parent";
-    const overview = buildOverview(
+    const range = {
+      watchPath: "/tmp",
+      now: "2026-08-28T12:00:00.000Z",
+      sinceMs: Date.parse("2026-08-21T12:00:00.000Z"),
+      dayCount: 8,
+    };
+
+    const idleOnly = buildOverview(
+      [
+        session({
+          id: "parent",
+          startedAt: "2026-07-19T09:00:00.000Z",
+          lastEventAt: "2026-08-28T11:00:00.000Z",
+          turns: [],
+          children: [child],
+          toggles: { poll: false },
+        }),
+      ],
+      range,
+    );
+    expect(idleOnly.cost.raw).toBe(80);
+    expect(idleOnly.waste.raw).toBe(0);
+
+    const withPoll = buildOverview(
       [
         session({
           id: "parent",
@@ -588,14 +612,9 @@ describe("buildOverview", () => {
           children: [child],
         }),
       ],
-      {
-        watchPath: "/tmp",
-        now: "2026-08-28T12:00:00.000Z",
-        sinceMs: Date.parse("2026-08-21T12:00:00.000Z"),
-        dayCount: 8,
-      },
+      range,
     );
-    expect(overview.cost.raw).toBe(80);
-    expect(overview.waste.raw).toBe(0);
+    expect(withPoll.cost.raw).toBe(80);
+    expect(withPoll.waste.raw).toBe(80);
   });
 });
