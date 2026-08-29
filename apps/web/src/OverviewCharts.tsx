@@ -57,7 +57,7 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
         <div>
           <h2 className="chart-title">消耗趋势</h2>
           <p className="chart-desc">
-            按 UTC 日期归桶（跨日会话按每轮结束时间拆分）
+            按本地日期归桶（跨日会话按每轮结束时间拆分）
             {rangeLabel ? ` · ${rangeLabel}` : ""}
             。窗口外的用量记在「更早 / 之后」。单位跟随页顶开关。不是逐 token
             实时扣费。

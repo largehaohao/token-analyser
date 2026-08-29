@@ -129,7 +129,13 @@ describe("buildOverview", () => {
     expect(overview.watchPath).toBe("/Users/zhanghao/.codex");
     expect(overview.slices.find((s) => s.key === "code")?.raw).toBe(1000);
     expect(overview.slices.find((s) => s.key === "planning")?.raw).toBe(500);
-    expect(overview.rateCardAsOf).toBe("2026-08-27");
+    expect(overview.rateCardAsOf).toBe("2026-08-29");
+    expect(overview.quality).toEqual({
+      pricedRaw: 1600,
+      unpricedRaw: 0,
+      ledgerWarningSessions: 0,
+      parseErrors: 0,
+    });
     expect(overview.models).toEqual([
       {
         model: "gpt-5.6-luna",
@@ -274,6 +280,35 @@ describe("buildOverview", () => {
     expect(overview.cost.raw).toBe(300);
     expect(overview.days.find((d) => d.date === "2026-08-27")?.cost.raw).toBe(100);
     expect(overview.days.find((d) => d.date === "2026-08-28")?.cost.raw).toBe(200);
+  });
+
+  it("groups trend days in the browser's local timezone", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "local-midnight",
+          startedAt: "2026-08-27T17:00:00.000Z",
+          turns: [
+            turn({
+              id: "local-next-day",
+              bucket: "code",
+              raw: 100,
+              startedAt: "2026-08-27T17:00:00.000Z",
+              endedAt: "2026-08-27T17:30:00.000Z",
+            }),
+          ],
+        }),
+      ],
+      {
+        watchPath: "/tmp",
+        now: "2026-08-28T12:00:00.000Z",
+        dayCount: 2,
+        timezone: "Asia/Shanghai",
+        timezoneOffsetMinutes: 8 * 60,
+      },
+    );
+    expect(overview.days.find((d) => d.date === "2026-08-28")?.cost.raw).toBe(100);
+    expect(overview.days.find((d) => d.date === "2026-08-27")?.cost.raw).toBe(0);
   });
 
   it("puts spend outside the chart window into an earlier bucket so bars match the KPI", () => {

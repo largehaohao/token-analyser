@@ -17,6 +17,7 @@ type Props = {
   highlightTurnId: string | null;
   highlightNonce?: number;
   resetKey: string;
+  scopeLabel?: string;
 };
 
 function excerpt(text: string, max: number): string {
@@ -40,6 +41,7 @@ export function TurnTable({
   highlightTurnId,
   highlightNonce = 0,
   resetKey,
+  scopeLabel,
 }: Props) {
   const filtered = useMemo(
     () =>
@@ -75,7 +77,7 @@ export function TurnTable({
     <div className="turn-table-wrap chart-card">
       <div className="turn-table-head">
         <h3>
-          轮次 ({visible.length}
+          轮次{scopeLabel ? ` · ${scopeLabel}` : ""} ({visible.length}
           {filtered.length !== visible.length ? ` / ${filtered.length}` : ""})
         </h3>
         <TurnSparkline turns={filtered} />
@@ -128,11 +130,20 @@ export function TurnTable({
                         ]
                           .filter(Boolean)
                           .join(" ")}
+                        tabIndex={0}
+                        aria-expanded={expanded}
                         onClick={() =>
                           setExpandedId((current) =>
                             current === t.id ? null : t.id,
                           )
                         }
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          setExpandedId((current) =>
+                            current === t.id ? null : t.id,
+                          );
+                        }}
                       >
                         <td
                           title={new Date(t.startedAt).toLocaleString("zh-CN", {

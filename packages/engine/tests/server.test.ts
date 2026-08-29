@@ -163,7 +163,7 @@ describe("startServer", () => {
       expect(emptyRes.status).toBe(200);
       const emptyBody = (await emptyRes.json()) as { sessionCount: number };
       expect(emptyBody.sessionCount).toBe(0);
-      expect(body.rateCardAsOf).toBe("2026-08-27");
+      expect(body.rateCardAsOf).toBe("2026-08-29");
     } finally {
       await server.close();
     }

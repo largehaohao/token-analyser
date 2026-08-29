@@ -302,7 +302,7 @@ function AppShell() {
               overview={overview}
               onOpenSessions={openSessions}
               rangeLabel={
-                range === "all" ? `${rangeLabel}（趋势为近 30 天 UTC）` : rangeLabel
+                range === "all" ? `${rangeLabel}（趋势为近 30 个本地日）` : rangeLabel
               }
             />
           ) : overviewState === "error" ? (

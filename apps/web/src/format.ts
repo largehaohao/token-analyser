@@ -227,5 +227,5 @@ export function formatAbsoluteTime(iso: string | null): string {
 }
 
 export function disclaimer(rateCardAsOf: string): string {
-  return `Local estimate from telemetry and the public rate card dated ${rateCardAsOf}. Not OpenAI's bill.`;
+  return `基于本地遥测与 ${rateCardAsOf} 公共费率表的估算，不代表 OpenAI 账单。`;
 }

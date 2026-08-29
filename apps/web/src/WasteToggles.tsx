@@ -27,6 +27,7 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
   const latest = useRef(snapshot);
   const requestQueue = useRef(Promise.resolve());
   const [persistError, setPersistError] = useState<string | null>(null);
+  const [pending, setPending] = useState(0);
 
   // Keep the ref current during render so a selection change invalidates
   // responses from a previous session before another click can queue work.
@@ -41,12 +42,13 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
     latest.current = optimistic;
     onUpdate(optimistic);
     setPersistError(null);
+    setPending((count) => count + 1);
 
     requestQueue.current = requestQueue.current
       .catch(() => undefined)
       .then(async () => {
-        if (latest.current.id !== current.id) return;
         try {
+          if (latest.current.id !== current.id) return;
           const updated = await patchToggles(current.id, { [id]: checked });
           if (latest.current.id !== current.id) return;
           latest.current = updated;
@@ -63,13 +65,23 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
             if (latest.current.id !== current.id) return;
             setPersistError(persistToggleError(true, true));
           }
+        } finally {
+          setPending((count) => Math.max(0, count - 1));
         }
       });
   }
 
   return (
     <div className="waste-toggles chart-card">
-      <h3>浪费开关</h3>
+      <div className="toggle-head">
+        <h3>浪费开关</h3>
+        <span
+          className={pending > 0 ? "toggle-status saving" : "toggle-status"}
+          role="status"
+        >
+          {pending > 0 ? "正在保存…" : "已保存"}
+        </span>
+      </div>
       <p className="chart-desc">
         浪费是轮次集合，同一轮只计一次。默认打开可避免的异常，不是所有贵的工作。
       </p>

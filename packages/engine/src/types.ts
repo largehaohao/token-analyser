@@ -108,7 +108,15 @@ export type RateCard = {
   usd_per_credit: number;
   usd_per_credit_source: string;
   fast_multiplier: number;
-  models: Record<string, { input: number; cached: number; output: number }>;
+  models: Record<
+    string,
+    {
+      input: number;
+      cached: number;
+      output: number;
+      fast_multiplier?: number;
+    }
+  >;
 };
 
 export type SessionSnapshot = {

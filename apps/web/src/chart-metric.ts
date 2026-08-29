@@ -78,7 +78,7 @@ export function formatChartDay(date: string): string {
 export function chartDayTooltip(date: string): string {
   if (date === "earlier") return "窗口之前";
   if (date === "later") return "窗口之后";
-  return `${date} UTC`;
+  return `${date} 本地时间`;
 }
 
 export function trendColumnAriaLabel(

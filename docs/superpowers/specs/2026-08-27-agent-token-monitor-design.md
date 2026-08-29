@@ -136,11 +136,11 @@ credits =
   + output       / 1e6 * output_rate
 ```
 
-Rates are per 1M tokens, keyed by the model id from `turn_context` (e.g. `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`). Initial card copies the public Codex rate card as of 2026-08-27:
+Rates are per 1M tokens, keyed by the model id from `turn_context` (e.g. `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`). The shipped card follows the public Codex rate card as of 2026-08-29:
 
 | Model | Input | Cached input | Output |
 |---|---:|---:|---:|
-| gpt-5.6-sol | 125 | 12.5 | 750 |
+| gpt-5.6-sol | 100 | 10 | 500 |
 | gpt-5.6-terra | 50 | 5 | 300 |
 | gpt-5.6-luna | 5 | 0.5 | 30 |
 

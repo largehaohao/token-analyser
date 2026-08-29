@@ -51,6 +51,12 @@ export type Overview = {
   waste: Cost;
   unpricedRaw: number;
   rateCardAsOf: string;
+  quality: {
+    pricedRaw: number;
+    unpricedRaw: number;
+    ledgerWarningSessions: number;
+    parseErrors: number;
+  };
   days: OverviewDay[];
   slices: OverviewSlice[];
   models: OverviewModel[];
@@ -62,6 +68,10 @@ export type OverviewOptions = {
   now?: string;
   dayCount?: number;
   sinceMs?: number;
+  /** IANA timezone from the browser, used for DST-correct trend buckets. */
+  timezone?: string;
+  /** Minutes east of UTC, matching `-Date#getTimezoneOffset()`. */
+  timezoneOffsetMinutes?: number;
 };
 
 export const OVERVIEW_EARLIER_DATE = "earlier";
@@ -76,15 +86,55 @@ function countTurns(snap: SessionSnapshot): number {
   );
 }
 
-function utcDay(iso: string): string | null {
-  if (!iso || iso.length < 10) return null;
-  const day = iso.slice(0, 10);
+function collectQuality(
+  session: SessionSnapshot,
+): { ledgerWarningSessions: number; parseErrors: number } {
+  let ledgerWarningSessions = session.ledger_warning ? 1 : 0;
+  let parseErrors = session.parse_errors.length;
+  for (const child of session.children) {
+    const quality = collectQuality(child);
+    ledgerWarningSessions += quality.ledgerWarningSessions;
+    parseErrors += quality.parseErrors;
+  }
+  return { ledgerWarningSessions, parseErrors };
+}
+
+function calendarDay(
+  iso: string,
+  timezone: string | undefined,
+  timezoneOffsetMinutes = 0,
+): string | null {
+  const time = Date.parse(iso);
+  if (!Number.isFinite(time)) return null;
+  if (timezone) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(time);
+      const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      const day = `${value.year}-${value.month}-${value.day}`;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
+    } catch {
+      // Fall through to the validated numeric offset.
+    }
+  }
+  const day = new Date(time + timezoneOffsetMinutes * 60_000)
+    .toISOString()
+    .slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
 }
 
-function dayRange(nowIso: string, count: number): string[] {
-  const now = new Date(nowIso);
-  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+function dayRange(
+  nowIso: string,
+  count: number,
+  timezone: string | undefined,
+  timezoneOffsetMinutes = 0,
+): string[] {
+  const currentDay = calendarDay(nowIso, timezone, timezoneOffsetMinutes);
+  const end = Date.parse(`${currentDay ?? nowIso.slice(0, 10)}T00:00:00.000Z`);
   const days: string[] = [];
   for (let i = count - 1; i >= 0; i--) {
     days.push(new Date(end - i * 86_400_000).toISOString().slice(0, 10));
@@ -223,7 +273,9 @@ export function buildOverview(
   const now = opts.now ?? new Date().toISOString();
   const included = sessions.filter((session) => inRange(session, opts.sinceMs));
   const dayCount = opts.dayCount ?? 8;
-  const days = dayRange(now, dayCount);
+  const timezone = opts.timezone;
+  const timezoneOffsetMinutes = opts.timezoneOffsetMinutes ?? 0;
+  const days = dayRange(now, dayCount, timezone, timezoneOffsetMinutes);
   const lastDay = days[days.length - 1] ?? "";
   const dayCosts = new Map(days.map((date) => [date, emptyMaybeCost()]));
   const dayFlagged = new Map(days.map((date) => [date, emptyMaybeCost()]));
@@ -244,8 +296,13 @@ export function buildOverview(
   let later = emptyMaybeCost();
   let laterFlagged = emptyMaybeCost();
   let laterUnpriced = 0;
+  let ledgerWarningSessions = 0;
+  let parseErrors = 0;
 
   for (const session of included) {
+    const quality = collectQuality(session);
+    ledgerWarningSessions += quality.ledgerWarningSessions;
+    parseErrors += quality.parseErrors;
     const ranged = filterSessionTurns(session, opts.sinceMs);
     waste = addKnownCost(waste, windowedWaste(session, opts.sinceMs));
     turnCount += countTurns(ranged);
@@ -266,7 +323,11 @@ export function buildOverview(
       if (turn.cost.credits == null) prev.unpricedRaw += turn.cost.raw;
       models.set(model, prev);
 
-      const day = utcDay(turn.endedAt || turn.startedAt);
+      const day = calendarDay(
+        turn.endedAt || turn.startedAt,
+        timezone,
+        timezoneOffsetMinutes,
+      );
       const unpriced = turn.cost.credits == null ? turn.cost.raw : 0;
       if (day && dayCosts.has(day)) {
         dayCosts.set(day, addKnownCost(dayCosts.get(day)!, turn.cost));
@@ -313,6 +374,12 @@ export function buildOverview(
     waste: normalizeCost(waste),
     unpricedRaw,
     rateCardAsOf: loadRateCard().as_of,
+    quality: {
+      pricedRaw: Math.max(0, cost.raw - unpricedRaw),
+      unpricedRaw,
+      ledgerWarningSessions,
+      parseErrors,
+    },
     days: chartDays,
     slices: OVERVIEW_SLICE_KEYS.map((key) => ({
       key,

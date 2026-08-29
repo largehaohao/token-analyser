@@ -134,6 +134,12 @@ export type Overview = {
   waste: Cost;
   unpricedRaw: number;
   rateCardAsOf: string;
+  quality?: {
+    pricedRaw: number;
+    unpricedRaw: number;
+    ledgerWarningSessions: number;
+    parseErrors: number;
+  };
   days: OverviewDay[];
   slices: OverviewSlice[];
   models?: OverviewModel[];
@@ -202,6 +208,12 @@ export async function getOverview(
   const params = new URLSearchParams();
   if (query.since) params.set("since", query.since);
   params.set("days", String(query.days));
+  params.set(
+    "timezone_offset_minutes",
+    String(-new Date(nowMs).getTimezoneOffset()),
+  );
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (timezone) params.set("timezone", timezone);
   return parseJson<Overview>(await fetch(`/overview?${params.toString()}`));
 }
 
