@@ -3,7 +3,8 @@ import { appendFileSync, readFileSync, writeFileSync, mkdtempSync, utimesSync } 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ingestFile, readJsonlFile } from "../src/ingest.ts";
+import { ingestFile, hasLiveReadState, readJsonlFile } from "../src/ingest.ts";
+import { SessionStore } from "../src/store.ts";
 
 const fixtures = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -108,6 +109,21 @@ describe("readJsonlFile", () => {
     expect(ingestFile(filePath, { allowAppend: true }).turns).toHaveLength(0);
     appendFileSync(filePath, `\n${rest.join("\n")}`);
     expect(ingestFile(filePath, { allowAppend: true }).turns.length).toBeGreaterThan(0);
+  });
+
+  it("evicts live append state when the store drops the path", () => {
+    const waitPoll = readFileSync(
+      path.join(fixtures, "wait-poll.jsonl"),
+      "utf8",
+    );
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-evict-"));
+    const filePath = path.join(dir, "rollout-live.jsonl");
+    writeFileSync(filePath, waitPoll.split("\n")[0]!);
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.ingestPath(filePath, { allowAppend: true });
+    expect(hasLiveReadState(filePath)).toBe(true);
+    store.removePath(filePath);
+    expect(hasLiveReadState(filePath)).toBe(false);
   });
 
   it("invalidates the historical cache when the effective rate card changes", () => {

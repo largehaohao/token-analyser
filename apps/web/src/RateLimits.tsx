@@ -1,4 +1,4 @@
-import { formatWindow, parseRateLimits } from "./rate-limits";
+import { formatResetAt, formatWindow, parseRateLimits } from "./rate-limits";
 
 function level(percent: number): "ok" | "warn" | "hot" {
   if (percent >= 80) return "hot";
@@ -46,9 +46,17 @@ export function RateLimits({ raw }: { raw: unknown }) {
                 style={{ width: `${width}%` }}
               />
             </div>
-            {gauge.windowMinutes != null && (
+            {(gauge.windowMinutes != null || gauge.resetsAt != null) && (
               <div className="rate-gauge-meta">
-                {formatWindow(gauge.windowMinutes)} window
+                {gauge.windowMinutes != null
+                  ? `${formatWindow(gauge.windowMinutes)} window`
+                  : null}
+                {gauge.windowMinutes != null && gauge.resetsAt != null
+                  ? " · "
+                  : null}
+                {gauge.resetsAt != null
+                  ? `reset ${formatResetAt(gauge.resetsAt)}`
+                  : null}
               </div>
             )}
           </div>

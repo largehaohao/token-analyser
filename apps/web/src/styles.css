@@ -454,6 +454,38 @@ input {
   font-size: 12px;
 }
 
+.banner.app-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: #1a1010;
+  border: 1px solid #4a1818;
+  border-radius: 12px;
+  color: #ff6b6b;
+  padding: 0.65rem 0.85rem;
+  margin: 0 1.6rem 0.75rem;
+  font-size: 13px;
+}
+
+.banner.app-error button {
+  background: transparent;
+  border: 1px solid #4a1818;
+  color: #ff6b6b;
+  font-family: inherit;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 0.15rem 0.65rem;
+  cursor: pointer;
+}
+
+.import-error,
+.toggle-error {
+  color: #ff6b6b;
+  font-size: 12px;
+  margin: 0.35rem 0 0;
+}
+
 .parse-error-detail {
   color: #888;
   margin-top: 0.25rem;

@@ -20,6 +20,22 @@ export function effectiveRateCard(cardPath: string = defaultPath): RateCard {
   return { ...card, usd_per_credit: override };
 }
 
+function ratesForModel(
+  model: string | null,
+  card: RateCard,
+): { input: number; cached: number; output: number } | undefined {
+  if (!model) return undefined;
+  const exact = card.models[model];
+  if (exact) return exact;
+  let best: string | undefined;
+  for (const key of Object.keys(card.models)) {
+    if (model.startsWith(`${key}-`) || model.startsWith(`${key}.`)) {
+      if (!best || key.length > best.length) best = key;
+    }
+  }
+  return best ? card.models[best] : undefined;
+}
+
 export function priceUsage(
   usage: TokenUsage,
   model: string | null,
@@ -30,7 +46,7 @@ export function priceUsage(
   const cached_input = usage.cached_input_tokens;
   const output = usage.output_tokens;
   const raw = usage.input_tokens + usage.output_tokens;
-  const rates = model ? card.models[model] : undefined;
+  const rates = ratesForModel(model, card);
   if (!rates) {
     return { raw, uncached_input, cached_input, output, credits: null, usd: null };
   }

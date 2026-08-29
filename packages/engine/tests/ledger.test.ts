@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJsonlChunk } from "../src/parse-jsonl.ts";
-import { buildLedger } from "../src/ledger.ts";
+import { LedgerBuilder, buildLedger } from "../src/ledger.ts";
+import type { RolloutLine } from "../src/types.ts";
 
 const fixtures = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -89,5 +90,214 @@ describe("buildLedger", () => {
     const { turns } = buildLedger(source, "function-envelope", { isSubagent: false });
     expect(turns[0]!.tools[0]!.name).toBe("exec");
     expect(turns[0]!.tools[0]!.input).toBe("cat README.md");
+  });
+
+  it("joins argv cmd envelopes into a shell command", () => {
+    const source = eventsFrom("wait-poll.jsonl");
+    const call = source.find((event) => event.type === "response_item" && event.payload?.type === "custom_tool_call");
+    const output = source.find((event) => event.type === "response_item" && event.payload?.type === "custom_tool_call_output");
+    call!.payload = {
+      type: "function_call",
+      name: "exec",
+      arguments: JSON.stringify({ cmd: ["cat", "README.md"] }),
+      call_id: "argv",
+    };
+    output!.payload = { type: "function_call_output", call_id: "argv", output: "readme" };
+    const { turns } = buildLedger(source, "argv-cmd", { isSubagent: false });
+    expect(turns[0]!.tools[0]!.input).toBe("cat README.md");
+  });
+
+  it("prices every turn with Fast once the session records it", () => {
+    const usage = (input: number, totalInput: number) => ({
+      last_token_usage: {
+        input_tokens: input,
+        cached_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: input,
+      },
+      total_token_usage: {
+        input_tokens: totalInput,
+        cached_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: totalInput,
+      },
+    });
+    const events: RolloutLine[] = [
+      { timestamp: "t0", type: "session_meta", payload: { id: "fast-s" } },
+      {
+        timestamp: "t1",
+        type: "turn_context",
+        payload: { model: "gpt-5.6-sol", fast_mode: true },
+      },
+      {
+        timestamp: "t2",
+        type: "event_msg",
+        payload: { type: "token_count", info: usage(1_000_000, 1_000_000) },
+      },
+      {
+        timestamp: "t3",
+        type: "turn_context",
+        payload: { model: "gpt-5.6-sol" },
+      },
+      {
+        timestamp: "t4",
+        type: "event_msg",
+        payload: { type: "token_count", info: usage(1_000_000, 2_000_000) },
+      },
+    ];
+    const { turns, fastMode } = buildLedger(events, "fast-s", { isSubagent: false });
+    expect(fastMode).toBe(true);
+    expect(turns[0]!.cost.credits).toBeCloseTo(312.5, 5);
+    expect(turns[1]!.cost.credits).toBeCloseTo(312.5, 5);
+  });
+
+  it("treats service_tier=fast as Fast mode", () => {
+    const events: RolloutLine[] = [
+      { timestamp: "t0", type: "session_meta", payload: { id: "tier" } },
+      {
+        timestamp: "t1",
+        type: "turn_context",
+        payload: { model: "gpt-5.6-sol", service_tier: "fast" },
+      },
+      {
+        timestamp: "t2",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 1_000_000,
+              cached_input_tokens: 0,
+              cache_write_input_tokens: 0,
+              output_tokens: 0,
+              reasoning_output_tokens: 0,
+              total_tokens: 1_000_000,
+            },
+            total_token_usage: {
+              input_tokens: 1_000_000,
+              cached_input_tokens: 0,
+              cache_write_input_tokens: 0,
+              output_tokens: 0,
+              reasoning_output_tokens: 0,
+              total_tokens: 1_000_000,
+            },
+          },
+        },
+      },
+    ];
+    const { turns, fastMode } = buildLedger(events, "tier", { isSubagent: false });
+    expect(fastMode).toBe(true);
+    expect(turns[0]!.cost.credits).toBeCloseTo(312.5, 5);
+  });
+
+  it("sets ledger_warning when last_token_usage sums diverge from total", () => {
+    const events: RolloutLine[] = [
+      { timestamp: "t0", type: "session_meta", payload: { id: "warn" } },
+      {
+        timestamp: "t1",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 100,
+              cached_input_tokens: 0,
+              cache_write_input_tokens: 0,
+              output_tokens: 10,
+              reasoning_output_tokens: 0,
+              total_tokens: 110,
+            },
+            total_token_usage: {
+              input_tokens: 100,
+              cached_input_tokens: 0,
+              cache_write_input_tokens: 0,
+              output_tokens: 10,
+              reasoning_output_tokens: 0,
+              total_tokens: 110,
+            },
+          },
+        },
+      },
+      {
+        timestamp: "t2",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 50,
+              cached_input_tokens: 0,
+              cache_write_input_tokens: 0,
+              output_tokens: 5,
+              reasoning_output_tokens: 0,
+              total_tokens: 55,
+            },
+            total_token_usage: {
+              input_tokens: 9999,
+              cached_input_tokens: 0,
+              cache_write_input_tokens: 0,
+              output_tokens: 15,
+              reasoning_output_tokens: 0,
+              total_tokens: 10014,
+            },
+          },
+        },
+      },
+    ];
+    const { turns, ledger_warning } = buildLedger(events, "warn", {
+      isSubagent: false,
+    });
+    expect(turns).toHaveLength(2);
+    expect(ledger_warning).toBe(true);
+  });
+
+  it("does not warn when only reasoning counters drift", () => {
+    const events: RolloutLine[] = [
+      { timestamp: "t0", type: "session_meta", payload: { id: "slack" } },
+      {
+        timestamp: "t1",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 100,
+              cached_input_tokens: 0,
+              cache_write_input_tokens: 0,
+              output_tokens: 10,
+              reasoning_output_tokens: 3,
+              total_tokens: 110,
+            },
+            total_token_usage: {
+              input_tokens: 100,
+              cached_input_tokens: 0,
+              cache_write_input_tokens: 0,
+              output_tokens: 10,
+              reasoning_output_tokens: 99,
+              total_tokens: 110,
+            },
+          },
+        },
+      },
+    ];
+    const { ledger_warning } = buildLedger(events, "slack", { isSubagent: false });
+    expect(ledger_warning).toBe(false);
+  });
+
+  it("incremental consume matches a full rebuild", () => {
+    const events = eventsFrom("duplicate-token-count.jsonl");
+    const full = buildLedger(events, "s1", { isSubagent: false });
+    const builder = new LedgerBuilder("s1", { isSubagent: false });
+    builder.consume(events.slice(0, 4));
+    builder.consume(events.slice(4));
+    const split = builder.snapshot();
+    expect(split.turns.map((turn) => turn.cost.raw)).toEqual(
+      full.turns.map((turn) => turn.cost.raw),
+    );
+    expect(split.ledger_warning).toBe(full.ledger_warning);
   });
 });

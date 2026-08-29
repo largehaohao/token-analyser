@@ -120,6 +120,14 @@ export function findNodeById(root: TreeNode, id: string): TreeNode | null {
   return null;
 }
 
+export function resolveSelectedNode(
+  root: TreeNode,
+  id: string | null,
+): TreeNode {
+  if (!id) return root;
+  return findNodeById(root, id) ?? root;
+}
+
 export function findNodeForTurnId(root: TreeNode, turnId: string): TreeNode | null {
   for (const child of root.children) {
     const found = findNodeForTurnId(child, turnId);

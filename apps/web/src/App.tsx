@@ -10,6 +10,7 @@ import {
   type SessionSnapshot,
   type StreamStatus,
 } from "./api";
+import { errorMessage, isNotFound, streamErrorBanner } from "./app-errors";
 import { UnitProvider } from "./UnitContext";
 import type { CostUnit } from "./format";
 import { OverviewPage } from "./OverviewPage";
@@ -51,6 +52,7 @@ function AppShell() {
   );
   const [range, setRange] = useState<SessionRangeId>(DEFAULT_SESSION_RANGE);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
+  const [appError, setAppError] = useState<string | null>(null);
   const listRequest = useRef(0);
   const sessionRequest = useRef(0);
   const overviewRequest = useRef(0);
@@ -88,23 +90,42 @@ function AppShell() {
 
   const refreshList = useCallback(async () => {
     const requestId = ++listRequest.current;
-    const list = await listSessions();
-    if (requestId === listRequest.current) {
-      setSessions(list);
+    try {
+      const list = await listSessions();
+      if (requestId === listRequest.current) {
+        setSessions(list);
+      }
+      return list;
+    } catch (err) {
+      if (requestId === listRequest.current) {
+        setAppError(errorMessage(err, "加载会话列表失败"));
+      }
+      throw err;
     }
-    return list;
   }, []);
 
   const refreshSession = useCallback(async (id: string) => {
     const requestId = ++sessionRequest.current;
-    const snap = await getSession(id);
-    if (
-      requestId === sessionRequest.current &&
-      selectedIdRef.current === id
-    ) {
-      setSnapshot(snap);
+    try {
+      const snap = await getSession(id);
+      if (
+        requestId === sessionRequest.current &&
+        selectedIdRef.current === id
+      ) {
+        setSnapshot(snap);
+      }
+      return snap;
+    } catch (err) {
+      if (requestId !== sessionRequest.current || selectedIdRef.current !== id) {
+        return;
+      }
+      if (isNotFound(err)) {
+        setSnapshot(null);
+        return;
+      }
+      setAppError(errorMessage(err, "加载会话失败"));
+      setSnapshot(null);
     }
-    return snap;
   }, []);
 
   useEffect(() => {
@@ -136,7 +157,9 @@ function AppShell() {
 
   useEffect(() => {
     return openStream(
-      () => {
+      (event) => {
+        const banner = streamErrorBanner(event);
+        if (banner) setAppError(banner);
         void refreshOverview().catch(() => undefined);
         void refreshList().catch(() => undefined);
         const currentId = selectedIdRef.current;
@@ -149,15 +172,22 @@ function AppShell() {
   }, [refreshList, refreshOverview, refreshSession]);
 
   async function handleImport(filename: string, text: string) {
-    const snap = await importNdjson(filename, text);
-    await refreshList();
-    await refreshOverview().catch(() => undefined);
-    sessionRequest.current += 1;
-    selectedIdRef.current = snap.id;
-    setView("sessions");
-    setSelectedId(snap.id);
-    setSnapshot(snap);
-    setContextOpen(null);
+    try {
+      const snap = await importNdjson(filename, text);
+      await refreshList();
+      await refreshOverview().catch(() => undefined);
+      sessionRequest.current += 1;
+      selectedIdRef.current = snap.id;
+      setView("sessions");
+      setSelectedId(snap.id);
+      setSelectedNodeId(null);
+      setSnapshot(snap);
+      setContextOpen(null);
+      setAppError(null);
+    } catch (err) {
+      setAppError(errorMessage(err, "导入失败"));
+      throw err;
+    }
   }
 
   function handleSelectSession(id: string) {
@@ -232,6 +262,14 @@ function AppShell() {
             <UnitSwitcher />
           </div>
         </header>
+        {appError && (
+          <div className="banner app-error" role="alert">
+            <span>{appError}</span>
+            <button type="button" onClick={() => setAppError(null)}>
+              关闭
+            </button>
+          </div>
+        )}
         {view === "overview" ? (
           overviewState === "ready" && overview ? (
             <OverviewPage

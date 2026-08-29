@@ -1,6 +1,7 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { WasteToggleId, SessionSnapshot } from "./api";
 import { getSession, patchToggles } from "./api";
+import { persistToggleError } from "./waste-toggles";
 
 const TOGGLE_LABELS: { id: WasteToggleId; label: string }[] = [
   { id: "poll", label: "Waiting poll" },
@@ -21,6 +22,7 @@ type Props = {
 export function WasteToggles({ snapshot, onUpdate }: Props) {
   const latest = useRef(snapshot);
   const requestQueue = useRef(Promise.resolve());
+  const [persistError, setPersistError] = useState<string | null>(null);
 
   // Keep the ref current during render so a selection change invalidates
   // responses from a previous session before another click can queue work.
@@ -34,6 +36,7 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
     };
     latest.current = optimistic;
     onUpdate(optimistic);
+    setPersistError(null);
 
     requestQueue.current = requestQueue.current
       .catch(() => undefined)
@@ -44,14 +47,17 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
           if (latest.current.id !== current.id) return;
           latest.current = updated;
           onUpdate(updated);
+          setPersistError(null);
         } catch {
           try {
             const refreshed = await getSession(current.id);
             if (latest.current.id !== current.id) return;
             latest.current = refreshed;
             onUpdate(refreshed);
+            setPersistError(null);
           } catch {
-            // Keep the optimistic state until the next successful refresh.
+            if (latest.current.id !== current.id) return;
+            setPersistError(persistToggleError(true, true));
           }
         }
       });
@@ -63,6 +69,11 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
       <p className="chart-desc">
         浪费是轮次集合，同一轮只计一次。默认打开可避免的异常，不是所有贵的工作。
       </p>
+      {persistError && (
+        <p className="toggle-error" role="alert">
+          {persistError}
+        </p>
+      )}
       <div className="toggle-grid">
         {TOGGLE_LABELS.map(({ id, label }) => (
           <label key={id}>

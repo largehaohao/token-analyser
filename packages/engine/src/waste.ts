@@ -28,6 +28,14 @@ function collectChildTurns(child: SessionSnapshot, idle: boolean): Turn[] {
   return turns;
 }
 
+function walkTurns(
+  session: SessionSnapshot,
+  visit: (turn: Turn) => void,
+): void {
+  for (const turn of session.turns) visit(turn);
+  for (const child of session.children) walkTurns(child, visit);
+}
+
 export function computeWaste(args: {
   turns: Turn[];
   children: SessionSnapshot[];
@@ -36,12 +44,15 @@ export function computeWaste(args: {
   const turnIds = new Set<string>();
   const turnById = new Map<string, Turn>();
 
-  for (const turn of args.turns) {
+  const consider = (turn: Turn): void => {
     if (isOwnTurnWaste(turn, args.toggles)) {
       turnIds.add(turn.id);
       turnById.set(turn.id, turn);
     }
-  }
+  };
+
+  for (const turn of args.turns) consider(turn);
+  for (const child of args.children) walkTurns(child, consider);
 
   if (args.toggles.idle_subagents) {
     for (const child of args.children) {

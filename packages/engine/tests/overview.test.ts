@@ -128,6 +128,7 @@ describe("buildOverview", () => {
     expect(overview.watchPath).toBe("/Users/zhanghao/.codex");
     expect(overview.slices.find((s) => s.key === "code")?.raw).toBe(1000);
     expect(overview.slices.find((s) => s.key === "planning")?.raw).toBe(500);
+    expect(overview.rateCardAsOf).toBe("2026-08-27");
   });
 
   it("fills eight UTC days ending at now and marks flagged days", () => {

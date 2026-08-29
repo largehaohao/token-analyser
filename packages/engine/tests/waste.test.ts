@@ -127,6 +127,21 @@ describe("computeWaste", () => {
     expect(waste.raw).toBe(80);
   });
 
+  it("default poll toggle counts poll inside a healthy child", () => {
+    const parentPoll = turn({ id: "pp", bucket: "waiting.poll", raw: 200 });
+    const child = snapshotWithTurns("child", "Worker", [
+      turn({ id: "cp", bucket: "waiting.poll", raw: 80, sessionId: "child" }),
+      turn({ id: "cc", bucket: "code", raw: 400, sessionId: "child" }),
+    ]);
+    const { waste, turnIds } = computeWaste({
+      turns: [parentPoll],
+      children: [child],
+      toggles: DEFAULT_WASTE_TOGGLES,
+    });
+    expect(turnIds).toEqual(new Set(["pp", "cp"]));
+    expect(waste.raw).toBe(280);
+  });
+
   it("keeps known credits when one waste turn is unpriced", () => {
     const priced = turn({ id: "1", bucket: "waiting.poll", raw: 100 });
     priced.cost = {

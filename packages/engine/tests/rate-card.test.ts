@@ -43,6 +43,24 @@ describe("rate card", () => {
     expect(cost.usd).toBeCloseTo(33.2, 5);
   });
 
+  it("prices model ids that add a suffix onto a known card key", () => {
+    const card = loadRateCard(cardPath);
+    const cost = priceUsage(
+      {
+        input_tokens: 1_000_000,
+        cached_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 1_000_000,
+      },
+      "gpt-5.6-sol-high",
+      card,
+      false,
+    );
+    expect(cost.credits).toBeCloseTo(125, 5);
+  });
+
   it("returns null credits for unknown models", () => {
     const card = loadRateCard(cardPath);
     const cost = priceUsage(

@@ -1,4 +1,4 @@
-import { buildLedger } from "./ledger.ts";
+import { LedgerBuilder, buildLedger } from "./ledger.ts";
 import { classifyTurns } from "./classify.ts";
 import { detect } from "./detect.ts";
 import { buildTree } from "./tree.ts";
@@ -25,7 +25,7 @@ function asString(value: unknown): string {
   return String(value);
 }
 
-function extractSessionInfo(
+export function extractSessionInfo(
   events: RolloutLine[],
   overrideSessionId?: string,
 ): { id: string; isSubagent: boolean } {
@@ -65,17 +65,16 @@ export function analyseSession(args: {
   toggles?: Record<WasteToggleId, boolean>;
   live?: boolean;
   parse_errors?: ParseError[];
+  ledgerBuilder?: LedgerBuilder;
 }): SessionSnapshot {
   const children = args.children ?? [];
   const toggles = args.toggles ?? DEFAULT_WASTE_TOGGLES;
   const parse_errors = args.parse_errors ?? [];
 
   const { id, isSubagent } = extractSessionInfo(args.events, args.sessionId);
-  const { turns: ledgerTurns, ledger_warning, fastMode, meta } = buildLedger(
-    args.events,
-    id,
-    { isSubagent },
-  );
+  const { turns: ledgerTurns, ledger_warning, fastMode, meta } = args.ledgerBuilder
+    ? args.ledgerBuilder.snapshot()
+    : buildLedger(args.events, id, { isSubagent });
 
   const classified = classifyTurns(ledgerTurns);
   const { turns, suggestions } = detect(classified, args.events);

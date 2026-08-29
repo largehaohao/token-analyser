@@ -121,4 +121,37 @@ describe("detect", () => {
     const { turns: labeled } = detect(turns, rewritten);
     expect(labeled[1]!.labels).toContain("compaction_loop");
   });
+
+  it("labels hash-equal rereads as reread_repeat", () => {
+    const { turns, events } = classifiedFromFixture("reread-same-hash.jsonl");
+    const { turns: labeled, suggestions } = detect(turns, events);
+    expect(labeled[0]!.labels).not.toContain("reread_repeat");
+    expect(labeled[1]!.labels).toContain("reread_repeat");
+    expect(suggestions.some((item) => item.kind === "reread_repeat")).toBe(true);
+  });
+
+  it("escalates to compaction_loop_heavy when rereads dominate between compacts", () => {
+    const reread = pollTurn("r1", "2026-08-27T00:00:30.000Z");
+    reread.bucket = "reread";
+    reread.cost = cost(80);
+    const planning = pollTurn("p0", "2026-08-27T00:00:40.000Z");
+    planning.bucket = "planning";
+    planning.cost = cost(10);
+    const { suggestions } = detect(
+      [reread, planning],
+      [
+        {
+          timestamp: "2026-08-27T00:00:10.000Z",
+          type: "compacted",
+          payload: { window_id: "w1" },
+        },
+        {
+          timestamp: "2026-08-27T00:01:00.000Z",
+          type: "compacted",
+          payload: { window_id: "w2" },
+        },
+      ],
+    );
+    expect(suggestions[0]?.kind).toBe("compaction_loop_heavy");
+  });
 });

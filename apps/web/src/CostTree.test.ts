@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TreeNode } from "./api";
-import { findNodeForTurnId, suggestionTarget } from "./CostTree";
+import { findNodeForTurnId, resolveSelectedNode, suggestionTarget } from "./CostTree";
 
 function node(
   partial: Pick<TreeNode, "id" | "kind" | "turnIds"> & {
@@ -52,5 +52,11 @@ describe("findNodeForTurnId", () => {
       turnId: "t1",
       nodeId: "root",
     });
+  });
+
+  it("falls back to the root when the selected node id is stale", () => {
+    expect(resolveSelectedNode(tree, null).id).toBe("root");
+    expect(resolveSelectedNode(tree, "waiting").id).toBe("waiting");
+    expect(resolveSelectedNode(tree, "s-poll:waiting.poll").id).toBe("root");
   });
 });

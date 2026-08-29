@@ -2,7 +2,7 @@ import path from "node:path";
 import { existsSync, statSync } from "node:fs";
 import { buildTree } from "./tree.ts";
 import { computeWaste } from "./waste.ts";
-import { ingestFile, type IngestOptions } from "./ingest.ts";
+import { ingestFile, clearLiveReadState, type IngestOptions } from "./ingest.ts";
 import { isLive, pruneStaleCache } from "./cache.ts";
 import { effectiveRateCard } from "./rate-card.ts";
 import {
@@ -155,7 +155,10 @@ export class SessionStore {
     if (changed) this.rebuildAll();
   }
 
-  refresh(paths: string[]): void {
+  refresh(
+    paths: string[],
+    opts?: { onError?: (filePath: string, err: Error) => void },
+  ): void {
     const ingested: SessionSnapshot[] = [];
     for (const p of paths) {
       if (!p.endsWith(".jsonl")) continue;
@@ -163,9 +166,11 @@ export class SessionStore {
       if (!base.startsWith("rollout-")) continue;
       try {
         ingested.push(ingestFile(p, { cacheHome: this.cacheHome }));
-      } catch {
-        // A file can disappear between directory scan and ingestion.
-        // Continue loading the remaining sessions.
+      } catch (err) {
+        opts?.onError?.(
+          p,
+          err instanceof Error ? err : new Error(String(err)),
+        );
       }
     }
 
@@ -178,6 +183,20 @@ export class SessionStore {
       this.sources.set(snap.id, { ...snap, children: [] });
     }
     this.rebuildAll();
+  }
+
+  removePath(filePath: string): { id: string; parentId: string | null } | undefined {
+    const resolved = path.resolve(filePath);
+    for (const [id, source] of this.sources) {
+      if (path.resolve(source.path) !== resolved) continue;
+      const parentId = source.parentId;
+      this.sources.delete(id);
+      this.toggles.delete(id);
+      clearLiveReadState(source.path);
+      this.rebuildAll();
+      return { id, parentId };
+    }
+    return undefined;
   }
 
   ingestPath(

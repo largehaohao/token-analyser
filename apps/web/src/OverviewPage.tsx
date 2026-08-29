@@ -1,6 +1,7 @@
 import type { Overview } from "./api";
 import {
   cacheHitRatio,
+  disclaimer,
   formatCompactTokens,
   formatCost,
   formatExactTokens,
@@ -127,6 +128,8 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
           </div>
         </button>
       </div>
+
+      <p className="disclaimer">{disclaimer(overview.rateCardAsOf)}</p>
 
       {overview.sessionCount === 0 && (
         <p className="empty-overview">
