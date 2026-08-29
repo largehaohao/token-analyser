@@ -3,15 +3,19 @@ import type { WasteToggleId, SessionSnapshot } from "./api";
 import { getSession, patchToggles } from "./api";
 import { persistToggleError } from "./waste-toggles";
 
-const TOGGLE_LABELS: { id: WasteToggleId; label: string }[] = [
-  { id: "poll", label: "Waiting poll" },
-  { id: "reread", label: "Duplicate reads" },
-  { id: "compaction_loop", label: "Compaction loop" },
-  { id: "idle_subagents", label: "Idle subagents" },
-  { id: "coord", label: "Coordination (spawn/send)" },
-  { id: "healthy_subagents", label: "Healthy subagent work" },
-  { id: "planning", label: "Planning" },
-  { id: "code", label: "Code" },
+const TOGGLE_LABELS: {
+  id: WasteToggleId;
+  label: string;
+  onByDefault: boolean;
+}[] = [
+  { id: "poll", label: "轮询等待", onByDefault: true },
+  { id: "reread", label: "重复读取", onByDefault: true },
+  { id: "compaction_loop", label: "压缩回读", onByDefault: true },
+  { id: "idle_subagents", label: "空转子 Agent", onByDefault: true },
+  { id: "coord", label: "协调 spawn/send", onByDefault: false },
+  { id: "healthy_subagents", label: "正常子 Agent 工作", onByDefault: false },
+  { id: "planning", label: "规划与思考", onByDefault: false },
+  { id: "code", label: "代码与执行", onByDefault: false },
 ];
 
 type Props = {
@@ -75,14 +79,16 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
         </p>
       )}
       <div className="toggle-grid">
-        {TOGGLE_LABELS.map(({ id, label }) => (
+        {TOGGLE_LABELS.map(({ id, label, onByDefault }) => (
           <label key={id}>
             <input
               type="checkbox"
+              aria-label={label}
               checked={snapshot.toggles[id]}
               onChange={(e) => handleChange(id, e.target.checked)}
             />
-            {label}
+            <span>{label}</span>
+            {onByDefault && <span className="toggle-default">默认开</span>}
           </label>
         ))}
       </div>

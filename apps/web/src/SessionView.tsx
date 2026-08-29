@@ -5,7 +5,9 @@ import {
   cacheHitRatio,
   disclaimer,
   formatCost,
+  formatCostTitle,
   formatPercent,
+  tokenIdentity,
   unpricedNote,
   unpricedRawFromTurns,
   wasteShare,
@@ -58,6 +60,7 @@ export function SessionView({
   const unitWaste = wasteShare(snapshot.waste, snapshot.cost, unit);
   const suggestions = snapshot.suggestions.slice(0, 3);
   const unpriced = unpricedNote(unpricedRawFromTurns(turns));
+  const identity = tokenIdentity(snapshot.cost);
 
   function handleSuggestionClick(ids: string[]) {
     const target = suggestionTarget(snapshot.tree, ids);
@@ -109,14 +112,24 @@ export function SessionView({
         <div className="chart-card headline-main">
           <div className="headline-row">
             <span className="headline-label">总量</span>
-            <span className="headline-value">
+            <span className="headline-value" title={formatCostTitle(snapshot.cost, unit)}>
               {formatCost(snapshot.cost, unit)}
             </span>
           </div>
           {unpriced ? <p className="headline-note">{unpriced}</p> : null}
+          {!identity.ok && (
+            <p className="headline-note identity-warn">
+              构成合计 {identity.parts.toLocaleString("en-US")} ≠ raw{" "}
+              {snapshot.cost.raw.toLocaleString("en-US")}
+            </p>
+          )}
           <div className="headline-row">
             <span className="headline-label">浪费</span>
-            <span className="headline-value waste" data-testid="waste-headline">
+            <span
+              className="headline-value waste"
+              data-testid="waste-headline"
+              title={formatCostTitle(snapshot.waste, unit)}
+            >
               {formatCost(snapshot.waste, unit)}
             </span>
           </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatResetAt, formatWindow, parseRateLimits } from "./rate-limits";
+import { formatResetAt, formatWindow, parseRateLimits, resetIso } from "./rate-limits";
 
 describe("parseRateLimits", () => {
   it("reads nested plan windows with used_percent and window_duration_mins", () => {
@@ -65,5 +65,11 @@ describe("formatWindow", () => {
     expect(formatWindow(10080)).toBe("7d");
     expect(formatWindow(100)).toBe("1h 40m");
     expect(formatWindow(45)).toBe("45m");
+  });
+});
+
+describe("resetIso", () => {
+  it("treats Codex resets_at as unix seconds, not milliseconds", () => {
+    expect(resetIso(1_787_895_092)).toBe("2026-08-28T05:31:32.000Z");
   });
 });

@@ -16,22 +16,74 @@ export function costValue(cost: Cost, unit: CostUnit): number | null {
   return cost.usd;
 }
 
+function formatCreditsNumber(n: number): string {
+  if (n === 0) return "0.0";
+  const abs = Math.abs(n);
+  if (abs < 0.05) {
+    return n.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 3,
+    });
+  }
+  if (abs < 1) {
+    return n.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+}
+
+function formatUsdNumber(n: number): string {
+  if (n === 0) return "$0.00";
+  const abs = Math.abs(n);
+  if (abs < 0.005) {
+    return `$${n.toLocaleString("en-US", {
+      minimumFractionDigits: 3,
+      maximumFractionDigits: 4,
+    })}`;
+  }
+  if (abs < 0.01) {
+    return `$${n.toLocaleString("en-US", {
+      minimumFractionDigits: 3,
+      maximumFractionDigits: 3,
+    })}`;
+  }
+  return `$${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 export function formatCost(cost: Cost, unit: CostUnit): string {
   const value = costValue(cost, unit);
   if (unit === "tokens") {
     return (value ?? 0).toLocaleString("en-US");
   }
   if (value == null) return "—";
-  if (unit === "credits") {
-    return value.toLocaleString("en-US", {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1,
-    });
+  if (unit === "credits") return formatCreditsNumber(value);
+  return formatUsdNumber(value);
+}
+
+/** Full-precision tooltip so compact/rounded headlines stay auditable. */
+export function formatCostTitle(cost: Cost, unit: CostUnit): string {
+  const value = costValue(cost, unit);
+  if (unit === "tokens") {
+    return `${(value ?? 0).toLocaleString("en-US")} tokens`;
   }
-  return `$${value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  if (value == null) return "未定价";
+  if (unit === "credits") {
+    return `${value.toLocaleString("en-US", { maximumFractionDigits: 6 })} credits`;
+  }
+  return `$${value.toLocaleString("en-US", { maximumFractionDigits: 6 })}`;
+}
+
+export function tokenIdentity(cost: Cost): { parts: number; ok: boolean } {
+  const parts = cost.uncached_input + cost.cached_input + cost.output;
+  return { parts, ok: parts === cost.raw };
 }
 
 export function formatUnitSuffix(unit: CostUnit): string {
@@ -70,6 +122,11 @@ export function allocatePercents(values: number[], digits = 1): number[] {
 
 export function headlineCostUnit(unit: CostUnit): CostUnit {
   return unit;
+}
+
+/** Other dimension for a dual KPI: tokens stay paired with credits. */
+export function companionMoneyUnit(unit: CostUnit): CostUnit {
+  return unit === "tokens" ? "credits" : "tokens";
 }
 
 export function unpricedNote(unpricedRaw: number): string {
@@ -119,7 +176,9 @@ export function formatExactTokens(n: number): string {
 
 export function formatCreditsLabel(n: number | null): string {
   if (n == null) return "—";
-  if (n !== 0 && Math.abs(n) < 1) return n.toFixed(2);
+  if (n === 0) return "0";
+  const abs = Math.abs(n);
+  if (abs < 1) return formatCreditsNumber(n);
   return n.toLocaleString("en-US", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 1,

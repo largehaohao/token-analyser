@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { TreeNode } from "./api";
-import { findNodeForTurnId, resolveSelectedNode, suggestionTarget } from "./CostTree";
+import {
+  findNodeForTurnId,
+  resolveSelectedNode,
+  siblingDisplayPercents,
+  suggestionTarget,
+} from "./CostTree";
 
 function node(
   partial: Pick<TreeNode, "id" | "kind" | "turnIds"> & {
@@ -24,6 +29,18 @@ function node(
     turnIds: partial.turnIds,
   };
 }
+
+describe("siblingDisplayPercents", () => {
+  it("allocates nested siblings so displayed percents still sum to 100", () => {
+    const percents = siblingDisplayPercents([
+      { cost: { raw: 1 } },
+      { cost: { raw: 1 } },
+      { cost: { raw: 1 } },
+    ]);
+    expect(percents.reduce((sum, n) => sum + n, 0)).toBeCloseTo(100, 5);
+    expect(percents.every((n) => n === 33.3 || n === 33.4)).toBe(true);
+  });
+});
 
 describe("findNodeForTurnId", () => {
   const tree = node({

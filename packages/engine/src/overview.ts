@@ -34,6 +34,13 @@ export type OverviewDay = {
   unpricedRaw: number;
 };
 
+export type OverviewModel = {
+  model: string;
+  turnCount: number;
+  cost: Cost;
+  unpricedRaw: number;
+};
+
 export type Overview = {
   sessionCount: number;
   turnCount: number;
@@ -46,6 +53,7 @@ export type Overview = {
   rateCardAsOf: string;
   days: OverviewDay[];
   slices: OverviewSlice[];
+  models: OverviewModel[];
 };
 
 export type OverviewOptions = {
@@ -221,6 +229,10 @@ export function buildOverview(
   const dayFlagged = new Map(days.map((date) => [date, emptyMaybeCost()]));
   const dayUnpriced = new Map(days.map((date) => [date, 0]));
   const slices = emptySliceMap();
+  const models = new Map<
+    string,
+    { cost: Cost; turnCount: number; unpricedRaw: number }
+  >();
 
   let cost = emptyMaybeCost();
   let waste = emptyMaybeCost();
@@ -243,6 +255,16 @@ export function buildOverview(
       cost = addKnownCost(cost, turn.cost);
       const key = sliceKey(turn, nested);
       slices[key] = addKnownCost(slices[key], turn.cost);
+      const model = turn.model?.trim() || "(unknown)";
+      const prev = models.get(model) ?? {
+        cost: emptyMaybeCost(),
+        turnCount: 0,
+        unpricedRaw: 0,
+      };
+      prev.cost = addKnownCost(prev.cost, turn.cost);
+      prev.turnCount += 1;
+      if (turn.cost.credits == null) prev.unpricedRaw += turn.cost.raw;
+      models.set(model, prev);
 
       const day = utcDay(turn.endedAt || turn.startedAt);
       const unpriced = turn.cost.credits == null ? turn.cost.raw : 0;
@@ -298,5 +320,13 @@ export function buildOverview(
       credits: slices[key].raw === 0 ? 0 : slices[key].credits,
       usd: slices[key].raw === 0 ? 0 : slices[key].usd,
     })),
+    models: [...models.entries()]
+      .map(([model, entry]) => ({
+        model,
+        turnCount: entry.turnCount,
+        cost: normalizeCost(entry.cost),
+        unpricedRaw: entry.unpricedRaw,
+      }))
+      .sort((a, b) => b.cost.raw - a.cost.raw || a.model.localeCompare(b.model)),
   };
 }

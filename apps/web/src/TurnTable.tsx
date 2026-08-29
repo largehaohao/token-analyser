@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Turn } from "./api";
 import { LABEL_CHIP, treeAppearance } from "./buckets";
-import { formatCost, formatExactTokens } from "./format";
+import { formatCost, formatCostTitle, formatExactTokens } from "./format";
 import { MixBar } from "./MixBar";
 import { TurnSparkline } from "./TurnSparkline";
 import {
@@ -24,6 +24,11 @@ function excerpt(text: string, max: number): string {
   return text.slice(0, max) + "…";
 }
 
+function formatToolNames(turn: Turn): string {
+  if (turn.tools.length === 0) return "—";
+  return turn.tools.map((t) => t.name).join(", ");
+}
+
 function formatTools(turn: Turn): string {
   if (turn.tools.length === 0) return "—";
   return turn.tools.map((t) => `${t.name}(${t.input})`).join(", ");
@@ -44,16 +49,19 @@ export function TurnTable({
     [turns, turnIds],
   );
   const [limit, setLimit] = useState(TURN_PAGE_SIZE);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
 
   useEffect(() => {
     setLimit(TURN_PAGE_SIZE);
+    setExpandedId(null);
   }, [resetKey]);
 
   const visible = visibleTurnWindow(filtered, limit, highlightTurnId);
 
   useEffect(() => {
     if (!highlightTurnId) return;
+    setExpandedId(highlightTurnId);
     const reduceMotion =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -106,80 +114,141 @@ export function TurnTable({
                   const appearance = t.bucket
                     ? treeAppearance(t.bucket, "bucket", t.bucket)
                     : null;
+                  const expanded = expandedId === t.id;
                   return (
-                    <tr
-                      key={t.id}
-                      ref={(el) => {
-                        if (el) rowRefs.current.set(t.id, el);
-                        else rowRefs.current.delete(t.id);
-                      }}
-                      className={highlightTurnId === t.id ? "highlighted" : ""}
-                    >
-                      <td
-                        title={new Date(t.startedAt).toLocaleString("zh-CN", {
-                          hour12: false,
-                        })}
+                    <Fragment key={t.id}>
+                      <tr
+                        ref={(el) => {
+                          if (el) rowRefs.current.set(t.id, el);
+                          else rowRefs.current.delete(t.id);
+                        }}
+                        className={[
+                          highlightTurnId === t.id ? "highlighted" : "",
+                          expanded ? "expanded" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        onClick={() =>
+                          setExpandedId((current) =>
+                            current === t.id ? null : t.id,
+                          )
+                        }
                       >
-                        {new Date(t.startedAt).toLocaleTimeString("zh-CN", {
-                          hour12: false,
-                        })}
-                      </td>
-                      <td className="bucket-col">
-                        {appearance ? (
-                          <span className="bucket-chip">
-                            <i
-                              className="legend-dot"
-                              style={{ background: appearance.color }}
-                            />
-                            {appearance.label}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                        {(t.labels ?? []).map((label) => (
-                          <span key={label} className="label-chip">
-                            {LABEL_CHIP[label] ?? label}
-                          </span>
-                        ))}
-                      </td>
-                      <td className="tools-col" title={formatTools(t)}>
-                        {formatTools(t)}
-                      </td>
-                      <td className="prompt-col" title={t.prompt}>
-                        {excerpt(t.prompt, 80)}
-                      </td>
-                      <td className="mix-col">
-                        <MixBar
-                          className="turn-mix"
-                          label="未缓存 / 缓存 / 输出"
-                          segments={[
-                            {
-                              key: "uncached",
-                              label: "未缓存",
-                              value: t.cost.uncached_input,
-                              className: "uncached",
-                            },
-                            {
-                              key: "cached",
-                              label: "缓存",
-                              value: t.cost.cached_input,
-                              className: "cached",
-                            },
-                            {
-                              key: "output",
-                              label: "输出",
-                              value: t.cost.output,
-                              className: "output",
-                            },
-                          ]}
-                        />
-                      </td>
-                      <td>{formatExactTokens(t.cost.uncached_input)}</td>
-                      <td>{formatExactTokens(t.cost.cached_input)}</td>
-                      <td>{formatExactTokens(t.cost.output)}</td>
-                      <td>{formatCost(t.cost, "credits")}</td>
-                      <td>{formatCost(t.cost, "usd")}</td>
-                    </tr>
+                        <td
+                          title={new Date(t.startedAt).toLocaleString("zh-CN", {
+                            hour12: false,
+                          })}
+                        >
+                          {new Date(t.startedAt).toLocaleTimeString("zh-CN", {
+                            hour12: false,
+                          })}
+                        </td>
+                        <td className="bucket-col">
+                          {appearance ? (
+                            <span className="bucket-chip">
+                              <i
+                                className="legend-dot"
+                                style={{ background: appearance.color }}
+                              />
+                              {appearance.label}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                          {(t.labels ?? []).map((label) => (
+                            <span key={label} className="label-chip">
+                              {LABEL_CHIP[label] ?? label}
+                            </span>
+                          ))}
+                        </td>
+                        <td className="tools-col" title={formatTools(t)}>
+                          {formatToolNames(t)}
+                        </td>
+                        <td className="prompt-col" title={t.prompt}>
+                          {excerpt(t.prompt, 80)}
+                        </td>
+                        <td className="mix-col">
+                          <MixBar
+                            className="turn-mix"
+                            label="未缓存 / 缓存 / 输出"
+                            segments={[
+                              {
+                                key: "uncached",
+                                label: "未缓存",
+                                value: t.cost.uncached_input,
+                                className: "uncached",
+                              },
+                              {
+                                key: "cached",
+                                label: "缓存",
+                                value: t.cost.cached_input,
+                                className: "cached",
+                              },
+                              {
+                                key: "output",
+                                label: "输出",
+                                value: t.cost.output,
+                                className: "output",
+                              },
+                            ]}
+                          />
+                        </td>
+                        <td title={formatExactTokens(t.cost.uncached_input)}>
+                          {formatExactTokens(t.cost.uncached_input)}
+                        </td>
+                        <td title={formatExactTokens(t.cost.cached_input)}>
+                          {formatExactTokens(t.cost.cached_input)}
+                        </td>
+                        <td title={formatExactTokens(t.cost.output)}>
+                          {formatExactTokens(t.cost.output)}
+                        </td>
+                        <td title={formatCostTitle(t.cost, "credits")}>
+                          {formatCost(t.cost, "credits")}
+                        </td>
+                        <td title={formatCostTitle(t.cost, "usd")}>
+                          {formatCost(t.cost, "usd")}
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr className="turn-detail">
+                          <td colSpan={10}>
+                            <div className="turn-detail-grid">
+                              <div>
+                                <h4>提示</h4>
+                                <pre>{t.prompt || "（无用户提示）"}</pre>
+                              </div>
+                              <div>
+                                <h4>工具</h4>
+                                {t.tools.length === 0 ? (
+                                  <p className="empty-turns">该轮没有工具调用。</p>
+                                ) : (
+                                  <ul className="turn-tool-list">
+                                    {t.tools.map((tool, i) => (
+                                      <li key={`${t.id}-tool-${i}`}>
+                                        <strong>{tool.name}</strong>
+                                        <pre>{tool.input || "（无输入）"}</pre>
+                                        {tool.outputPreview && (
+                                          <p className="turn-output">
+                                            {tool.outputPreview}
+                                            {tool.outputBytes > 0 && (
+                                              <span>
+                                                {" "}
+                                                · {tool.outputBytes.toLocaleString("en-US")}{" "}
+                                                B · {tool.outputSha256.slice(0, 8)}
+                                              </span>
+                                            )}
+                                          </p>
+                                        )}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>

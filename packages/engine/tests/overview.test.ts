@@ -130,6 +130,21 @@ describe("buildOverview", () => {
     expect(overview.slices.find((s) => s.key === "code")?.raw).toBe(1000);
     expect(overview.slices.find((s) => s.key === "planning")?.raw).toBe(500);
     expect(overview.rateCardAsOf).toBe("2026-08-27");
+    expect(overview.models).toEqual([
+      {
+        model: "gpt-5.6-luna",
+        turnCount: 3,
+        cost: {
+          raw: 1600,
+          uncached_input: 0,
+          cached_input: 0,
+          output: 0,
+          credits: 16,
+          usd: 1.6,
+        },
+        unpricedRaw: 0,
+      },
+    ]);
   });
 
   it("fills eight UTC days ending at now and marks flagged days", () => {
@@ -501,6 +516,26 @@ describe("buildOverview", () => {
     expect(overview.cost.raw).toBe(60);
     expect(overview.waste.raw).toBe(60);
     expect(overview.waste.credits).toBeCloseTo(0.2, 5);
+  });
+
+  it("splits model rows by the turn's recorded model id", () => {
+    const luna = turn({ id: "t1", bucket: "code", raw: 100 });
+    const sol = turn({ id: "t2", bucket: "planning", raw: 50 });
+    sol.model = "gpt-5.6-sol";
+    const overview = buildOverview(
+      [
+        session({
+          id: "a",
+          startedAt: "2026-08-28T10:00:00.000Z",
+          turns: [luna, sol],
+        }),
+      ],
+      { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z" },
+    );
+    expect(overview.models.map((row) => [row.model, row.cost.raw, row.turnCount])).toEqual([
+      ["gpt-5.6-luna", 100, 1],
+      ["gpt-5.6-sol", 50, 1],
+    ]);
   });
 
   it("uses zero money, not null, on empty chart days", () => {

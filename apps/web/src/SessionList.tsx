@@ -5,6 +5,7 @@ import {
   activityTimestamp,
   formatCompactTokens,
   formatCost,
+  formatCostTitle,
   formatRelativeTime,
   formatAbsoluteTime,
   unpricedNote,
@@ -143,11 +144,12 @@ export function SessionList({
       </div>
       {totalCount > 0 && (
         <input
+          id="session-search"
           className="session-search"
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="筛选 id / 目录 / 模型"
+          placeholder="筛选 id / 目录 / 模型  ·  /"
           aria-label="筛选会话"
         />
       )}
@@ -170,6 +172,8 @@ export function SessionList({
           <ul>
             {page.map((s) => {
               const activity = activityTimestamp(s);
+              const tokenWaste = wasteShare(s.waste, s.cost, "tokens");
+              const unitWaste = wasteShare(s.waste, s.cost, unit);
               return (
                 <li
                   key={s.id}
@@ -208,9 +212,14 @@ export function SessionList({
                         {formatRelativeTime(activity, now)}
                       </div>
                       <div className="session-costs">
-                        <span>{formatCost(s.cost, unit)}</span>
-                        <span className="waste-share">
-                          waste {wasteShare(s.waste, s.cost, unit)}
+                        <span title={formatCostTitle(s.cost, unit)}>
+                          {formatCost(s.cost, unit)}
+                        </span>
+                        <span className="waste-share" title={formatCostTitle(s.waste, unit)}>
+                          浪费 {unitWaste}
+                          {unit !== "tokens" && unitWaste !== tokenWaste && (
+                            <span className="legend-note"> · token {tokenWaste}</span>
+                          )}
                         </span>
                       </div>
                       {(s.unpricedRaw ?? 0) > 0 && (
@@ -220,7 +229,7 @@ export function SessionList({
                       )}
                       <MixBar
                         className="waste-bar"
-                        label={`浪费 ${wasteShare(s.waste, s.cost)}（按 token）`}
+                        label={`浪费 ${tokenWaste}（按 token）`}
                         segments={[
                           {
                             key: "useful",
