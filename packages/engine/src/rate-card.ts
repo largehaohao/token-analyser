@@ -23,7 +23,7 @@ export function effectiveRateCard(cardPath: string = defaultPath): RateCard {
 function ratesForModel(
   model: string | null,
   card: RateCard,
-): { input: number; cached: number; output: number } | undefined {
+): RateCard["models"][string] | undefined {
   if (!model) return undefined;
   const exact = card.models[model];
   if (exact) return exact;
@@ -54,7 +54,7 @@ export function priceUsage(
     (uncached_input / 1e6) * rates.input +
     (cached_input / 1e6) * rates.cached +
     (output / 1e6) * rates.output;
-  if (fastMode) credits *= card.fast_multiplier;
+  if (fastMode) credits *= rates.fast_multiplier ?? card.fast_multiplier;
   const usd = credits * card.usd_per_credit;
   return { raw, uncached_input, cached_input, output, credits, usd };
 }

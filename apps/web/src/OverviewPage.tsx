@@ -74,6 +74,19 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
   const unpriced = unpricedNote(overview.unpricedRaw ?? 0);
   const identity = tokenIdentity(overview.cost);
   const models = overview.models ?? [];
+  const quality = overview.quality ?? {
+    pricedRaw: Math.max(0, overview.cost.raw - (overview.unpricedRaw ?? 0)),
+    unpricedRaw: overview.unpricedRaw ?? 0,
+    ledgerWarningSessions: 0,
+    parseErrors: 0,
+  };
+  const pricedCoverage =
+    overview.cost.raw > 0
+      ? formatPercent((100 * quality.pricedRaw) / overview.cost.raw)
+      : "100.0%";
+  const issueCount = quality.ledgerWarningSessions + quality.parseErrors;
+  const timezone =
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区";
 
   return (
     <div className="overview" data-testid="overview-page">
@@ -145,6 +158,40 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
             点击查看明细 · {overview.watchPath}
           </div>
         </button>
+      </div>
+
+      <div className="quality-strip" aria-label="数据质量">
+        <div
+          className={
+            quality.unpricedRaw > 0 ? "quality-item warn" : "quality-item good"
+          }
+        >
+          <span>定价覆盖</span>
+          <strong>{pricedCoverage}</strong>
+          <small>
+            {quality.unpricedRaw > 0
+              ? `${formatExactTokens(quality.unpricedRaw)} tokens 未定价`
+              : "所有模型均已匹配费率"}
+          </small>
+        </div>
+        <div
+          className={
+            issueCount > 0 ? "quality-item warn" : "quality-item good"
+          }
+        >
+          <span>账本健康</span>
+          <strong>{issueCount === 0 ? "通过" : `${issueCount} 项异常`}</strong>
+          <small>
+            {issueCount === 0
+              ? "累计值与逐轮增量一致"
+              : `${quality.ledgerWarningSessions} 个账本警告 · ${quality.parseErrors} 个解析错误`}
+          </small>
+        </div>
+        <div className="quality-item neutral">
+          <span>趋势口径</span>
+          <strong>{timezone}</strong>
+          <small>按每轮结束时刻归入本地日期</small>
+        </div>
       </div>
 
       <p className="disclaimer">{disclaimer(overview.rateCardAsOf)}</p>

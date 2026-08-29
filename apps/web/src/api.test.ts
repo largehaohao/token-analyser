@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openStream, type StreamEvent } from "./api";
+import { getOverview, openStream, type StreamEvent } from "./api";
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -56,5 +56,27 @@ describe("openStream", () => {
     expect(events).toEqual([
       { type: "session_error", id: "s1", reason: "ENOENT" },
     ]);
+  });
+});
+
+describe("getOverview", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sends the browser timezone so daily totals follow local calendar days", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getOverview("7d", Date.parse("2026-08-29T12:00:00.000Z"));
+
+    const url = new URL(String(fetchMock.mock.calls[0]![0]), "http://localhost");
+    expect(url.searchParams.has("timezone")).toBe(true);
+    expect(url.searchParams.has("timezone_offset_minutes")).toBe(true);
   });
 });

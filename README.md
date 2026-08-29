@@ -34,6 +34,12 @@ Default watch root: `~/.codex/sessions/**/rollout-*.jsonl`. Optional `~/.token-a
 
 Rate card: `config/rate-card.json`. Parse cache: `~/.token-analyser/cache/`.
 
+The dashboard shows pricing coverage and ledger/parse health beside the headline
+figures. Daily trends use the browser's IANA timezone (with numeric-offset
+fallback), and the shipped rate card is dated so historical estimates remain
+auditable. Unknown models keep their token counts and display money as `—`
+instead of silently borrowing another model's price.
+
 ## Test
 
 ```bash

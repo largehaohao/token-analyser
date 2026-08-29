@@ -167,8 +167,8 @@ describe("buildLedger", () => {
     ];
     const { turns, fastMode } = buildLedger(events, "fast-s", { isSubagent: false });
     expect(fastMode).toBe(true);
-    expect(turns[0]!.cost.credits).toBeCloseTo(312.5, 5);
-    expect(turns[1]!.cost.credits).toBeCloseTo(312.5, 5);
+    expect(turns[0]!.cost.credits).toBeCloseTo(250, 5);
+    expect(turns[1]!.cost.credits).toBeCloseTo(250, 5);
   });
 
   it("treats service_tier=fast as Fast mode", () => {
@@ -207,7 +207,7 @@ describe("buildLedger", () => {
     ];
     const { turns, fastMode } = buildLedger(events, "tier", { isSubagent: false });
     expect(fastMode).toBe(true);
-    expect(turns[0]!.cost.credits).toBeCloseTo(312.5, 5);
+    expect(turns[0]!.cost.credits).toBeCloseTo(250, 5);
   });
 
   it("sets ledger_warning when last_token_usage sums diverge from total", () => {

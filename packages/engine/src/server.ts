@@ -37,6 +37,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isValidTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function corsHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": CORS_ORIGIN,
@@ -395,8 +404,13 @@ export async function startServer(opts?: {
       const url = new URL(req.url ?? "/", "http://localhost");
       const sinceRaw = url.searchParams.get("since");
       const daysRaw = url.searchParams.get("days");
+      const timezoneRaw = url.searchParams.get("timezone_offset_minutes");
+      const timezone = url.searchParams.get("timezone")?.trim();
       const sinceMs = sinceRaw ? Date.parse(sinceRaw) : Number.NaN;
       const dayCount = daysRaw ? Number(daysRaw) : Number.NaN;
+      const timezoneOffsetMinutes = timezoneRaw
+        ? Number(timezoneRaw)
+        : Number.NaN;
       sendJson(
         res,
         200,
@@ -406,6 +420,14 @@ export async function startServer(opts?: {
           ...(Number.isFinite(sinceMs) ? { sinceMs } : {}),
           ...(Number.isFinite(dayCount) && dayCount > 0
             ? { dayCount: Math.min(60, Math.floor(dayCount)) }
+            : {}),
+          ...(Number.isFinite(timezoneOffsetMinutes) &&
+          timezoneOffsetMinutes >= -840 &&
+          timezoneOffsetMinutes <= 840
+            ? { timezoneOffsetMinutes: Math.trunc(timezoneOffsetMinutes) }
+            : {}),
+          ...(timezone && timezone.length <= 100 && isValidTimezone(timezone)
+            ? { timezone }
             : {}),
         }),
       );

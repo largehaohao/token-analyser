@@ -56,6 +56,7 @@ export function SessionList({
   const [dragging, setDragging] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [limit, setLimit] = useState(SESSION_PAGE_SIZE);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const listIdentity = sessionListIdentity(sessions);
 
   const filtered = useMemo(() => {
@@ -82,11 +83,7 @@ export function SessionList({
 
   const page = visibleSessions(filtered, limit);
 
-  async function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
+  async function importFile(file: File) {
     try {
       const dropped = await readDroppedFile(file);
       await onImport(dropped.filename, dropped.text);
@@ -94,6 +91,13 @@ export function SessionList({
     } catch (err) {
       setImportError(errorMessage(err, "导入失败"));
     }
+  }
+
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) await importFile(file);
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -153,9 +157,26 @@ export function SessionList({
           aria-label="筛选会话"
         />
       )}
-      <p className={`drop-hint${dragging ? " active" : ""}`}>
-        {dragging ? "放开以导入 JSONL" : "拖入 rollout JSONL 导入"}
-      </p>
+      <div className="import-actions">
+        <p className={`drop-hint${dragging ? " active" : ""}`}>
+          {dragging ? "放开以导入 JSONL" : "拖入 rollout JSONL 导入"}
+        </p>
+        <button type="button" onClick={() => fileInputRef.current?.click()}>
+          选择文件
+        </button>
+        <input
+          ref={fileInputRef}
+          className="visually-hidden"
+          type="file"
+          accept=".jsonl,.ndjson,application/x-ndjson"
+          aria-label="选择 rollout JSONL 文件"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void importFile(file);
+            event.target.value = "";
+          }}
+        />
+      </div>
       {importError && (
         <p className="import-error" role="alert">
           {importError}

@@ -19,6 +19,7 @@ import { RateLimits } from "./RateLimits";
 import { WasteToggles } from "./WasteToggles";
 import { TurnTable } from "./TurnTable";
 import { RelativeTime } from "./RelativeTime";
+import { treeAppearance } from "./buckets";
 
 type Props = {
   snapshot: SessionSnapshot;
@@ -61,6 +62,16 @@ export function SessionView({
   const suggestions = snapshot.suggestions.slice(0, 3);
   const unpriced = unpricedNote(unpricedRawFromTurns(turns));
   const identity = tokenIdentity(snapshot.cost);
+  const selectedAppearance = treeAppearance(
+    selectedNode.label,
+    selectedNode.kind,
+    selectedNode.bucket,
+  );
+  const pricedRaw = Math.max(0, snapshot.cost.raw - unpricedRawFromTurns(turns));
+  const pricingCoverage =
+    snapshot.cost.raw > 0
+      ? formatPercent((100 * pricedRaw) / snapshot.cost.raw)
+      : "100.0%";
 
   function handleSuggestionClick(ids: string[]) {
     const target = suggestionTarget(snapshot.tree, ids);
@@ -169,6 +180,20 @@ export function SessionView({
         onOpen={onContextOpen}
       />
 
+      <div className="session-audit" aria-label="当前会话数据口径">
+        <span>
+          <i className={unpriced ? "audit-dot warn" : "audit-dot good"} />
+          定价覆盖 <strong>{pricingCoverage}</strong>
+        </span>
+        <span>
+          <i className={snapshot.ledger_warning ? "audit-dot warn" : "audit-dot good"} />
+          账本校验 <strong>{snapshot.ledger_warning ? "需复核" : "通过"}</strong>
+        </span>
+        <span>
+          当前筛选 <strong>{selectedAppearance.label}</strong>
+        </span>
+      </div>
+
       <div className="session-body">
         <div className="session-left">
           <CostTree
@@ -202,6 +227,7 @@ export function SessionView({
           highlightTurnId={highlightTurnId}
           highlightNonce={highlightNonce}
           resetKey={`${snapshot.id}:${selectedNodeId ?? ""}`}
+          scopeLabel={selectedAppearance.label}
         />
       </div>
     </div>

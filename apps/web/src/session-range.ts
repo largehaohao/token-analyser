@@ -1,4 +1,4 @@
-// `days` is the UTC calendar span a rolling window can cover (window + 1
+// `days` is the local calendar span a rolling window can cover (window + 1
 // midnight crossing). The trend chart must include every day a session in
 // range can land on, otherwise KPIs and bars disagree.
 export const SESSION_RANGES = [

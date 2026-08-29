@@ -72,7 +72,7 @@ describe("wasteShare", () => {
   });
 
   it("includes the rate-card date in the billing disclaimer", () => {
-    expect(disclaimer("2026-08-27")).toMatch(/Not OpenAI's bill/);
+    expect(disclaimer("2026-08-27")).toContain("不代表 OpenAI 账单");
     expect(disclaimer("2026-08-27")).toContain("2026-08-27");
   });
 
