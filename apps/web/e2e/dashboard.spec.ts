@@ -11,8 +11,8 @@ test("overview shows KPIs and charts", async ({ page }) => {
   await expect(page.getByRole("button", { name: "全部" })).toBeVisible();
   await expect(page.locator(".kpi-label", { hasText: "总用量" })).toBeVisible();
   await expect(page.locator(".kpi-label", { hasText: "预估总费用" })).toBeVisible();
-  await expect(page.getByText(/Not OpenAI's bill/i)).toBeVisible();
-  await expect(page.getByText(/2026-08-27/)).toBeVisible();
+  await expect(page.locator(".disclaimer")).toContainText(/Not OpenAI's bill/i);
+  await expect(page.locator(".disclaimer")).toContainText("2026-08-27");
   await expect(page.getByTestId("trend-chart")).toBeVisible();
   await expect(page.getByTestId("donut-chart")).toBeVisible();
   await expect(page.getByTestId("model-mix")).toBeVisible();
