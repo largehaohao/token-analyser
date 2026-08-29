@@ -32,6 +32,7 @@ function pollTurn(id: string, endedAt: string, tools: ToolCall[] = []): Turn {
     endedAt,
     model: null,
     effort: null,
+    fastMode: false,
     prompt: "",
     tools,
     usage: {

@@ -49,6 +49,8 @@ export type Turn = {
   endedAt: string;
   model: string | null;
   effort: string | null;
+  /** Fast service tier recorded for this turn. */
+  fastMode: boolean;
   prompt: string;
   tools: ToolCall[];
   usage: TokenUsage;

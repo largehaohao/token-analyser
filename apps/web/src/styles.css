@@ -1057,6 +1057,11 @@ input:focus-visible,
   font-size: 10px;
 }
 
+.turn-fast {
+  display: inline-block;
+  margin: 0.08rem 0.2rem 0.08rem 0;
+}
+
 .label-chip {
   background: #1a1610;
   color: var(--warn);

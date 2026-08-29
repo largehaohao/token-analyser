@@ -171,6 +171,14 @@ export function TurnTable({
                               {LABEL_CHIP[label] ?? label}
                             </span>
                           ))}
+                          {t.fastMode && (
+                            <span
+                              className="badge fast turn-fast"
+                              title="该轮使用 Fast；费用倍率按模型费率计算"
+                            >
+                              Fast
+                            </span>
+                          )}
                         </td>
                         <td className="tools-col" title={formatTools(t)}>
                           {formatToolNames(t)}

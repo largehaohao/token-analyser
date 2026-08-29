@@ -325,7 +325,6 @@ export class LedgerBuilder {
     fastMode: false,
     collaborationMode: null,
   };
-  private sessionFastMode = false;
   private armed: boolean;
   private window = newWindow();
   private outstanding: PendingOwner[] = [];
@@ -356,13 +355,6 @@ export class LedgerBuilder {
     return { id: this.sessionId, isSubagent: this.isSubagent };
   }
 
-  private repriceFast(): void {
-    if (!this.sessionFastMode) return;
-    for (const turn of this.turns) {
-      turn.cost = priceUsage(turn.usage, turn.model, this.card, true);
-    }
-  }
-
   consume(events: RolloutLine[]): void {
     for (const event of events) {
       const payload = asRecord(event.payload) ?? {};
@@ -384,10 +376,6 @@ export class LedgerBuilder {
 
       if (event.type === "turn_context") {
         this.turnContext = extractTurnContext(payload);
-        if (this.turnContext.fastMode && !this.sessionFastMode) {
-          this.sessionFastMode = true;
-          this.repriceFast();
-        }
         continue;
       }
 
@@ -437,6 +425,7 @@ export class LedgerBuilder {
           endedAt: event.timestamp,
           model: this.turnContext.model,
           effort: this.turnContext.effort,
+          fastMode: this.turnContext.fastMode,
           prompt,
           tools: this.window.tools,
           usage: lastUsage,
@@ -444,7 +433,7 @@ export class LedgerBuilder {
             lastUsage,
             this.turnContext.model,
             this.card,
-            this.sessionFastMode || this.turnContext.fastMode,
+            this.turnContext.fastMode,
           ),
           bucket: "other",
           labels: [],
@@ -483,7 +472,6 @@ export class LedgerBuilder {
     fastMode: boolean;
     meta: SessionMeta;
   } {
-    this.repriceFast();
     const turns = this.turns.map((turn) => ({
       ...turn,
       tools: [...turn.tools],
@@ -496,7 +484,7 @@ export class LedgerBuilder {
     return {
       turns,
       ledger_warning: this.ledger_warning,
-      fastMode: this.sessionFastMode,
+      fastMode: this.turnContext.fastMode,
       meta: this.meta,
     };
   }
