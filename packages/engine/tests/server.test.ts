@@ -373,4 +373,25 @@ describe("startServer", () => {
       await server.close();
     }
   });
+
+  it("rejects oversized JSON import bodies with 413", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-413-json-"));
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({
+      port: 0,
+      store,
+      maxImportBytes: 16,
+    });
+    try {
+      const res = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "x".repeat(64),
+      });
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({ error: "payload_too_large" });
+    } finally {
+      await server.close();
+    }
+  });
 });

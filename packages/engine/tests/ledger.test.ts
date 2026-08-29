@@ -107,6 +107,22 @@ describe("buildLedger", () => {
     expect(turns[0]!.tools[0]!.input).toBe("cat README.md");
   });
 
+  it("keeps bash -lc argv scripts as one command", () => {
+    const source = eventsFrom("wait-poll.jsonl");
+    const call = source.find((event) => event.type === "response_item" && event.payload?.type === "custom_tool_call");
+    const output = source.find((event) => event.type === "response_item" && event.payload?.type === "custom_tool_call_output");
+    call!.payload = {
+      type: "function_call",
+      name: "exec",
+      arguments: JSON.stringify({ cmd: ["bash", "-lc", "cat README.md"] }),
+      call_id: "argv-bash",
+    };
+    output!.payload = { type: "function_call_output", call_id: "argv-bash", output: "readme" };
+    const { turns } = buildLedger(source, "argv-bash", { isSubagent: false });
+    expect(turns[0]!.tools[0]!.input).toMatch(/cat README.md/);
+    expect(turns[0]!.tools[0]!.input).not.toBe("bash -lc cat README.md");
+  });
+
   it("prices every turn with Fast once the session records it", () => {
     const usage = (input: number, totalInput: number) => ({
       last_token_usage: {

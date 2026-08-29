@@ -155,12 +155,18 @@ export function ingestFile(
     parse_errors = previous && canAppend
       ? [...previous.parse_errors, ...details.parse_errors]
       : details.parse_errors;
+    const info = extractSessionInfo(events);
     if (canAppend && previous.builder) {
-      previous.builder.consume(details.events);
-      builder = previous.builder;
+      const prev = previous.builder.identity();
+      if (prev.id === info.id && prev.isSubagent === info.isSubagent) {
+        previous.builder.consume(details.events);
+        builder = previous.builder;
+      } else {
+        builder = new LedgerBuilder(info.id, { isSubagent: info.isSubagent });
+        builder.consume(events);
+      }
     } else {
-      const { id, isSubagent } = extractSessionInfo(events);
-      builder = new LedgerBuilder(id, { isSubagent });
+      builder = new LedgerBuilder(info.id, { isSubagent: info.isSubagent });
       builder.consume(events);
     }
     liveReadStates.set(filePath, {

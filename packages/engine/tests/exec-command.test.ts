@@ -22,8 +22,12 @@ describe("isWriteOrTest", () => {
   it("unwraps bash -lc / argv JSON and ignores stdin redirection", () => {
     expect(extractReadPaths(`bash -lc "cat README.md"`)).toEqual(["README.md"]);
     expect(extractReadPaths(`{"cmd":["cat","README.md"]}`)).toEqual(["README.md"]);
+    expect(extractReadPaths(`{"cmd":["bash","-lc","cat README.md"]}`)).toEqual([
+      "README.md",
+    ]);
     expect(extractReadPaths("cat foo.ts | rg bar")).toEqual(["foo.ts"]);
     expect(isWriteOrTest(`bash -lc "python foo.py"`)).toBe(true);
+    expect(isWriteOrTest(`{"cmd":["bash","-lc","cat README.md"]}`)).toBe(false);
     expect(isWriteOrTest("grep foo < bar.txt")).toBe(false);
     expect(isWriteOrTest("cat foo > bar")).toBe(true);
   });

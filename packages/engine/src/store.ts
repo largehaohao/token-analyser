@@ -207,6 +207,13 @@ export class SessionStore {
       cacheHome: this.cacheHome,
       allowAppend: opts?.allowAppend,
     });
+    const resolved = path.resolve(filePath);
+    for (const [id, source] of this.sources) {
+      if (id === snap.id) continue;
+      if (path.resolve(source.path) !== resolved) continue;
+      this.sources.delete(id);
+      this.toggles.delete(id);
+    }
     const currentToggles = this.toggles.get(snap.id);
     if (!currentToggles) this.toggles.set(snap.id, { ...snap.toggles });
     this.sources.set(snap.id, { ...snap, children: [] });

@@ -209,7 +209,8 @@ async function handleImport(
       body = JSON.parse((await readBody(req, maxImportBytes)).toString("utf8")) as {
         path?: string;
       };
-    } catch {
+    } catch (err) {
+      if ((err as { status?: number }).status === 413) throw err;
       sendJson(res, 400, { error: "invalid_json" });
       return;
     }
@@ -238,7 +239,7 @@ async function handleImport(
     }
 
     const boundary = boundaryMatch[1]!;
-    const raw = (await readBody(req)).toString("binary");
+    const raw = (await readBody(req, maxImportBytes)).toString("binary");
     const parts = raw.split(`--${boundary}`);
     let filename: string | undefined;
     let fileData = "";

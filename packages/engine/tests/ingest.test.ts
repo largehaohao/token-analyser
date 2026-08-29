@@ -141,3 +141,22 @@ describe("readJsonlFile", () => {
     expect(second.cost.usd).toBeGreaterThan(first.cost.usd!);
   });
 });
+
+describe("live LedgerBuilder", () => {
+  it("rebuilds when session_meta arrives after an empty first parse", () => {
+    const full = readFileSync(path.join(fixtures, "child-prefix.jsonl"), "utf8");
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-child-live-"));
+    const filePath = path.join(dir, "rollout-child.jsonl");
+    writeFileSync(filePath, "");
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.ingestPath(filePath, { allowAppend: true });
+    appendFileSync(filePath, full);
+    const id = store.ingestPath(filePath, { allowAppend: true });
+    expect(id).toBe("child-1");
+    expect(store.list().some((item) => item.id === "unknown")).toBe(false);
+    expect(store.get("unknown")).toBeUndefined();
+    const snap = store.get("child-1");
+    expect(snap?.turns).toHaveLength(1);
+    expect(snap?.cost.raw).toBe(540);
+  });
+});

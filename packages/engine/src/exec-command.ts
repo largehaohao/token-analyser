@@ -59,6 +59,18 @@ function binaryName(command: string): string {
   return path.basename(tokens[0] ?? "");
 }
 
+const SAFE_ARGV = /^[A-Za-z0-9_./:@%+=,-]+$/;
+
+export function formatArgv(argv: unknown[]): string {
+  return argv
+    .map((item) => {
+      const part = String(item);
+      if (SAFE_ARGV.test(part)) return part;
+      return `'${part.replace(/'/g, `'\\''`)}'`;
+    })
+    .join(" ");
+}
+
 function unwrapCommand(command: string): string {
   const trimmed = command.trim();
   if (trimmed.startsWith("{")) {
@@ -70,7 +82,7 @@ function unwrapCommand(command: string): string {
           : null;
       const cmd = record?.cmd ?? record?.command;
       if (typeof cmd === "string") return unwrapCommand(cmd);
-      if (Array.isArray(cmd)) return unwrapCommand(cmd.map(String).join(" "));
+      if (Array.isArray(cmd)) return unwrapCommand(formatArgv(cmd));
     } catch {
       // Not a JSON command envelope.
     }

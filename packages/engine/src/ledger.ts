@@ -1,5 +1,6 @@
 import { preview, sha256 } from "./hash.ts";
 import { effectiveRateCard, priceUsage } from "./rate-card.ts";
+import { formatArgv } from "./exec-command.ts";
 import type {
   RolloutLine,
   SessionMeta,
@@ -98,8 +99,8 @@ function canonicalToolName(value: unknown): string {
 
 function joinArgv(value: unknown): string | null {
   if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value.map((item) => asString(item)).filter(Boolean).join(" ");
+  if (Array.isArray(value) && value.length > 0) {
+    return formatArgv(value);
   }
   return null;
 }
@@ -349,6 +350,10 @@ export class LedgerBuilder {
       cwd: null,
       startedAt: null,
     };
+  }
+
+  identity(): { id: string; isSubagent: boolean } {
+    return { id: this.sessionId, isSubagent: this.isSubagent };
   }
 
   private repriceFast(): void {
