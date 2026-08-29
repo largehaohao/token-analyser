@@ -3,6 +3,12 @@ import { treeAppearance } from "./buckets";
 import { useUnit } from "./UnitContext";
 import { allocatePercents, formatCost } from "./format";
 
+export function siblingDisplayPercents(
+  children: Array<{ cost: { raw: number } }>,
+): number[] {
+  return allocatePercents(children.map((child) => child.cost.raw));
+}
+
 type Props = {
   tree: TreeNode;
   selectedNodeId: string | null;
@@ -16,7 +22,6 @@ function TreeRow({
   depth,
   selectedNodeId,
   displayPercent,
-  rootPercents,
   onSelect,
 }: {
   node: TreeNode;
@@ -25,7 +30,6 @@ function TreeRow({
   depth: number;
   selectedNodeId: string | null;
   displayPercent: number;
-  rootPercents: number[];
   onSelect: (id: string) => void;
 }) {
   const { unit } = useUnit();
@@ -35,6 +39,7 @@ function TreeRow({
   const muted = node.cost.raw === 0 && depth > 0;
   const selected =
     selectedNodeId === node.id || (selectedNodeId == null && depth === 0);
+  const childPercents = siblingDisplayPercents(node.children);
 
   return (
     <>
@@ -65,7 +70,9 @@ function TreeRow({
         >
           {displayPercent.toFixed(1)}%
         </span>
-        <span className="tree-cost">{formatCost(node.cost, unit)}</span>
+        <span className="tree-cost" title={formatCost(node.cost, unit)}>
+          {formatCost(node.cost, unit)}
+        </span>
       </button>
       {node.children.map((child, i) => (
         <TreeRow
@@ -75,10 +82,7 @@ function TreeRow({
           isLast={i === node.children.length - 1}
           depth={depth + 1}
           selectedNodeId={selectedNodeId}
-          displayPercent={
-            depth === 0 ? rootPercents[i] : child.percentOfParent
-          }
-          rootPercents={rootPercents}
+          displayPercent={childPercents[i] ?? 0}
           onSelect={onSelect}
         />
       ))}
@@ -87,15 +91,11 @@ function TreeRow({
 }
 
 export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
-  const rootPercents = allocatePercents(
-    tree.children.map((child) => child.cost.raw),
-  );
-
   return (
     <div className="cost-tree chart-card">
       <h3>成本树</h3>
       <p className="chart-desc">
-        点选节点过滤右侧轮次。根节点为全部轮次。占比按原始 token 划分，合计 100%。
+        点选节点过滤右侧轮次。根节点为全部轮次。占比按原始 token 划分，兄弟节点用最大余数法显示为 100%。
       </p>
       <TreeRow
         node={tree}
@@ -104,7 +104,6 @@ export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
         depth={0}
         selectedNodeId={selectedNodeId}
         displayPercent={100}
-        rootPercents={rootPercents}
         onSelect={onSelect}
       />
     </div>

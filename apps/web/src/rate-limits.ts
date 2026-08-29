@@ -78,3 +78,14 @@ export function formatWindow(minutes: number): string {
   }
   return `${minutes}m`;
 }
+
+export function resetTimestampMs(resetsAt: number): number | null {
+  if (!Number.isFinite(resetsAt) || resetsAt <= 0) return null;
+  return resetsAt < 1e12 ? resetsAt * 1000 : resetsAt;
+}
+
+export function resetIso(resetsAt: number): string | null {
+  const ms = resetTimestampMs(resetsAt);
+  if (ms == null) return null;
+  return new Date(ms).toISOString();
+}

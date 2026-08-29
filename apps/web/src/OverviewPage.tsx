@@ -1,18 +1,20 @@
 import type { Overview } from "./api";
 import {
   cacheHitRatio,
+  type CostUnit,
   disclaimer,
   formatCompactTokens,
   formatCost,
+  formatCostTitle,
   formatExactTokens,
   formatPercent,
   formatUnitSuffix,
-  headlineCostUnit,
+  tokenIdentity,
   unpricedNote,
   wasteShare,
 } from "./format";
 import { MixBar } from "./MixBar";
-import { DonutChart, TrendChart } from "./OverviewCharts";
+import { DonutChart, ModelMix, TrendChart } from "./OverviewCharts";
 import { useUnit } from "./UnitContext";
 
 type Props = {
@@ -68,32 +70,49 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
   const { unit } = useUnit();
   const hit = cacheHitRatio(overview.cost);
   const wastePct = wasteShare(overview.waste, overview.cost, unit);
-  const costUnit = headlineCostUnit(unit);
+  // Tokens headlines keep a credits companion; money units already show tokens in KPI 2.
+  const moneyUnit: CostUnit = "credits";
   const unpriced = unpricedNote(overview.unpricedRaw ?? 0);
+  const identity = tokenIdentity(overview.cost);
+  const models = overview.models ?? [];
 
   return (
     <div className="overview" data-testid="overview-page">
       <div className="kpi-grid">
         <article className="kpi-card">
           <div className="kpi-label">
-            <IconDiamond /> 预估总费用
+            <IconDiamond /> {unit === "tokens" ? "总用量" : "预估总费用"}
           </div>
-          <div className="kpi-value">
-            {formatCost(overview.cost, costUnit)}{" "}
-            <small>{formatUnitSuffix(costUnit)}</small>
+          <div className="kpi-value" title={formatCostTitle(overview.cost, unit)}>
+            {formatCost(overview.cost, unit)}{" "}
+            <small>{formatUnitSuffix(unit)}</small>
           </div>
           <div className="kpi-sub">
-            本地费率估算 · {formatExactTokens(overview.cost.raw)} tokens
+            {unit === "tokens"
+              ? `本地费率估算 · ${formatCost(overview.cost, moneyUnit)} ${formatUnitSuffix(moneyUnit)}`
+              : `${formatExactTokens(overview.cost.raw)} tokens`}
             {hit != null ? ` · 缓存命中 ${formatPercent(100 * hit)}` : ""}
             {unpriced ? ` · ${unpriced}` : ""}
           </div>
         </article>
         <article className="kpi-card">
           <div className="kpi-label">
-            <IconHash /> 总 Token 用量
+            <IconHash /> {unit === "tokens" ? "预估总费用" : "总 Token 用量"}
           </div>
-          <div className="kpi-value">
-            {formatCompactTokens(overview.cost.raw)}
+          <div
+            className="kpi-value"
+            title={
+              unit === "tokens"
+                ? formatCostTitle(overview.cost, moneyUnit)
+                : formatExactTokens(overview.cost.raw)
+            }
+          >
+            {unit === "tokens"
+              ? formatCost(overview.cost, moneyUnit)
+              : formatCompactTokens(overview.cost.raw)}
+            {unit === "tokens" && (
+              <small> {formatUnitSuffix(moneyUnit)}</small>
+            )}
           </div>
           <div className="kpi-sub">
             {formatExactTokens(overview.cost.raw)} ·{" "}
@@ -104,7 +123,7 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
           <div className="kpi-label">
             <IconBolt /> 疑似可优化费用
           </div>
-          <div className="kpi-value">
+          <div className="kpi-value" title={formatCostTitle(overview.waste, unit)}>
             {formatCost(overview.waste, unit)}{" "}
             <small>{formatUnitSuffix(unit)}</small>
           </div>
@@ -186,6 +205,10 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
             <i className="swatch output" /> 输出{" "}
             {formatExactTokens(overview.cost.output)}
           </span>
+          <span className={identity.ok ? "identity-ok" : "identity-warn"}>
+            合计 {formatExactTokens(identity.parts)}
+            {identity.ok ? " = raw" : ` ≠ raw ${formatExactTokens(overview.cost.raw)}`}
+          </span>
         </div>
       </section>
 
@@ -193,6 +216,7 @@ export function OverviewPage({ overview, onOpenSessions, rangeLabel }: Props) {
         <TrendChart days={overview.days} rangeLabel={rangeLabel} />
         <DonutChart slices={overview.slices} totalRaw={overview.cost.raw} />
       </div>
+      <ModelMix models={models} />
     </div>
   );
 }

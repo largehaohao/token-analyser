@@ -9,12 +9,13 @@ test("overview shows KPIs and charts", async ({ page }) => {
   await expect(page.getByTestId("overview-page")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("group", { name: "时间范围" })).toBeVisible();
   await expect(page.getByRole("button", { name: "全部" })).toBeVisible();
-  await expect(page.getByText("预估总费用")).toBeVisible();
-  await expect(page.getByText("总 Token 用量")).toBeVisible();
+  await expect(page.locator(".kpi-label", { hasText: "总用量" })).toBeVisible();
+  await expect(page.locator(".kpi-label", { hasText: "预估总费用" })).toBeVisible();
   await expect(page.getByText(/Not OpenAI's bill/i)).toBeVisible();
   await expect(page.getByText(/2026-08-27/)).toBeVisible();
   await expect(page.getByTestId("trend-chart")).toBeVisible();
   await expect(page.getByTestId("donut-chart")).toBeVisible();
+  await expect(page.getByTestId("model-mix")).toBeVisible();
 });
 
 test("tree percents sum to ~100 and waste moves when poll is unchecked", async ({
@@ -36,7 +37,7 @@ test("tree percents sum to ~100 and waste moves when poll is unchecked", async (
   expect(sum).toBeLessThan(101);
   const waste = page.getByTestId("waste-headline");
   const before = await waste.textContent();
-  await page.getByLabel("Waiting poll").uncheck();
+  await page.getByLabel("轮询等待").uncheck();
   await expect(waste).not.toHaveText(before ?? "");
 });
 
@@ -58,6 +59,8 @@ test("shows mix bars for headline, tree, sessions, and turns", async ({
   await expect(page.locator(".tree-row .tree-bar").first()).toBeVisible();
   await page.locator(".tree-row").first().click();
   await expect(page.locator(".turn-mix").first()).toBeVisible();
+  await page.locator(".turn-table tbody tr").first().click();
+  await expect(page.getByRole("heading", { name: "提示" })).toBeVisible();
 });
 
 test("clicking skills lists the injected catalog", async ({ page }) => {

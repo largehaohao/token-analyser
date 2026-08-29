@@ -19,6 +19,7 @@ import { SessionList } from "./SessionList";
 import { SessionView } from "./SessionView";
 import { UnitSwitcher } from "./UnitSwitcher";
 import { NowProvider, useNow } from "./useNow";
+import { readUnitPref, writeUnitPref } from "./unit-pref";
 import { resolveSelectedSession } from "./session-page";
 import { overviewDisplayState } from "./overview-state";
 import {
@@ -39,7 +40,7 @@ const STREAM_LABEL: Record<StreamStatus, string> = {
 function AppShell() {
   const now = useNow();
   const [view, setView] = useState<View>("overview");
-  const [unit, setUnit] = useState<CostUnit>("tokens");
+  const [unit, setUnit] = useState<CostUnit>(readUnitPref);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [appliedRange, setAppliedRange] = useState<SessionRangeId | null>(null);
@@ -62,6 +63,29 @@ function AppShell() {
   selectedIdRef.current = selectedId;
   viewRef.current = view;
   rangeRef.current = range;
+
+  useEffect(() => {
+    writeUnitPref(unit);
+  }, [unit]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+      if (viewRef.current !== "sessions") return;
+      e.preventDefault();
+      document.getElementById("session-search")?.focus();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const visibleSessions = useMemo(
     () => filterSessionsByRange(sessions, range, now),
@@ -223,7 +247,7 @@ function AppShell() {
           <div className="brand">
             <p className="brand-name">Token Analyser</p>
             <p className="crumb">
-              工作空间 /{" "}
+              Codex 本地账本 /{" "}
               <strong>{view === "overview" ? "成本总览" : "会话明细"}</strong>
             </p>
           </div>
@@ -242,10 +266,11 @@ function AppShell() {
                 </span>
               )}
             </div>
-            <div className="nav-pills">
+            <nav className="nav-pills" aria-label="视图">
               <button
                 type="button"
                 className={view === "overview" ? "active" : ""}
+                aria-current={view === "overview" ? "page" : undefined}
                 onClick={() => setView("overview")}
               >
                 成本总览
@@ -253,11 +278,12 @@ function AppShell() {
               <button
                 type="button"
                 className={view === "sessions" ? "active" : ""}
+                aria-current={view === "sessions" ? "page" : undefined}
                 onClick={openSessions}
               >
                 会话明细
               </button>
-            </div>
+            </nav>
             <RangeSwitcher range={range} onChange={setRange} />
             <UnitSwitcher />
           </div>
@@ -279,13 +305,29 @@ function AppShell() {
                 range === "all" ? `${rangeLabel}（趋势为近 30 天 UTC）` : rangeLabel
               }
             />
-          ) : (
+          ) : overviewState === "error" ? (
             <div className="overview">
-              <p className="empty-main">
-                {overviewState === "error"
-                  ? `总览加载失败：${overviewError}`
-                  : "加载中…"}
-              </p>
+              <div className="empty-panel">
+                <p className="empty-main">总览加载失败：{overviewError}</p>
+                <button
+                  type="button"
+                  className="load-more"
+                  onClick={() => void refreshOverview().catch(() => undefined)}
+                >
+                  重试
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="overview" aria-busy="true" aria-live="polite">
+              <div className="kpi-grid">
+                <div className="kpi-card skeleton" />
+                <div className="kpi-card skeleton" />
+                <div className="kpi-card skeleton" />
+                <div className="kpi-card skeleton" />
+              </div>
+              <div className="chart-card skeleton-block" />
+              <p className="empty-main">加载中…</p>
             </div>
           )
         ) : (

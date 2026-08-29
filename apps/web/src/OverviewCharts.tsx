@@ -1,6 +1,5 @@
 import { useState } from "react";
-import type { OverviewDay, OverviewSlice } from "./api";
-import { SLICE_META, type SliceKey } from "./buckets";
+import type { OverviewDay, OverviewModel, OverviewSlice } from "./api";
 import {
   barHeightPct,
   chartDayTooltip,
@@ -16,12 +15,16 @@ import {
   unitToChartMetric,
   type ChartMetric,
 } from "./chart-metric";
+import { buildDonutSeries, donutPercents } from "./donut-series";
 import {
-  allocatePercents,
   formatChartNumber,
+  formatCost,
+  formatCostTitle,
   formatExactTokens,
   formatPercent,
+  unpricedNote,
 } from "./format";
+import { MixBar } from "./MixBar";
 import { useUnit } from "./UnitContext";
 
 function flaggedLabel(day: OverviewDay, metric: ChartMetric): string {
@@ -157,15 +160,16 @@ export function DonutChart({
   const radius = 62;
   const circ = 2 * Math.PI * radius;
   let offset = circ * 0.25;
-  const visible = slices.filter((s) => s.raw > 0);
-  const percents = allocatePercents(slices.map((s) => s.raw));
+  const series = buildDonutSeries(slices, totalRaw);
+  const percents = donutPercents(series);
   const sliceSum = slices.reduce((sum, s) => sum + s.raw, 0);
-  const [hoverKey, setHoverKey] = useState<SliceKey | null>(null);
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const hovered = series.find((slice) => slice.key === hoverKey);
 
   return (
     <section className="chart-card">
       <h2 className="chart-title">Token 花在哪里?</h2>
-      <p className="chart-desc">按行为归因的原始 token 划分，不是服务商账单分类</p>
+      <p className="chart-desc">按行为归因的原始 token 划分，不是服务商账单分类。环与图例共用最大余数百分比。</p>
       <div className="donut-wrap" data-testid="donut-chart">
         <svg
           className="donut"
@@ -181,8 +185,9 @@ export function DonutChart({
             stroke="#1a221a"
             strokeWidth="22"
           />
-          {visible.map((slice) => {
-            const dash = totalRaw > 0 ? (slice.raw / totalRaw) * circ : 0;
+          {series.map((slice, i) => {
+            const dash = totalRaw > 0 ? (percents[i] / 100) * circ : 0;
+            if (dash <= 0) return null;
             const circle = (
               <circle
                 key={slice.key}
@@ -190,7 +195,7 @@ export function DonutChart({
                 cy="100"
                 r={radius}
                 fill="none"
-                stroke={SLICE_META[slice.key].color}
+                stroke={slice.color}
                 strokeWidth={hoverKey === slice.key ? 26 : 22}
                 strokeDasharray={`${dash} ${circ - dash}`}
                 strokeDashoffset={offset}
@@ -208,7 +213,7 @@ export function DonutChart({
             textAnchor="middle"
             className="donut-center-label"
           >
-            {hoverKey ? SLICE_META[hoverKey].label : "总用量"}
+            {hovered ? hovered.label : "总用量"}
           </text>
           <text
             x="100"
@@ -216,9 +221,9 @@ export function DonutChart({
             textAnchor="middle"
             className="donut-center-value"
           >
-            {hoverKey
-              ? `${formatExactTokens(slices.find((s) => s.key === hoverKey)?.raw ?? 0)} · ${formatPercent(
-                  percents[slices.findIndex((s) => s.key === hoverKey)] ?? 0,
+            {hovered
+              ? `${formatExactTokens(hovered.raw)} · ${formatPercent(
+                  percents[series.findIndex((s) => s.key === hovered.key)] ?? 0,
                 )}`
               : totalRaw >= 1_000_000
                 ? `${(totalRaw / 1_000_000).toFixed(1)}M tokens`
@@ -226,7 +231,7 @@ export function DonutChart({
           </text>
         </svg>
         <ul className="donut-legend">
-          {slices.map((slice, i) => (
+          {series.map((slice, i) => (
             <li key={slice.key} className={hoverKey === slice.key ? "hot" : ""}>
               <button
                 type="button"
@@ -237,11 +242,11 @@ export function DonutChart({
               >
                 <i
                   className="legend-dot"
-                  style={{ background: SLICE_META[slice.key].color }}
+                  style={{ background: slice.color }}
                 />
-                <span>{SLICE_META[slice.key].label}</span>
+                <span>{slice.label}</span>
                 <em>{formatExactTokens(slice.raw)}</em>
-                <strong>{formatPercent(percents[i])}</strong>
+                <strong>{formatPercent(percents[i] ?? 0)}</strong>
               </button>
             </li>
           ))}
@@ -250,8 +255,77 @@ export function DonutChart({
       <p className="chart-foot">
         {sliceSum === totalRaw
           ? "兄弟节点合计 100%。百分比用最大余数法显示，避免四舍五入加总偏差。"
-          : `切片合计 ${formatExactTokens(sliceSum)}，与总量 ${formatExactTokens(totalRaw)} 不一致。`}
+          : `切片合计 ${formatExactTokens(sliceSum)}，与总量 ${formatExactTokens(totalRaw)} 不一致；差额记为未归因。`}
       </p>
+    </section>
+  );
+}
+
+const MODEL_COLORS = [
+  "#7dffb3",
+  "#5b8cff",
+  "#a78bfa",
+  "#38bdf8",
+  "#ff9f5a",
+  "#f5c542",
+];
+
+export function ModelMix({ models }: { models: OverviewModel[] }) {
+  const { unit } = useUnit();
+  if (models.length === 0) return null;
+  const percents = donutPercents(
+    models.map((row, i) => ({
+      key: row.model,
+      raw: row.cost.raw,
+      label: row.model,
+      color: MODEL_COLORS[i % MODEL_COLORS.length],
+    })),
+  );
+
+  return (
+    <section className="chart-card model-mix" data-testid="model-mix">
+      <div className="chart-head">
+        <div>
+          <h2 className="chart-title">按模型</h2>
+          <p className="chart-desc">
+            按 turn_context 记录的模型拆分原始 token。费用跟随页顶单位。
+          </p>
+        </div>
+      </div>
+      <MixBar
+        className="headline-mix"
+        label="按模型"
+        segments={models.map((row, i) => ({
+          key: row.model,
+          label: row.model === "(unknown)" ? "未记录模型" : row.model,
+          value: row.cost.raw,
+          className: "model",
+          color: MODEL_COLORS[i % MODEL_COLORS.length],
+        }))}
+      />
+      <ul className="model-list">
+        {models.map((row, i) => (
+          <li key={row.model}>
+            <span
+              className="legend-dot"
+              style={{ background: MODEL_COLORS[i % MODEL_COLORS.length] }}
+            />
+            <span className="model-name" title={row.model}>
+              {row.model === "(unknown)" ? "未记录模型" : row.model}
+            </span>
+            <span className="model-turns">
+              {row.turnCount.toLocaleString("en-US")} 轮
+            </span>
+            <strong title={formatCostTitle(row.cost, unit)}>
+              {formatCost(row.cost, unit)}
+            </strong>
+            <em>{formatPercent(percents[i] ?? 0)}</em>
+            {row.unpricedRaw > 0 && (
+              <span className="model-note">{unpricedNote(row.unpricedRaw)}</span>
+            )}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

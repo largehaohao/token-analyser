@@ -1,4 +1,5 @@
-import { formatResetAt, formatWindow, parseRateLimits } from "./rate-limits";
+import { formatWindow, parseRateLimits, resetIso } from "./rate-limits";
+import { RelativeTime } from "./RelativeTime";
 
 function level(percent: number): "ok" | "warn" | "hot" {
   if (percent >= 80) return "hot";
@@ -16,7 +17,11 @@ export function RateLimits({ raw }: { raw: unknown }) {
     return (
       <aside className="rate-limits chart-card">
         <h3>用量限额</h3>
-        <pre>{JSON.stringify(raw, null, 2)}</pre>
+        <p className="chart-desc">未识别到 used_percent 结构，原始快照可展开核对。</p>
+        <details>
+          <summary>查看原始数据</summary>
+          <pre>{JSON.stringify(raw, null, 2)}</pre>
+        </details>
       </aside>
     );
   }
@@ -24,8 +29,10 @@ export function RateLimits({ raw }: { raw: unknown }) {
   return (
     <aside className="rate-limits chart-card">
       <h3>用量限额</h3>
+      <p className="chart-desc">来自最近一次 token_count 快照，不覆盖分轮账本。</p>
       {gauges.map((gauge) => {
         const width = Math.min(100, Math.max(0, gauge.usedPercent));
+        const reset = gauge.resetsAt != null ? resetIso(gauge.resetsAt) : null;
         return (
           <div
             key={gauge.id}
@@ -46,17 +53,16 @@ export function RateLimits({ raw }: { raw: unknown }) {
                 style={{ width: `${width}%` }}
               />
             </div>
-            {(gauge.windowMinutes != null || gauge.resetsAt != null) && (
+            {(gauge.windowMinutes != null || reset) && (
               <div className="rate-gauge-meta">
-                {gauge.windowMinutes != null
-                  ? `${formatWindow(gauge.windowMinutes)} window`
-                  : null}
-                {gauge.windowMinutes != null && gauge.resetsAt != null
-                  ? " · "
-                  : null}
-                {gauge.resetsAt != null
-                  ? `reset ${formatResetAt(gauge.resetsAt)}`
-                  : null}
+                {gauge.windowMinutes != null && (
+                  <span>{formatWindow(gauge.windowMinutes)} 窗口</span>
+                )}
+                {reset && (
+                  <span>
+                    重置 <RelativeTime iso={reset} />
+                  </span>
+                )}
               </div>
             )}
           </div>

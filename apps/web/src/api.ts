@@ -136,6 +136,14 @@ export type Overview = {
   rateCardAsOf: string;
   days: OverviewDay[];
   slices: OverviewSlice[];
+  models?: OverviewModel[];
+};
+
+export type OverviewModel = {
+  model: string;
+  turnCount: number;
+  cost: Cost;
+  unpricedRaw: number;
 };
 
 export type SessionListItem = {

@@ -1,10 +1,11 @@
-import { allocatePercents } from "./format";
+import { allocatePercents, formatExactTokens } from "./format";
 
 export type MixSegment = {
   key: string;
   label?: string;
   value: number;
   className: string;
+  color?: string;
 };
 
 type Props = {
@@ -20,7 +21,10 @@ export function MixBar({ segments, label, className, testId }: Props) {
   const percents = allocatePercents(values);
   const classes = className ? `mix-bar ${className}` : "mix-bar";
   const detail = segments
-    .map((seg, i) => `${seg.label ?? seg.key} ${percents[i].toFixed(1)}%`)
+    .map((seg, i) => {
+      const name = seg.label ?? seg.key;
+      return `${name} ${formatExactTokens(seg.value)} (${percents[i].toFixed(1)}%)`;
+    })
     .join(" · ");
 
   return (
@@ -41,7 +45,10 @@ export function MixBar({ segments, label, className, testId }: Props) {
             <span
               key={seg.key}
               className={`mix-seg ${seg.className}`}
-              style={{ width: `${pct}%` }}
+              style={{
+                width: `${pct}%`,
+                ...(seg.color ? { background: seg.color } : {}),
+              }}
             />
           );
         })

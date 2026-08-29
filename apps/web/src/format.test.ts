@@ -5,9 +5,12 @@ import {
   activityTimestamp,
   cacheHitRatio,
   disclaimer,
+  formatCost,
+  formatCostTitle,
   formatPercent,
   formatRelativeTime,
   headlineCostUnit,
+  tokenIdentity,
   unpricedNote,
   unpricedRawFromTurns,
   wasteShare,
@@ -83,6 +86,57 @@ describe("wasteShare", () => {
     expect(wasteShare(waste, total, "tokens")).toBe("<0.1%");
     expect(formatPercent(0)).toBe("0.0%");
     expect(wasteShare(cost({ raw: 0 }), cost({ raw: 0 }), "tokens")).toBe("0.0%");
+  });
+});
+
+describe("formatCost", () => {
+  it("does not round a non-zero credit leftover to 0.0", () => {
+    expect(formatCost(cost({ raw: 40, credits: 0.04, usd: 0.0016 }), "credits")).toBe(
+      "0.04",
+    );
+    expect(formatCost(cost({ raw: 40, credits: 0.04, usd: 0.0016 }), "usd")).toBe(
+      "$0.0016",
+    );
+  });
+
+  it("keeps ordinary credits at one decimal and dollars at two", () => {
+    expect(formatCost(cost({ raw: 1000, credits: 12.5, usd: 0.5 }), "credits")).toBe(
+      "12.5",
+    );
+    expect(formatCost(cost({ raw: 1000, credits: 12.5, usd: 0.5 }), "usd")).toBe(
+      "$0.50",
+    );
+  });
+
+  it("puts the exact ledger value in the tooltip", () => {
+    expect(
+      formatCostTitle(cost({ raw: 40, credits: 0.041234, usd: 0.001649 }), "credits"),
+    ).toContain("0.041234");
+  });
+});
+
+describe("tokenIdentity", () => {
+  it("checks uncached + cached + output against raw, without adding reasoning", () => {
+    expect(
+      tokenIdentity(
+        cost({
+          raw: 130,
+          uncached_input: 20,
+          cached_input: 80,
+          output: 30,
+        }),
+      ),
+    ).toEqual({ parts: 130, ok: true });
+    expect(
+      tokenIdentity(
+        cost({
+          raw: 100,
+          uncached_input: 20,
+          cached_input: 80,
+          output: 30,
+        }),
+      ),
+    ).toEqual({ parts: 130, ok: false });
   });
 });
 
