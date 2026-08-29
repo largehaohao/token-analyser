@@ -7,6 +7,7 @@ import {
   type Turn,
 } from "./types.ts";
 import { computeWaste } from "./waste.ts";
+import { loadRateCard } from "./rate-card.ts";
 
 export const OVERVIEW_SLICE_KEYS = [
   "planning",
@@ -42,6 +43,7 @@ export type Overview = {
   cost: Cost;
   waste: Cost;
   unpricedRaw: number;
+  rateCardAsOf: string;
   days: OverviewDay[];
   slices: OverviewSlice[];
 };
@@ -288,6 +290,7 @@ export function buildOverview(
     cost: normalizeCost(cost),
     waste: normalizeCost(waste),
     unpricedRaw,
+    rateCardAsOf: loadRateCard().as_of,
     days: chartDays,
     slices: OVERVIEW_SLICE_KEYS.map((key) => ({
       key,

@@ -151,6 +151,7 @@ describe("startServer", () => {
         sessionCount: number;
         turnCount: number;
         slices: { key: string; raw: number }[];
+        rateCardAsOf: string;
       };
       expect(body.sessionCount).toBe(1);
       expect(body.turnCount).toBeGreaterThan(0);
@@ -162,6 +163,24 @@ describe("startServer", () => {
       expect(emptyRes.status).toBe(200);
       const emptyBody = (await emptyRes.json()) as { sessionCount: number };
       expect(emptyBody.sessionCount).toBe(0);
+      expect(body.rateCardAsOf).toBe("2026-08-27");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("answers CORS preflight with allowed headers", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-cors-"));
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({ port: 0, store });
+    try {
+      const res = await fetch(`${server.url}/import`, {
+        method: "OPTIONS",
+      });
+      expect(res.status).toBe(204);
+      const allow = res.headers.get("access-control-allow-headers") ?? "";
+      expect(allow.toLowerCase()).toContain("content-type");
+      expect(allow.toLowerCase()).toContain("x-filename");
     } finally {
       await server.close();
     }
@@ -326,6 +345,51 @@ describe("startServer", () => {
       expect(joined).toContain("event: session_updated");
       expect(joined).toContain('"id":"parent-1"');
       expect(joined).not.toMatch(/event: session_added[\s\S]*"id":"child-1"/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects oversized import bodies with 413", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-413-"));
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({
+      port: 0,
+      store,
+      maxImportBytes: 16,
+    });
+    try {
+      const res = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "X-Filename": "rollout-big.jsonl",
+        },
+        body: "x".repeat(64),
+      });
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({ error: "payload_too_large" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects oversized JSON import bodies with 413", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-413-json-"));
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({
+      port: 0,
+      store,
+      maxImportBytes: 16,
+    });
+    try {
+      const res = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "x".repeat(64),
+      });
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({ error: "payload_too_large" });
     } finally {
       await server.close();
     }

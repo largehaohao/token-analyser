@@ -21,6 +21,8 @@ import {
   shouldResetSessionLimit,
   visibleSessions,
 } from "./session-page";
+import { errorMessage } from "./app-errors";
+import { readDroppedFile } from "./import-file";
 
 const EMPTY_COPY =
   "No Codex sessions found. Run Codex locally, then sessions appear from ~/.codex/sessions/**/rollout-*.jsonl";
@@ -35,7 +37,7 @@ type Props = {
   contextOpen: ContextBucketId | null;
   onSelect: (id: string) => void;
   onInspectContext: (id: string, bucket: ContextBucketId) => void;
-  onImport: (filename: string, text: string) => void;
+  onImport: (filename: string, text: string) => void | Promise<void>;
 };
 
 export function SessionList({
@@ -51,6 +53,7 @@ export function SessionList({
   const now = useNow();
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   const [limit, setLimit] = useState(SESSION_PAGE_SIZE);
   const listIdentity = sessionListIdentity(sessions);
 
@@ -78,16 +81,18 @@ export function SessionList({
 
   const page = visibleSessions(filtered, limit);
 
-  function handleDrop(e: React.DragEvent) {
+  async function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      onImport(file.name, reader.result as string);
-    };
-    reader.readAsText(file);
+    try {
+      const dropped = await readDroppedFile(file);
+      await onImport(dropped.filename, dropped.text);
+      setImportError(null);
+    } catch (err) {
+      setImportError(errorMessage(err, "导入失败"));
+    }
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -149,6 +154,11 @@ export function SessionList({
       <p className={`drop-hint${dragging ? " active" : ""}`}>
         {dragging ? "放开以导入 JSONL" : "拖入 rollout JSONL 导入"}
       </p>
+      {importError && (
+        <p className="import-error" role="alert">
+          {importError}
+        </p>
+      )}
       {totalCount === 0 ? (
         <p className="empty-copy">{EMPTY_COPY}</p>
       ) : filtered.length === 0 ? (

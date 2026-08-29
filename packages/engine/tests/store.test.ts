@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -166,6 +166,34 @@ describe("SessionStore", () => {
     expect(item.lastEventAt).toMatch(/^2026-08-28T12:00:/);
     expect(item.unpricedRaw).toBeGreaterThan(0);
   });
+
+  it("removePath drops a session from the index", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "store-remove-"));
+    const filePath = path.join(dir, "rollout-parent.jsonl");
+    writeFileSync(filePath, parentFixture());
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.ingestPath(filePath);
+    expect(store.list()).toHaveLength(1);
+    expect(store.removePath(filePath)?.id).toBe("parent-1");
+    expect(store.list()).toHaveLength(0);
+    expect(store.get("parent-1")).toBeUndefined();
+  });
+
+  it("reports refresh ingest errors instead of swallowing them", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "store-refresh-err-"));
+    const missing = path.join(dir, "rollout-missing.jsonl");
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const errors: { filePath: string; message: string }[] = [];
+    store.refresh([missing], {
+      onError: (filePath, err) => {
+        errors.push({ filePath, message: err.message });
+      },
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.filePath).toBe(missing);
+    expect(errors[0]!.message.length).toBeGreaterThan(0);
+    expect(store.list()).toHaveLength(0);
+  });
 });
 
 describe("watchSessions", () => {
@@ -221,6 +249,36 @@ describe("watchSessions", () => {
 
       expect(store.list()).toHaveLength(1);
       expect(store.list()[0]!.id).toBe("nested-1");
+    } finally {
+      stop();
+    }
+  });
+
+  it("drops a session when its rollout file is deleted", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "watch-delete-"));
+    const cacheDir = path.join(dir, "cache");
+    const store = new SessionStore({ cacheDir });
+    const rolloutPath = path.join(dir, "rollout-gone.jsonl");
+    writeFileSync(
+      rolloutPath,
+      '{"timestamp":"2026-08-27T00:00:00.000Z","type":"session_meta","payload":{"id":"gone","session_id":"gone"}}\n',
+    );
+
+    const stop = watchSessions(store, () => {}, { watchPaths: [dir] });
+    try {
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        if (store.list().some((item) => item.id === "gone")) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(store.list().some((item) => item.id === "gone")).toBe(true);
+      unlinkSync(rolloutPath);
+      const goneDeadline = Date.now() + 2000;
+      while (Date.now() < goneDeadline) {
+        if (!store.list().some((item) => item.id === "gone")) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(store.list().some((item) => item.id === "gone")).toBe(false);
     } finally {
       stop();
     }

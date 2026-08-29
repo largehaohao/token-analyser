@@ -57,6 +57,14 @@ export function parseRateLimits(raw: unknown): RateLimitGauge[] {
   return gauges;
 }
 
+export function formatResetAt(resetsAt: number, nowMs = Date.now()): string {
+  const ms = resetsAt > 0 && resetsAt < 1e12 ? resetsAt * 1000 : resetsAt;
+  if (!Number.isFinite(ms)) return "";
+  const deltaSec = Math.round((ms - nowMs) / 1000);
+  if (Math.abs(deltaSec) < 90) return `${deltaSec}s`;
+  return new Date(ms).toLocaleString("zh-CN", { hour12: false });
+}
+
 export function formatWindow(minutes: number): string {
   if (minutes >= 1440 && minutes % 1440 === 0) {
     return `${minutes / 1440}d`;

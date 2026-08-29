@@ -18,6 +18,7 @@ const CORS_ORIGIN = "http://127.0.0.1:7788";
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 7789;
 const HEARTBEAT_MS = 15_000;
+const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
 
 type SseEvent = "session_added" | "session_updated" | "session_error";
 
@@ -40,6 +41,7 @@ function corsHeaders(extra: Record<string, string> = {}): Record<string, string>
   return {
     "Access-Control-Allow-Origin": CORS_ORIGIN,
     "Access-Control-Allow-Methods": "GET,PATCH,POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Filename",
     ...extra,
   };
 }
@@ -56,10 +58,21 @@ function sendJson(
   res.end(JSON.stringify(body));
 }
 
-async function readBody(req: http.IncomingMessage): Promise<Buffer> {
+async function readBody(
+  req: http.IncomingMessage,
+  limit = MAX_IMPORT_BYTES,
+): Promise<Buffer> {
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > limit) {
+      const err = new Error("payload_too_large") as Error & { status?: number };
+      err.status = 413;
+      throw err;
+    }
+    chunks.push(buf);
   }
   return Buffer.concat(chunks);
 }
@@ -148,12 +161,23 @@ function wireStoreChangeEvents(
     origSetToggles(id, toggles);
     onChange(id, false);
   };
+
+  const origRemove = store.removePath.bind(store);
+  store.removePath = (filePath: string) => {
+    const removed = origRemove(filePath);
+    if (removed) {
+      onChange(removed.id, false);
+      if (removed.parentId) onChange(removed.parentId, false);
+    }
+    return removed;
+  };
 }
 
 async function handleImport(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   store: SessionStore,
+  maxImportBytes = MAX_IMPORT_BYTES,
 ): Promise<void> {
   const contentType = req.headers["content-type"] ?? "";
 
@@ -167,7 +191,7 @@ async function handleImport(
     const importsDir = path.join(tokenAnalyserHome(), "imports");
     mkdirSync(importsDir, { recursive: true });
     const dest = path.join(importsDir, path.basename(filename));
-    writeFileSync(dest, await readBody(req));
+    writeFileSync(dest, await readBody(req, maxImportBytes));
 
     const id = store.ingestPath(dest);
     if (!id) {
@@ -182,10 +206,11 @@ async function handleImport(
   if (contentType.includes("application/json")) {
     let body: { path?: string };
     try {
-      body = JSON.parse((await readBody(req)).toString("utf8")) as {
+      body = JSON.parse((await readBody(req, maxImportBytes)).toString("utf8")) as {
         path?: string;
       };
-    } catch {
+    } catch (err) {
+      if ((err as { status?: number }).status === 413) throw err;
       sendJson(res, 400, { error: "invalid_json" });
       return;
     }
@@ -214,7 +239,7 @@ async function handleImport(
     }
 
     const boundary = boundaryMatch[1]!;
-    const raw = (await readBody(req)).toString("binary");
+    const raw = (await readBody(req, maxImportBytes)).toString("binary");
     const parts = raw.split(`--${boundary}`);
     let filename: string | undefined;
     let fileData = "";
@@ -309,6 +334,7 @@ export async function startServer(opts?: {
   port?: number;
   store?: SessionStore;
   staticDir?: string;
+  maxImportBytes?: number;
 }): Promise<{
   url: string;
   close: () => Promise<void>;
@@ -316,6 +342,7 @@ export async function startServer(opts?: {
 }> {
   const store = opts?.store ?? new SessionStore();
   const staticDir = opts?.staticDir;
+  const maxImportBytes = opts?.maxImportBytes ?? MAX_IMPORT_BYTES;
   const port =
     opts?.port ??
     (process.env.PORT ? Number.parseInt(process.env.PORT, 10) : DEFAULT_PORT);
@@ -445,7 +472,7 @@ export async function startServer(opts?: {
     }
 
     if (req.method === "POST" && parts[0] === "import" && parts.length === 1) {
-      await handleImport(req, res, store);
+      await handleImport(req, res, store, maxImportBytes);
       return;
     }
 
@@ -457,6 +484,8 @@ export async function startServer(opts?: {
     } catch (err) {
       if (res.headersSent) {
         res.destroy(err instanceof Error ? err : undefined);
+      } else if ((err as { status?: number }).status === 413) {
+        sendJson(res, 413, { error: "payload_too_large" });
       } else {
         sendJson(res, 500, { error: "internal_error" });
       }
@@ -514,6 +543,7 @@ async function main(): Promise<void> {
     path.dirname(fileURLToPath(import.meta.url)),
     "../../..",
   );
+  const ingestErrors: { id: string; reason: string }[] = [];
 
   const fixtureDir = process.env.FIXTURE_DIR;
   if (fixtureDir) {
@@ -521,10 +551,21 @@ async function main(): Promise<void> {
       ? fixtureDir
       : path.resolve(repoRoot, fixtureDir);
     for (const file of collectFixtureFiles(root)) {
-      store.ingestPath(file);
+      try {
+        store.ingestPath(file);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        ingestErrors.push({ id: errorIdFromPath(file), reason });
+        console.error(`ingest failed ${file}: ${reason}`);
+      }
     }
   } else {
-    store.refresh(collectRolloutFiles(config.watch_paths));
+    store.refresh(collectRolloutFiles(config.watch_paths), {
+      onError: (filePath, err) => {
+        ingestErrors.push({ id: errorIdFromPath(filePath), reason: err.message });
+        console.error(`ingest failed ${filePath}: ${err.message}`);
+      },
+    });
   }
 
   const webDist = path.resolve(
@@ -541,6 +582,9 @@ async function main(): Promise<void> {
       ? { staticDir: webDist, port: configuredPort || 7788 }
       : {}),
   });
+  for (const item of ingestErrors) {
+    onIngestError(item.id, item.reason);
+  }
   console.log(`token-analyser engine listening on ${url}`);
 
   if (!fixtureDir) {

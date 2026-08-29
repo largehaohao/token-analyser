@@ -11,6 +11,8 @@ test("overview shows KPIs and charts", async ({ page }) => {
   await expect(page.getByRole("button", { name: "全部" })).toBeVisible();
   await expect(page.getByText("预估总费用")).toBeVisible();
   await expect(page.getByText("总 Token 用量")).toBeVisible();
+  await expect(page.getByText(/Not OpenAI's bill/i)).toBeVisible();
+  await expect(page.getByText(/2026-08-27/)).toBeVisible();
   await expect(page.getByTestId("trend-chart")).toBeVisible();
   await expect(page.getByTestId("donut-chart")).toBeVisible();
 });
@@ -159,6 +161,7 @@ function overviewPayload(sessionCount: number) {
     live: false,
     collecting: true,
     watchPath: "/tmp",
+    rateCardAsOf: "2026-08-27",
     cost: emptyCost,
     waste: { ...emptyCost, raw: 0 },
     unpricedRaw: 0,

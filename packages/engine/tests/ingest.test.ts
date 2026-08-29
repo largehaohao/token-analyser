@@ -3,7 +3,8 @@ import { appendFileSync, readFileSync, writeFileSync, mkdtempSync, utimesSync } 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ingestFile, readJsonlFile } from "../src/ingest.ts";
+import { ingestFile, hasLiveReadState, readJsonlFile } from "../src/ingest.ts";
+import { SessionStore } from "../src/store.ts";
 
 const fixtures = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -110,6 +111,21 @@ describe("readJsonlFile", () => {
     expect(ingestFile(filePath, { allowAppend: true }).turns.length).toBeGreaterThan(0);
   });
 
+  it("evicts live append state when the store drops the path", () => {
+    const waitPoll = readFileSync(
+      path.join(fixtures, "wait-poll.jsonl"),
+      "utf8",
+    );
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-evict-"));
+    const filePath = path.join(dir, "rollout-live.jsonl");
+    writeFileSync(filePath, waitPoll.split("\n")[0]!);
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.ingestPath(filePath, { allowAppend: true });
+    expect(hasLiveReadState(filePath)).toBe(true);
+    store.removePath(filePath);
+    expect(hasLiveReadState(filePath)).toBe(false);
+  });
+
   it("invalidates the historical cache when the effective rate card changes", () => {
     const waitPoll = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8");
     const dir = mkdtempSync(path.join(tmpdir(), "ingest-cache-rate-"));
@@ -123,5 +139,24 @@ describe("readJsonlFile", () => {
     writeFileSync(path.join(dir, "config.json"), JSON.stringify({ usd_per_credit: 1 }));
     const second = ingestFile(filePath, { cacheHome: dir });
     expect(second.cost.usd).toBeGreaterThan(first.cost.usd!);
+  });
+});
+
+describe("live LedgerBuilder", () => {
+  it("rebuilds when session_meta arrives after an empty first parse", () => {
+    const full = readFileSync(path.join(fixtures, "child-prefix.jsonl"), "utf8");
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-child-live-"));
+    const filePath = path.join(dir, "rollout-child.jsonl");
+    writeFileSync(filePath, "");
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.ingestPath(filePath, { allowAppend: true });
+    appendFileSync(filePath, full);
+    const id = store.ingestPath(filePath, { allowAppend: true });
+    expect(id).toBe("child-1");
+    expect(store.list().some((item) => item.id === "unknown")).toBe(false);
+    expect(store.get("unknown")).toBeUndefined();
+    const snap = store.get("child-1");
+    expect(snap?.turns).toHaveLength(1);
+    expect(snap?.cost.raw).toBe(540);
   });
 });

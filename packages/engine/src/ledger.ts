@@ -1,5 +1,6 @@
 import { preview, sha256 } from "./hash.ts";
 import { effectiveRateCard, priceUsage } from "./rate-card.ts";
+import { formatArgv } from "./exec-command.ts";
 import type {
   RolloutLine,
   SessionMeta,
@@ -96,14 +97,25 @@ function canonicalToolName(value: unknown): string {
   return name;
 }
 
+function joinArgv(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && value.length > 0) {
+    return formatArgv(value);
+  }
+  return null;
+}
+
 function normalizeToolInput(value: unknown, toolName: string): string {
   const text = asString(value);
   if (toolName !== "exec" || !text) return text;
   try {
     const parsed = JSON.parse(text) as unknown;
+    if (Array.isArray(parsed)) return joinArgv(parsed) ?? text;
     const record = asRecord(parsed);
-    if (record && typeof record.cmd === "string") return record.cmd;
-    if (record && typeof record.command === "string") return record.command;
+    if (record) {
+      const cmd = joinArgv(record.cmd) ?? joinArgv(record.command);
+      if (cmd) return cmd;
+    }
   } catch {
     // The input may already be a plain shell command.
   }
@@ -120,7 +132,9 @@ function extractTurnContext(payload: Record<string, unknown>): TurnContext {
     (typeof payload.effort === "string" ? payload.effort : undefined) ??
     null;
   const fastMode =
-    payload.fast_mode === true || payload.speed === "fast";
+    payload.fast_mode === true ||
+    payload.speed === "fast" ||
+    asString(payload.service_tier).toLowerCase() === "fast";
   const model =
     (typeof payload.model === "string" ? payload.model : undefined) ??
     (typeof settings?.model === "string" ? settings.model : undefined) ??
@@ -228,13 +242,6 @@ function movePendingTools(window: WindowState, turn: Turn, outstanding: PendingO
   window.pendingTools = [];
 }
 
-function flushOutstandingTools(outstanding: PendingOwner[]): void {
-  for (const owner of outstanding) {
-    owner.turn.tools.push(finalizeTool(owner.pending, ""));
-  }
-  outstanding.length = 0;
-}
-
 function withinSlack(actual: number, expected: number): boolean {
   return Math.abs(actual - expected) <= 1;
 }
@@ -307,6 +314,194 @@ function accumulateEvent(
   }
 }
 
+export class LedgerBuilder {
+  private sessionId: string;
+  private readonly isSubagent: boolean;
+  private readonly card = effectiveRateCard();
+  private meta: SessionMeta;
+  private turnContext: TurnContext = {
+    model: null,
+    effort: null,
+    fastMode: false,
+    collaborationMode: null,
+  };
+  private sessionFastMode = false;
+  private armed: boolean;
+  private window = newWindow();
+  private outstanding: PendingOwner[] = [];
+  private lastPrompt = "";
+  private keptTurnCount = 0;
+  private ledger_warning = false;
+  private prevLastUsage: TokenUsage | null = null;
+  private prevTotalUsage: TokenUsage | null = null;
+  private runningInput = 0;
+  private runningOutput = 0;
+  private runningCached = 0;
+  private turns: Turn[] = [];
+
+  constructor(sessionId: string, opts: { isSubagent: boolean }) {
+    this.sessionId = sessionId;
+    this.isSubagent = opts.isSubagent;
+    this.armed = !opts.isSubagent;
+    this.meta = {
+      id: sessionId,
+      parentId: null,
+      nickname: null,
+      cwd: null,
+      startedAt: null,
+    };
+  }
+
+  identity(): { id: string; isSubagent: boolean } {
+    return { id: this.sessionId, isSubagent: this.isSubagent };
+  }
+
+  private repriceFast(): void {
+    if (!this.sessionFastMode) return;
+    for (const turn of this.turns) {
+      turn.cost = priceUsage(turn.usage, turn.model, this.card, true);
+    }
+  }
+
+  consume(events: RolloutLine[]): void {
+    for (const event of events) {
+      const payload = asRecord(event.payload) ?? {};
+
+      if (event.type === "session_meta") {
+        const subagentMeta = extractSubagentMeta(payload.source);
+        this.meta = {
+          id: asString(payload.id ?? payload.session_id) || this.sessionId,
+          parentId: subagentMeta.parentId,
+          nickname: subagentMeta.nickname,
+          cwd: (payload.cwd as string | null | undefined) ?? null,
+          startedAt:
+            (payload.started_at as string | null | undefined) ??
+            event.timestamp,
+        };
+        this.sessionId = this.meta.id;
+        continue;
+      }
+
+      if (event.type === "turn_context") {
+        this.turnContext = extractTurnContext(payload);
+        if (this.turnContext.fastMode && !this.sessionFastMode) {
+          this.sessionFastMode = true;
+          this.repriceFast();
+        }
+        continue;
+      }
+
+      if (event.type === "event_msg" && payload.type === "task_started") {
+        if (this.isSubagent) this.armed = true;
+        accumulateEvent(event, this.window, this.armed, this.outstanding);
+        continue;
+      }
+
+      if (
+        event.type === "event_msg" &&
+        payload.type === "token_count" &&
+        this.armed
+      ) {
+        const info = asRecord(payload.info);
+        const lastUsage = extractUsage(info?.last_token_usage);
+        const totalUsage = extractUsage(info?.total_token_usage);
+        if (!lastUsage || !totalUsage) {
+          if (
+            info &&
+            (info.last_token_usage !== undefined ||
+              info.total_token_usage !== undefined)
+          ) {
+            this.ledger_warning = true;
+          }
+          continue;
+        }
+
+        if (
+          this.prevLastUsage &&
+          this.prevTotalUsage &&
+          usageEqual(lastUsage, this.prevLastUsage) &&
+          usageEqual(totalUsage, this.prevTotalUsage)
+        ) {
+          continue;
+        }
+
+        this.keptTurnCount += 1;
+        const turnId = `${this.sessionId}:${event.ordinal ?? this.keptTurnCount}`;
+        const prompt = this.window.promptParts.join("\n") || this.lastPrompt;
+        if (this.window.promptParts.length > 0) this.lastPrompt = prompt;
+
+        const turn: Turn = {
+          id: turnId,
+          sessionId: this.sessionId,
+          startedAt: this.window.startedAt ?? event.timestamp,
+          endedAt: event.timestamp,
+          model: this.turnContext.model,
+          effort: this.turnContext.effort,
+          prompt,
+          tools: this.window.tools,
+          usage: lastUsage,
+          cost: priceUsage(
+            lastUsage,
+            this.turnContext.model,
+            this.card,
+            this.sessionFastMode || this.turnContext.fastMode,
+          ),
+          bucket: "other",
+          labels: [],
+          hasPatchApply: this.window.hasPatchApply,
+          collaborationMode: this.turnContext.collaborationMode,
+        };
+        this.turns.push(turn);
+        movePendingTools(this.window, turn, this.outstanding);
+
+        this.prevLastUsage = lastUsage;
+        this.prevTotalUsage = totalUsage;
+
+        this.runningInput += lastUsage.input_tokens;
+        this.runningOutput += lastUsage.output_tokens;
+        this.runningCached += lastUsage.cached_input_tokens;
+
+        if (
+          !withinSlack(this.runningInput, totalUsage.input_tokens) ||
+          !withinSlack(this.runningOutput, totalUsage.output_tokens) ||
+          !withinSlack(this.runningCached, totalUsage.cached_input_tokens)
+        ) {
+          this.ledger_warning = true;
+        }
+
+        this.window = newWindow();
+        continue;
+      }
+
+      accumulateEvent(event, this.window, this.armed, this.outstanding);
+    }
+  }
+
+  snapshot(): {
+    turns: Turn[];
+    ledger_warning: boolean;
+    fastMode: boolean;
+    meta: SessionMeta;
+  } {
+    this.repriceFast();
+    const turns = this.turns.map((turn) => ({
+      ...turn,
+      tools: [...turn.tools],
+      labels: [...turn.labels],
+    }));
+    const turnById = new Map(turns.map((turn) => [turn.id, turn]));
+    for (const owner of this.outstanding) {
+      turnById.get(owner.turn.id)?.tools.push(finalizeTool(owner.pending, ""));
+    }
+    return {
+      turns,
+      ledger_warning: this.ledger_warning,
+      fastMode: this.sessionFastMode,
+      meta: this.meta,
+    };
+  }
+}
+
 export function buildLedger(
   events: RolloutLine[],
   sessionId: string,
@@ -317,161 +512,7 @@ export function buildLedger(
   fastMode: boolean;
   meta: SessionMeta;
 } {
-  const card = effectiveRateCard();
-  let meta: SessionMeta = {
-    id: sessionId,
-    parentId: null,
-    nickname: null,
-    cwd: null,
-    startedAt: null,
-  };
-
-  let turnContext: TurnContext = {
-    model: null,
-    effort: null,
-    fastMode: false,
-    collaborationMode: null,
-  };
-  let sessionFastMode = false;
-
-  let armed = !opts.isSubagent;
-  let window = newWindow();
-  const outstanding: PendingOwner[] = [];
-  let lastPrompt = "";
-  let keptTurnCount = 0;
-  let ledger_warning = false;
-
-  let prevLastUsage: TokenUsage | null = null;
-  let prevTotalUsage: TokenUsage | null = null;
-  let runningInput = 0;
-  let runningOutput = 0;
-  let runningCached = 0;
-  let runningCacheWrite = 0;
-  let runningReasoning = 0;
-  let runningTotal = 0;
-
-  const turns: Turn[] = [];
-
-  for (const event of events) {
-    const payload = asRecord(event.payload) ?? {};
-
-    if (event.type === "session_meta") {
-      const subagentMeta = extractSubagentMeta(payload.source);
-      meta = {
-        id: asString(payload.id ?? payload.session_id) || sessionId,
-        parentId: subagentMeta.parentId,
-        nickname: subagentMeta.nickname,
-        cwd: (payload.cwd as string | null | undefined) ?? null,
-        startedAt:
-          (payload.started_at as string | null | undefined) ??
-          event.timestamp,
-      };
-      continue;
-    }
-
-    if (event.type === "turn_context") {
-      turnContext = extractTurnContext(payload);
-      if (turnContext.fastMode) sessionFastMode = true;
-      continue;
-    }
-
-    if (event.type === "event_msg" && payload.type === "task_started") {
-      if (opts.isSubagent) armed = true;
-      accumulateEvent(event, window, armed, outstanding);
-      continue;
-    }
-
-    if (
-      event.type === "event_msg" &&
-      payload.type === "token_count" &&
-      armed
-    ) {
-      const info = asRecord(payload.info);
-      const lastUsage = extractUsage(info?.last_token_usage);
-      const totalUsage = extractUsage(info?.total_token_usage);
-      if (!lastUsage || !totalUsage) {
-        if (
-          info &&
-          (info.last_token_usage !== undefined ||
-            info.total_token_usage !== undefined)
-        ) {
-          ledger_warning = true;
-        }
-        continue;
-      }
-
-      if (
-        prevLastUsage &&
-        prevTotalUsage &&
-        usageEqual(lastUsage, prevLastUsage) &&
-        usageEqual(totalUsage, prevTotalUsage)
-      ) {
-        continue;
-      }
-
-      keptTurnCount += 1;
-      const turnId = `${sessionId}:${event.ordinal ?? keptTurnCount}`;
-      const prompt = window.promptParts.join("\n") || lastPrompt;
-      if (window.promptParts.length > 0) lastPrompt = prompt;
-
-      const turn: Turn = {
-        id: turnId,
-        sessionId,
-        startedAt: window.startedAt ?? event.timestamp,
-        endedAt: event.timestamp,
-        model: turnContext.model,
-        effort: turnContext.effort,
-        prompt,
-        tools: window.tools,
-        usage: lastUsage,
-        cost: priceUsage(
-          lastUsage,
-          turnContext.model,
-          card,
-          turnContext.fastMode,
-        ),
-        bucket: "other",
-        labels: [],
-        hasPatchApply: window.hasPatchApply,
-        collaborationMode: turnContext.collaborationMode,
-      };
-      turns.push(turn);
-      movePendingTools(window, turn, outstanding);
-
-      prevLastUsage = lastUsage;
-      prevTotalUsage = totalUsage;
-
-      runningInput += lastUsage.input_tokens;
-      runningOutput += lastUsage.output_tokens;
-      runningCached += lastUsage.cached_input_tokens;
-      runningCacheWrite += lastUsage.cache_write_input_tokens;
-      runningReasoning += lastUsage.reasoning_output_tokens;
-      runningTotal += lastUsage.total_tokens;
-
-      if (
-        !withinSlack(runningInput, totalUsage.input_tokens) ||
-        !withinSlack(runningOutput, totalUsage.output_tokens) ||
-        !withinSlack(runningCached, totalUsage.cached_input_tokens) ||
-        !withinSlack(runningCacheWrite, totalUsage.cache_write_input_tokens) ||
-        !withinSlack(runningReasoning, totalUsage.reasoning_output_tokens) ||
-        !withinSlack(runningTotal, totalUsage.total_tokens)
-      ) {
-        ledger_warning = true;
-      }
-
-      window = newWindow();
-      continue;
-    }
-
-    accumulateEvent(event, window, armed, outstanding);
-  }
-
-  flushOutstandingTools(outstanding);
-
-  return {
-    turns,
-    ledger_warning,
-    fastMode: sessionFastMode,
-    meta,
-  };
+  const builder = new LedgerBuilder(sessionId, opts);
+  builder.consume(events);
+  return builder.snapshot();
 }

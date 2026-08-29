@@ -133,6 +133,7 @@ export type Overview = {
   cost: Cost;
   waste: Cost;
   unpricedRaw: number;
+  rateCardAsOf: string;
   days: OverviewDay[];
   slices: OverviewSlice[];
 };
@@ -162,7 +163,18 @@ export type SessionListItem = {
 
 async function parseJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status}`);
+    let detail = "";
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) detail = `: ${body.error}`;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    const err = new Error(`HTTP ${res.status}${detail}`) as Error & {
+      status?: number;
+    };
+    err.status = res.status;
+    throw err;
   }
   return (await res.json()) as T;
 }
@@ -220,13 +232,22 @@ export async function importNdjson(
 
 export type StreamStatus = "connecting" | "open" | "error";
 
+export type StreamEvent = {
+  type: string;
+  id: string;
+  reason?: string;
+};
+
 export function openStream(
-  onEvent: (e: { type: string; id: string }) => void,
+  onEvent: (e: StreamEvent) => void,
   onStatus?: (status: StreamStatus) => void,
 ): () => void {
   const es = new EventSource("/stream");
   onStatus?.("connecting");
-  es.onopen = () => onStatus?.("open");
+  es.onopen = () => {
+    onStatus?.("open");
+    onEvent({ type: "resync", id: "*" });
+  };
   es.onerror = () => {
     onStatus?.(es.readyState === EventSource.CLOSED ? "error" : "connecting");
   };
@@ -235,8 +256,11 @@ export function openStream(
     (type: string) =>
     (ev: MessageEvent): void => {
       try {
-        const data = JSON.parse(ev.data as string) as { id: string };
-        onEvent({ type, id: data.id });
+        const data = JSON.parse(ev.data as string) as {
+          id: string;
+          reason?: string;
+        };
+        onEvent({ type, id: data.id, reason: data.reason });
       } catch {
         // ignore malformed events
       }

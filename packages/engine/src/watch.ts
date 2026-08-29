@@ -57,7 +57,12 @@ export function watchSessions(
 
   function ingestIfRollout(fullPath: string): void {
     const base = path.basename(fullPath);
-    if (!isRolloutJsonl(base) || !existsSync(fullPath)) return;
+    if (!isRolloutJsonl(base)) return;
+    if (!existsSync(fullPath)) {
+      const removed = store.removePath(fullPath);
+      if (removed) onChange(removed.id);
+      return;
+    }
     try {
       const id = store.ingestPath(fullPath, { allowAppend: true });
       if (id) onChange(id);

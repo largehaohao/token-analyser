@@ -69,7 +69,7 @@ export function allocatePercents(values: number[], digits = 1): number[] {
 }
 
 export function headlineCostUnit(unit: CostUnit): CostUnit {
-  return unit === "tokens" ? "credits" : unit;
+  return unit;
 }
 
 export function unpricedNote(unpricedRaw: number): string {

@@ -4,6 +4,7 @@ import {
   allocatePercents,
   activityTimestamp,
   cacheHitRatio,
+  disclaimer,
   formatPercent,
   formatRelativeTime,
   headlineCostUnit,
@@ -54,10 +55,15 @@ describe("wasteShare", () => {
     expect(wasteShare(waste, total, "tokens")).toBe("25.0%");
   });
 
-  it("keeps the headline unit on credits when the page is in tokens", () => {
-    expect(headlineCostUnit("tokens")).toBe("credits");
+  it("keeps the active unit on every headline", () => {
+    expect(headlineCostUnit("tokens")).toBe("tokens");
     expect(headlineCostUnit("credits")).toBe("credits");
     expect(headlineCostUnit("usd")).toBe("usd");
+  });
+
+  it("includes the rate-card date in the billing disclaimer", () => {
+    expect(disclaimer("2026-08-27")).toMatch(/Not OpenAI's bill/);
+    expect(disclaimer("2026-08-27")).toContain("2026-08-27");
   });
 
   it("names unpriced leftover tokens instead of hiding them", () => {

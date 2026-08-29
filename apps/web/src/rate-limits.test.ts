@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatWindow, parseRateLimits } from "./rate-limits";
+import { formatResetAt, formatWindow, parseRateLimits } from "./rate-limits";
 
 describe("parseRateLimits", () => {
   it("reads nested plan windows with used_percent and window_duration_mins", () => {
@@ -49,6 +49,13 @@ describe("parseRateLimits", () => {
     expect(gauges.map((g) => g.label)).toEqual(["primary", "secondary"]);
     expect(gauges[0]?.windowMinutes).toBe(300);
     expect(gauges[1]?.windowMinutes).toBe(10080);
+    expect(gauges[0]?.resetsAt).toBe(1787895092);
+  });
+});
+
+describe("formatResetAt", () => {
+  it("formats unix seconds as a locale timestamp", () => {
+    expect(formatResetAt(1_700_000_000)).toMatch(/2023|2024/);
   });
 });
 

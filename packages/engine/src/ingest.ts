@@ -1,6 +1,7 @@
 import { openSync, readSync, closeSync, statSync } from "node:fs";
 import { parseJsonlLine } from "./parse-jsonl.ts";
-import { analyseSession } from "./snapshot.ts";
+import { analyseSession, extractSessionInfo } from "./snapshot.ts";
+import { LedgerBuilder } from "./ledger.ts";
 import {
   cacheKey,
   isLive,
@@ -106,9 +107,18 @@ type LiveReadState = JsonlReadDetails & {
   size: number;
   mtimeMs: number;
   ctimeMs: number;
+  builder?: LedgerBuilder;
 };
 
 const liveReadStates = new Map<string, LiveReadState>();
+
+export function clearLiveReadState(filePath: string): void {
+  liveReadStates.delete(filePath);
+}
+
+export function hasLiveReadState(filePath: string): boolean {
+  return liveReadStates.has(filePath);
+}
 
 export function ingestFile(
   filePath: string,
@@ -127,6 +137,7 @@ export function ingestFile(
 
   let events: RolloutLine[];
   let parse_errors: ParseError[];
+  let builder: LedgerBuilder | undefined;
   if (live && opts?.allowAppend) {
     const previous = liveReadStates.get(filePath);
     const canAppend =
@@ -144,6 +155,20 @@ export function ingestFile(
     parse_errors = previous && canAppend
       ? [...previous.parse_errors, ...details.parse_errors]
       : details.parse_errors;
+    const info = extractSessionInfo(events);
+    if (canAppend && previous.builder) {
+      const prev = previous.builder.identity();
+      if (prev.id === info.id && prev.isSubagent === info.isSubagent) {
+        previous.builder.consume(details.events);
+        builder = previous.builder;
+      } else {
+        builder = new LedgerBuilder(info.id, { isSubagent: info.isSubagent });
+        builder.consume(events);
+      }
+    } else {
+      builder = new LedgerBuilder(info.id, { isSubagent: info.isSubagent });
+      builder.consume(events);
+    }
     liveReadStates.set(filePath, {
       ...details,
       events,
@@ -152,6 +177,7 @@ export function ingestFile(
       size: st.size,
       mtimeMs: st.mtimeMs,
       ctimeMs: st.ctimeMs,
+      builder,
     });
   } else {
     liveReadStates.delete(filePath);
@@ -164,6 +190,7 @@ export function ingestFile(
     path: filePath,
     live,
     parse_errors,
+    ...(builder ? { ledgerBuilder: builder } : {}),
   });
 
   if (!live) {

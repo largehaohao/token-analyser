@@ -11,7 +11,7 @@ import {
   wasteShare,
 } from "./format";
 import { ContextProfileCard } from "./ContextProfile";
-import { CostTree, collectTurnIds, findNodeById, suggestionTarget } from "./CostTree";
+import { CostTree, collectTurnIds, resolveSelectedNode, suggestionTarget } from "./CostTree";
 import { MixBar } from "./MixBar";
 import { RateLimits } from "./RateLimits";
 import { WasteToggles } from "./WasteToggles";
@@ -48,11 +48,9 @@ export function SessionView({
   }, [snapshot.id]);
 
   const turns = useMemo(() => flattenTurns(snapshot), [snapshot]);
-  const selectedNode = selectedNodeId
-    ? findNodeById(snapshot.tree, selectedNodeId)
-    : snapshot.tree;
+  const selectedNode = resolveSelectedNode(snapshot.tree, selectedNodeId);
   const turnIds = useMemo(
-    () => (selectedNode ? collectTurnIds(selectedNode) : new Set<string>()),
+    () => collectTurnIds(selectedNode),
     [selectedNode],
   );
   const hit = cacheHitRatio(snapshot.cost);
