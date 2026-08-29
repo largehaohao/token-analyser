@@ -148,7 +148,10 @@ Rates are per 1M tokens, keyed by the model id from `turn_context` (e.g. `gpt-5.
 
 `$ = credits * usd_per_credit`. `usd_per_credit` lives in the same JSON with `source` and `as_of`. Ship `0.04` labeled as the ChatGPT credit purchase unit price used in public invoice reconstructions (Aug 2026). Users override in `~/.token-analyser/config.json`.
 
-Fast mode: if the session records Fast mode, multiply credits by the official Fast multiplier (2.5). If it does not record it, multiplier is 1. Never infer Fast from burn rate.
+Fast mode: price each turn from its recorded `turn_context`. Apply the model's
+official Fast multiplier (2.5 for current GPT-5.6/5.5 models, 2 for GPT-5.4)
+only to turns that record Fast; switching Fast off must restore standard pricing
+for later turns. Never infer Fast from burn rate.
 
 `token_count.payload.rate_limits` is displayed as a side-by-side comparison on the session page. It never overwrites the per-turn ledger.
 

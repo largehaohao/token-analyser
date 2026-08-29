@@ -38,6 +38,7 @@ export type Turn = {
   endedAt: string;
   model: string | null;
   effort: string | null;
+  fastMode?: boolean;
   prompt: string;
   tools: {
     name: string;

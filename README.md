@@ -40,6 +40,10 @@ fallback), and the shipped rate card is dated so historical estimates remain
 auditable. Unknown models keep their token counts and display money as `—`
 instead of silently borrowing another model's price.
 
+Fast mode is accounted per turn, so switching `/fast` on or off during a
+conversation changes only the affected turns. Each Fast turn is marked in the
+detail table, and model-specific multipliers come from the dated rate card.
+
 ## Test
 
 ```bash

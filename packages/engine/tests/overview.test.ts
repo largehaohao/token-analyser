@@ -31,6 +31,7 @@ function turn(partial: {
     endedAt: partial.endedAt ?? partial.startedAt ?? "2026-08-27T10:00:01.000Z",
     model: "gpt-5.6-luna",
     effort: "max",
+    fastMode: false,
     prompt: "",
     tools: [],
     usage: {

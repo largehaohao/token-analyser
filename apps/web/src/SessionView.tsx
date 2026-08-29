@@ -101,8 +101,11 @@ export function SessionView({
       <p className="session-kicker">
         {snapshot.live && <span className="badge live">LIVE</span>}
         {snapshot.fastMode && (
-          <span className="badge fast" title="Fast multiplier 2.5 from session telemetry">
-            Fast ×2.5
+          <span
+            className="badge fast"
+            title="最新 turn_context 使用 Fast；费用倍率按该轮模型的费率计算"
+          >
+            Fast
           </span>
         )}
         <span>{snapshot.model ?? "未知模型"}</span>

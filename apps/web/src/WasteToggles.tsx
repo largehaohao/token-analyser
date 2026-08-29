@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { WasteToggleId, SessionSnapshot } from "./api";
 import { getSession, patchToggles } from "./api";
-import { persistToggleError } from "./waste-toggles";
+import { nextToggleState, persistToggleError } from "./waste-toggles";
 
 const TOGGLE_LABELS: {
   id: WasteToggleId;
@@ -26,6 +26,7 @@ type Props = {
 export function WasteToggles({ snapshot, onUpdate }: Props) {
   const latest = useRef(snapshot);
   const requestQueue = useRef(Promise.resolve());
+  const mutationRevision = useRef(0);
   const [persistError, setPersistError] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
 
@@ -37,9 +38,10 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
     const current = latest.current;
     const optimistic = {
       ...current,
-      toggles: { ...current.toggles, [id]: checked },
+      toggles: nextToggleState(current.toggles, id, checked),
     };
     latest.current = optimistic;
+    const revision = ++mutationRevision.current;
     onUpdate(optimistic);
     setPersistError(null);
     setPending((count) => count + 1);
@@ -49,15 +51,28 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
       .then(async () => {
         try {
           if (latest.current.id !== current.id) return;
-          const updated = await patchToggles(current.id, { [id]: checked });
-          if (latest.current.id !== current.id) return;
+          // Persist the complete state captured by this click. If an earlier
+          // queued request fails, a later request still carries every newer
+          // optimistic choice instead of silently losing one toggle.
+          const updated = await patchToggles(current.id, optimistic.toggles);
+          if (
+            latest.current.id !== current.id ||
+            mutationRevision.current !== revision
+          ) return;
           latest.current = updated;
           onUpdate(updated);
           setPersistError(null);
         } catch {
+          if (
+            latest.current.id !== current.id ||
+            mutationRevision.current !== revision
+          ) return;
           try {
             const refreshed = await getSession(current.id);
-            if (latest.current.id !== current.id) return;
+            if (
+              latest.current.id !== current.id ||
+              mutationRevision.current !== revision
+            ) return;
             latest.current = refreshed;
             onUpdate(refreshed);
             setPersistError(null);

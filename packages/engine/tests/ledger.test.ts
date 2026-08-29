@@ -123,7 +123,7 @@ describe("buildLedger", () => {
     expect(turns[0]!.tools[0]!.input).not.toBe("bash -lc cat README.md");
   });
 
-  it("prices every turn with Fast once the session records it", () => {
+  it("prices Fast per turn and allows it to be turned off mid-session", () => {
     const usage = (input: number, totalInput: number) => ({
       last_token_usage: {
         input_tokens: input,
@@ -166,9 +166,10 @@ describe("buildLedger", () => {
       },
     ];
     const { turns, fastMode } = buildLedger(events, "fast-s", { isSubagent: false });
-    expect(fastMode).toBe(true);
+    expect(fastMode).toBe(false);
+    expect(turns.map((turn) => turn.fastMode)).toEqual([true, false]);
     expect(turns[0]!.cost.credits).toBeCloseTo(250, 5);
-    expect(turns[1]!.cost.credits).toBeCloseTo(250, 5);
+    expect(turns[1]!.cost.credits).toBeCloseTo(100, 5);
   });
 
   it("treats service_tier=fast as Fast mode", () => {
@@ -207,6 +208,7 @@ describe("buildLedger", () => {
     ];
     const { turns, fastMode } = buildLedger(events, "tier", { isSubagent: false });
     expect(fastMode).toBe(true);
+    expect(turns[0]!.fastMode).toBe(true);
     expect(turns[0]!.cost.credits).toBeCloseTo(250, 5);
   });
 
