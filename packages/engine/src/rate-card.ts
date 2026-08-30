@@ -25,15 +25,9 @@ function ratesForModel(
   card: RateCard,
 ): RateCard["models"][string] | undefined {
   if (!model) return undefined;
-  const exact = card.models[model];
-  if (exact) return exact;
-  let best: string | undefined;
-  for (const key of Object.keys(card.models)) {
-    if (model.startsWith(`${key}-`) || model.startsWith(`${key}.`)) {
-      if (!best || key.length > best.length) best = key;
-    }
-  }
-  return best ? card.models[best] : undefined;
+  // Pricing must be auditable. A future model that merely shares a prefix
+  // may have different rates, so only explicit IDs in the dated card match.
+  return card.models[model];
 }
 
 export function priceUsage(

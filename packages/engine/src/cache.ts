@@ -13,8 +13,8 @@ import { sha256 } from "./hash.ts";
 import { tokenAnalyserHome } from "./config.ts";
 import type { SessionSnapshot } from "./types.ts";
 
-// v5 stores per-turn Fast state and invalidates v4's session-wide repricing.
-export const CACHE_VERSION = 5;
+// v6 also invalidates snapshots that used v5's permissive model-prefix rates.
+export const CACHE_VERSION = 6;
 
 export function cacheDir(home?: string): string {
   return path.join(home ?? tokenAnalyserHome(), "cache");

@@ -85,7 +85,10 @@ export type SessionStoreOptions = {
   cacheDir?: string;
 };
 
-export type SessionIngestOptions = Pick<IngestOptions, "allowAppend">;
+export type SessionIngestOptions = Pick<IngestOptions, "allowAppend"> & {
+  /** Keep an already-loaded canonical session when an import has the same id. */
+  skipExisting?: boolean;
+};
 
 export class SessionStore {
   /** Raw per-file snapshots. Children are attached only in `rebuildAll`. */
@@ -207,6 +210,7 @@ export class SessionStore {
       cacheHome: this.cacheHome,
       allowAppend: opts?.allowAppend,
     });
+    if (opts?.skipExisting && this.sources.has(snap.id)) return snap.id;
     const resolved = path.resolve(filePath);
     for (const [id, source] of this.sources) {
       if (id === snap.id) continue;

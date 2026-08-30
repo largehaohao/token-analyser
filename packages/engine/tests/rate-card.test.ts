@@ -43,7 +43,7 @@ describe("rate card", () => {
     expect(cost.usd).toBeCloseTo(22.56, 5);
   });
 
-  it("prices model ids that add a suffix onto a known card key", () => {
+  it("prices the explicit gpt-5.6 default alias", () => {
     const card = loadRateCard(cardPath);
     const cost = priceUsage(
       {
@@ -54,11 +54,30 @@ describe("rate card", () => {
         reasoning_output_tokens: 0,
         total_tokens: 1_000_000,
       },
-      "gpt-5.6-sol-high",
+      "gpt-5.6",
       card,
       false,
     );
     expect(cost.credits).toBeCloseTo(100, 5);
+  });
+
+  it("does not borrow rates for an unknown prefixed model", () => {
+    const card = loadRateCard(cardPath);
+    const cost = priceUsage(
+      {
+        input_tokens: 1_000_000,
+        cached_input_tokens: 0,
+        cache_write_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+        total_tokens: 1_000_000,
+      },
+      "gpt-5.6-sol-preview",
+      card,
+      false,
+    );
+    expect(cost.credits).toBeNull();
+    expect(cost.usd).toBeNull();
   });
 
   it("returns null credits for unknown models", () => {

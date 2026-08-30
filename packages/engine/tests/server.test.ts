@@ -1,6 +1,9 @@
 import { describe, expect, it, afterEach } from "vitest";
 import {
   readFileSync,
+  readdirSync,
+  mkdirSync,
+  utimesSync,
   writeFileSync,
   mkdtempSync,
 } from "node:fs";
@@ -8,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SessionStore } from "../src/store.ts";
-import { startServer } from "../src/server.ts";
+import { loadImportedSessions, startServer } from "../src/server.ts";
 
 const fixtures = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -129,6 +132,113 @@ describe("startServer", () => {
       controller.abort();
 
       expect(events.join("")).toMatch(/session_(added|updated)/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("restores imports after restart and never overwrites a same-name file", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-import-restore-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({ port: 0, store });
+
+    try {
+      const first = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "X-Filename": "session.ndjson",
+        },
+        body: readFileSync(path.join(fixtures, "spawn-coord.jsonl"), "utf8"),
+      });
+      expect(first.status).toBe(200);
+
+      const second = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "X-Filename": "session.ndjson",
+        },
+        body: waitPollAsS1(),
+      });
+      expect(second.status).toBe(200);
+    } finally {
+      await server.close();
+    }
+
+    const importsDir = path.join(dir, "imports");
+    expect(readdirSync(importsDir).sort()).toEqual([
+      "session-2.ndjson",
+      "session.ndjson",
+    ]);
+
+    const restarted = new SessionStore({ cacheDir: path.join(dir, "cache-2") });
+    expect(loadImportedSessions(restarted, importsDir).sort()).toEqual([
+      "s-coord",
+      "s1",
+    ]);
+    expect(restarted.list().map((item) => item.id).sort()).toEqual([
+      "s-coord",
+      "s1",
+    ]);
+  });
+
+  it("keeps a watched session canonical when an import has the same id", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-import-duplicate-id-"));
+    const importsDir = path.join(dir, "imports");
+    mkdirSync(importsDir);
+    const watchedPath = path.join(dir, "rollout-s1.jsonl");
+    writeFileSync(watchedPath, waitPollAsS1());
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.refresh([watchedPath]);
+    const importedPath = path.join(importsDir, "same-id.ndjson");
+    writeFileSync(importedPath, waitPollAsS1().replace("100", "999"), {
+      flag: "w",
+    });
+
+    loadImportedSessions(store, importsDir);
+
+    expect(store.get("s1")?.path).toBe(watchedPath);
+  });
+
+  it("restores the newest copy when durable imports share a session id", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-import-newest-"));
+    const importsDir = path.join(dir, "imports");
+    mkdirSync(importsDir);
+    const older = path.join(importsDir, "older.ndjson");
+    const newer = path.join(importsDir, "newer.ndjson");
+    writeFileSync(older, waitPollAsS1());
+    writeFileSync(
+      newer,
+      waitPollAsS1().replaceAll('"input_tokens":90', '"input_tokens":900'),
+    );
+    utimesSync(older, new Date(1_000), new Date(1_000));
+    utimesSync(newer, new Date(2_000), new Date(2_000));
+
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    loadImportedSessions(store, importsDir);
+
+    expect(store.get("s1")?.path).toBe(newer);
+    expect(store.get("s1")?.cost.raw).toBe(910);
+  });
+
+  it("rejects imported payloads whose filename is not JSONL or NDJSON", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-import-name-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({ port: 0, store });
+    try {
+      const res = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "X-Filename": "session.txt",
+        },
+        body: waitPollAsS1(),
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_filename" });
     } finally {
       await server.close();
     }
