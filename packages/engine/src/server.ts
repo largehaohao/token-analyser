@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -92,6 +93,74 @@ function parsePathname(url: string | undefined): string {
 
 function isRolloutJsonl(name: string): boolean {
   return name.startsWith("rollout-") && name.endsWith(".jsonl");
+}
+
+function isImportFilename(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith(".jsonl") || lower.endsWith(".ndjson");
+}
+
+export function collectImportFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const files: { path: string; mtimeMs: number }[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !isImportFilename(entry.name)) continue;
+    const filePath = path.join(dir, entry.name);
+    try {
+      files.push({ path: filePath, mtimeMs: statSync(filePath).mtimeMs });
+    } catch {
+      // Skip a file removed while the directory is being scanned.
+    }
+  }
+  return files
+    // Newest first: when several durable imports contain the same session id,
+    // `skipExisting` keeps the most recent copy and ignores stale duplicates.
+    .sort((a, b) => b.mtimeMs - a.mtimeMs || b.path.localeCompare(a.path))
+    .map((entry) => entry.path);
+}
+
+export function loadImportedSessions(
+  store: SessionStore,
+  importsDir: string,
+  onError?: (filePath: string, err: Error) => void,
+): string[] {
+  const loaded: string[] = [];
+  for (const filePath of collectImportFiles(importsDir)) {
+    try {
+      const id = store.ingestPath(filePath, { skipExisting: true });
+      if (id) loaded.push(id);
+    } catch (err) {
+      onError?.(
+        filePath,
+        err instanceof Error ? err : new Error(String(err)),
+      );
+    }
+  }
+  return loaded;
+}
+
+function uniqueImportPath(importsDir: string, filename: string): string {
+  const safe = path.basename(filename);
+  const parsed = path.parse(safe);
+  let candidate = path.join(importsDir, safe);
+  for (let suffix = 2; existsSync(candidate); suffix += 1) {
+    candidate = path.join(importsDir, `${parsed.name}-${suffix}${parsed.ext}`);
+  }
+  return candidate;
+}
+
+function removeFailedImport(filePath: string): void {
+  try {
+    unlinkSync(filePath);
+  } catch {
+    // The failed copy may already have been removed by another process.
+  }
 }
 
 function collectRolloutFiles(roots: string[]): string[] {
@@ -196,14 +265,19 @@ async function handleImport(
       sendJson(res, 400, { error: "missing_filename" });
       return;
     }
+    if (!isImportFilename(filename)) {
+      sendJson(res, 400, { error: "invalid_filename" });
+      return;
+    }
 
     const importsDir = path.join(tokenAnalyserHome(), "imports");
     mkdirSync(importsDir, { recursive: true });
-    const dest = path.join(importsDir, path.basename(filename));
+    const dest = uniqueImportPath(importsDir, filename);
     writeFileSync(dest, await readBody(req, maxImportBytes));
 
     const id = store.ingestPath(dest);
     if (!id) {
+      removeFailedImport(dest);
       sendJson(res, 500, { error: "ingest_failed" });
       return;
     }
@@ -272,14 +346,19 @@ async function handleImport(
       sendJson(res, 400, { error: "missing_file" });
       return;
     }
+    if (!isImportFilename(filename)) {
+      sendJson(res, 400, { error: "invalid_filename" });
+      return;
+    }
 
     const importsDir = path.join(tokenAnalyserHome(), "imports");
     mkdirSync(importsDir, { recursive: true });
-    const dest = path.join(importsDir, filename);
+    const dest = uniqueImportPath(importsDir, filename);
     writeFileSync(dest, fileData, "binary");
 
     const id = store.ingestPath(dest);
     if (!id) {
+      removeFailedImport(dest);
       sendJson(res, 500, { error: "ingest_failed" });
       return;
     }
@@ -588,6 +667,14 @@ async function main(): Promise<void> {
         console.error(`ingest failed ${filePath}: ${err.message}`);
       },
     });
+    loadImportedSessions(
+      store,
+      path.join(tokenAnalyserHome(), "imports"),
+      (filePath, err) => {
+        ingestErrors.push({ id: errorIdFromPath(filePath), reason: err.message });
+        console.error(`import ingest failed ${filePath}: ${err.message}`);
+      },
+    );
   }
 
   const webDist = path.resolve(

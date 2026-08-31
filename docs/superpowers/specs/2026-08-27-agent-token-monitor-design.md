@@ -67,7 +67,7 @@ Two local processes. The browser never reads JSONL.
 - `GET /sessions/:id` — full `SessionSnapshot`.
 - `PATCH /sessions/:id/waste-toggles` — body is the toggle map; response is the same snapshot with recomputed `waste`. Parser is not rerun.
 - `GET /stream` — SSE events: `session_added`, `session_updated`, `session_error`.
-- `POST /import` — `{ "path": "<absolute jsonl>" }` or multipart file saved under `~/.token-analyser/imports/` then analysed in place.
+- `POST /import` — `{ "path": "<absolute jsonl>" }` or an uploaded JSONL/NDJSON copy saved under `~/.token-analyser/imports/` then analysed in place. Uploaded copies survive restarts, same-name files do not overwrite each other, and an already-watched canonical session wins over a duplicate import.
 
 **UI** consumes those endpoints only.
 
@@ -144,7 +144,7 @@ Rates are per 1M tokens, keyed by the model id from `turn_context` (e.g. `gpt-5.
 | gpt-5.6-terra | 50 | 5 | 300 |
 | gpt-5.6-luna | 5 | 0.5 | 30 |
 
-(Source: [Codex rate card](https://help.openai.com/en/articles/20001106-codex-rate-card). If a model is missing, the turn is `unpriced`: tokens still show, credits and $ show as `—`.)
+(Source: [Codex rate card](https://help.openai.com/en/articles/20001106-codex-rate-card). Model IDs match exact entries only; a shared prefix is not enough to borrow a rate. If a model is missing, the turn is `unpriced`: tokens still show, credits and $ show as `—`.)
 
 `$ = credits * usd_per_credit`. `usd_per_credit` lives in the same JSON with `source` and `as_of`. Ship `0.04` labeled as the ChatGPT credit purchase unit price used in public invoice reconstructions (Aug 2026). Users override in `~/.token-analyser/config.json`.
 

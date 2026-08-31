@@ -33,12 +33,16 @@ Default watch root: `~/.codex/sessions/**/rollout-*.jsonl`. Optional `~/.token-a
 ```
 
 Rate card: `config/rate-card.json`. Parse cache: `~/.token-analyser/cache/`.
+Imported `.jsonl` / `.ndjson` files are copied to
+`~/.token-analyser/imports/` and restored on the next launch. Existing imports
+are never overwritten by another file with the same name.
 
 The dashboard shows pricing coverage and ledger/parse health beside the headline
 figures. Daily trends use the browser's IANA timezone (with numeric-offset
 fallback), and the shipped rate card is dated so historical estimates remain
 auditable. Unknown models keep their token counts and display money as `—`
-instead of silently borrowing another model's price.
+instead of silently borrowing another model's price; model IDs must match an
+explicit entry in the dated rate card.
 
 Fast mode is accounted per turn, so switching `/fast` on or off during a
 conversation changes only the affected turns. Each Fast turn is marked in the
