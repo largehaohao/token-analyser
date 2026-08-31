@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { extractReadPaths, isReadCommand, isWriteOrTest } from "../src/exec-command.ts";
+import {
+  extractReadPaths,
+  hasSourceReadCommand,
+  isInspectionCommand,
+  isReadCommand,
+  isToolingCommand,
+  isValidationCommand,
+  isVerificationCommand,
+  isWriteCommand,
+  isWriteOrTest,
+} from "../src/exec-command.ts";
 
 describe("extractReadPaths", () => {
   it("takes file operands and ignores flags", () => {
@@ -30,5 +40,15 @@ describe("isWriteOrTest", () => {
     expect(isWriteOrTest(`{"cmd":["bash","-lc","cat README.md"]}`)).toBe(false);
     expect(isWriteOrTest("grep foo < bar.txt")).toBe(false);
     expect(isWriteOrTest("cat foo > bar")).toBe(true);
+  });
+
+  it("recognizes inspection, validation, and tooling commands separately", () => {
+    expect(isInspectionCommand("pwd && git status --short && rg -n TODO src")).toBe(true);
+    expect(hasSourceReadCommand("pwd && git status --short")).toBe(false);
+    expect(isValidationCommand("pnpm --filter engine test")).toBe(true);
+    expect(isVerificationCommand("git diff --check && pnpm test")).toBe(true);
+    expect(isToolingCommand("pnpm exec tsx probe.mts")).toBe(true);
+    expect(isWriteCommand("pnpm test")).toBe(false);
+    expect(isWriteCommand("rm -f /tmp/fixture")).toBe(true);
   });
 });

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, unlinkSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdtempSync,
+  mkdirSync,
+  unlinkSync,
+  utimesSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -167,6 +174,25 @@ describe("SessionStore", () => {
     expect(item.unpricedRaw).toBeGreaterThan(0);
   });
 
+  it("marks a root live while one of its child sessions is still active", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "store-child-live-"));
+    const parentPath = path.join(dir, "rollout-parent.jsonl");
+    const childPath = path.join(dir, "rollout-child.jsonl");
+    const old = new Date(Date.now() - 180_000);
+    writeFileSync(parentPath, parentFixture());
+    utimesSync(parentPath, old, old);
+    writeFileSync(
+      childPath,
+      readFileSync(path.join(fixtures, "child-prefix.jsonl"), "utf8"),
+    );
+
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.refresh([parentPath, childPath]);
+
+    expect(store.get("parent-1")?.live).toBe(true);
+    expect(store.overview({ watchPath: dir }).live).toBe(true);
+  });
+
   it("removePath drops a session from the index", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "store-remove-"));
     const filePath = path.join(dir, "rollout-parent.jsonl");
@@ -249,6 +275,34 @@ describe("watchSessions", () => {
 
       expect(store.list()).toHaveLength(1);
       expect(store.list()[0]!.id).toBe("nested-1");
+    } finally {
+      stop();
+    }
+  });
+
+  it("discovers a rollout in a directory created after a fallback watcher starts", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "watch-new-directory-"));
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const stop = watchSessions(store, () => {}, {
+      watchPaths: [dir],
+      recursive: false,
+    });
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const nested = path.join(dir, "2026", "08", "28");
+      mkdirSync(nested, { recursive: true });
+      writeFileSync(
+        path.join(nested, "rollout-after-start.jsonl"),
+        '{"timestamp":"2026-08-27T00:00:00.000Z","type":"session_meta","payload":{"id":"after-start","session_id":"after-start"}}\n',
+      );
+
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        if (store.get("after-start")) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(store.get("after-start")).toBeDefined();
     } finally {
       stop();
     }

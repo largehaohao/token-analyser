@@ -120,6 +120,19 @@ export function hasLiveReadState(filePath: string): boolean {
   return liveReadStates.has(filePath);
 }
 
+export function pruneInactiveLiveReadStates(): void {
+  for (const [filePath, state] of liveReadStates) {
+    let mtimeMs = state.mtimeMs;
+    try {
+      mtimeMs = statSync(filePath).mtimeMs;
+    } catch {
+      liveReadStates.delete(filePath);
+      continue;
+    }
+    if (!isLive(mtimeMs)) liveReadStates.delete(filePath);
+  }
+}
+
 export function ingestFile(
   filePath: string,
   opts?: IngestOptions,

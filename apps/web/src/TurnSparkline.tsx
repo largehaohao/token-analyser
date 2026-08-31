@@ -28,7 +28,7 @@ export function TurnSparkline({ turns }: Props) {
     >
       <polyline
         fill="none"
-        stroke="#7dffb3"
+        stroke="var(--accent)"
         strokeWidth="1.5"
         strokeLinejoin="round"
         strokeLinecap="round"

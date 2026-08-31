@@ -7,6 +7,26 @@ function slice(key: OverviewSlice["key"], raw: number): OverviewSlice {
 }
 
 describe("buildDonutSeries", () => {
+  it("uses labels and colors for fine-grained behavior slices", () => {
+    const series = buildDonutSeries(
+      [
+        slice("reading", 40),
+        slice("verification", 30),
+        slice("tooling", 20),
+        slice("communication", 10),
+      ],
+      100,
+    );
+
+    expect(series.map((item) => item.label)).toEqual([
+      "读取与搜索",
+      "测试与验证",
+      "工具与环境",
+      "消息沟通",
+    ]);
+    expect(series.every((item) => item.color !== "#7dffb3")).toBe(true);
+  });
+
   it("keeps legend percents and ring weights on the same allocated scale", () => {
     const series = buildDonutSeries(
       [

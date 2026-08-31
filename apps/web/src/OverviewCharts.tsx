@@ -39,6 +39,7 @@ type TrendProps = {
 };
 
 export function TrendChart({ days, rangeLabel }: TrendProps) {
+  const [inspectedDay, setInspectedDay] = useState<string | null>(null);
   const { unit } = useUnit();
   const metric = unitToChartMetric(unit);
   const values = days.map((day) => dayMetricValue(day, metric));
@@ -57,10 +58,7 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
         <div>
           <h2 className="chart-title">消耗趋势</h2>
           <p className="chart-desc">
-            按本地日期归桶（跨日会话按每轮结束时间拆分）
-            {rangeLabel ? ` · ${rangeLabel}` : ""}
-            。窗口外的用量记在「更早 / 之后」。单位跟随页顶开关。不是逐 token
-            实时扣费。
+            {rangeLabel ?? "当前范围"} · 按本地日期汇总，单位跟随页顶选择。
           </p>
         </div>
       </div>
@@ -71,7 +69,7 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
           ))}
         </div>
         <div className="trend-plot">
-          {days.map((day) => {
+          {days.map((day, index) => {
             const total = dayMetricValue(day, metric);
             const flagged = flaggedValue(day, metric);
             const bar = barHeightPct(total, day.cost.raw, max);
@@ -82,12 +80,20 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
                 ? (100 * flagged) / total
                 : 0;
             return (
-              <div
+              <button
+                type="button"
                 key={day.date}
-                className={`trend-col${isOverflowDate(day.date) ? " overflow" : ""}`}
-                tabIndex={0}
-                role="img"
+                className={`trend-col${isOverflowDate(day.date) ? " overflow" : ""}${inspectedDay === day.date ? " inspected" : ""}${index < days.length / 3 ? " tooltip-start" : index >= (days.length * 2) / 3 ? " tooltip-end" : ""}`}
                 aria-label={trendColumnAriaLabel(day, metric)}
+                onMouseEnter={() => setInspectedDay(day.date)}
+                onMouseLeave={() => setInspectedDay(null)}
+                onFocus={() => setInspectedDay(day.date)}
+                onBlur={() => setInspectedDay(null)}
+                onClick={() => setInspectedDay(day.date)}
+                onKeyDown={(event) => {
+                  if (!event.nativeEvent.isComposing && event.key === "Escape")
+                    setInspectedDay(null);
+                }}
               >
                 <div
                   className={`trend-stack${bar.unpriced ? " unpriced" : ""}${mixed ? " mixed-unpriced" : ""}`}
@@ -109,7 +115,7 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
                     }}
                   />
                 </div>
-                <div className="chart-tooltip">
+                <span className="chart-tooltip" aria-hidden="true">
                   <strong>
                     {chartDayTooltip(day.date)}
                     {" · "}
@@ -120,15 +126,17 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
                   <span>账本警告 / 解析错误 {flaggedLabel(day, metric)}</span>
                   <span>{formatExactTokens(day.cost.raw)} tokens</span>
                   {unpricedRaw > 0 && total != null && (
-                    <span>另有 {formatExactTokens(unpricedRaw)} tokens 未定价</span>
+                    <span>
+                      另有 {formatExactTokens(unpricedRaw)} tokens 未定价
+                    </span>
                   )}
-                </div>
+                </span>
                 <span className="trend-label">
                   {shouldLabelChartDay(day.date, dates)
                     ? formatChartDay(day.date)
                     : ""}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -138,7 +146,7 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
           <i className="swatch useful" /> 已记录用量
         </span>
         <span>
-          <i className="swatch waste" /> 含账本警告或解析错误（不是浪费开关）
+          <i className="swatch flagged" /> 含账本或解析异常
         </span>
         {hasUnpriced && (
           <span>
@@ -169,7 +177,10 @@ export function DonutChart({
   return (
     <section className="chart-card">
       <h2 className="chart-title">Token 花在哪里?</h2>
-      <p className="chart-desc">按行为归因的原始 token 划分，不是服务商账单分类。环与图例共用最大余数百分比。</p>
+      <p className="chart-desc">
+        按行为归因的原始 token
+        划分，不是服务商账单分类。环与图例共用最大余数百分比。
+      </p>
       <div className="donut-wrap" data-testid="donut-chart">
         <svg
           className="donut"
@@ -182,7 +193,7 @@ export function DonutChart({
             cy="100"
             r={radius}
             fill="none"
-            stroke="#1a221a"
+            stroke="var(--border)"
             strokeWidth="22"
           />
           {series.map((slice, i) => {
@@ -239,11 +250,9 @@ export function DonutChart({
                 onMouseLeave={() => setHoverKey(null)}
                 onFocus={() => setHoverKey(slice.key)}
                 onBlur={() => setHoverKey(null)}
+                onClick={() => setHoverKey(slice.key)}
               >
-                <i
-                  className="legend-dot"
-                  style={{ background: slice.color }}
-                />
+                <i className="legend-dot" style={{ background: slice.color }} />
                 <span>{slice.label}</span>
                 <em>{formatExactTokens(slice.raw)}</em>
                 <strong>{formatPercent(percents[i] ?? 0)}</strong>
@@ -262,12 +271,12 @@ export function DonutChart({
 }
 
 const MODEL_COLORS = [
-  "#7dffb3",
-  "#5b8cff",
-  "#a78bfa",
-  "#38bdf8",
-  "#ff9f5a",
-  "#f5c542",
+  "var(--accent)",
+  "var(--chart-blue)",
+  "var(--chart-violet)",
+  "var(--chart-cyan)",
+  "var(--chart-orange)",
+  "var(--warn)",
 ];
 
 export function ModelMix({ models }: { models: OverviewModel[] }) {
@@ -321,7 +330,9 @@ export function ModelMix({ models }: { models: OverviewModel[] }) {
             </strong>
             <em>{formatPercent(percents[i] ?? 0)}</em>
             {row.unpricedRaw > 0 && (
-              <span className="model-note">{unpricedNote(row.unpricedRaw)}</span>
+              <span className="model-note">
+                {unpricedNote(row.unpricedRaw)}
+              </span>
             )}
           </li>
         ))}

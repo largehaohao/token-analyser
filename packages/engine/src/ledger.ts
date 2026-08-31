@@ -119,7 +119,79 @@ function normalizeToolInput(value: unknown, toolName: string): string {
   } catch {
     // The input may already be a plain shell command.
   }
-  return text;
+  const embedded = extractEmbeddedExecCommand(text);
+  return embedded ?? text;
+}
+
+function decodeJavaScriptString(source: string): string {
+  let decoded = "";
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i]!;
+    if (char !== "\\" || i + 1 >= source.length) {
+      decoded += char;
+      continue;
+    }
+    const escaped = source[++i]!;
+    decoded +=
+      escaped === "n"
+        ? "\n"
+        : escaped === "r"
+          ? "\r"
+          : escaped === "t"
+            ? "\t"
+            : escaped;
+  }
+  return decoded;
+}
+
+/** Extract only literal commands from an exec_command wrapper; never evaluates JS. */
+function extractEmbeddedExecCommand(source: string): string | null {
+  const marker = /\b(?:[\w$]+\.)?exec_command\s*\(\s*\{\s*(?:cmd|command)\s*:/g;
+  const match = marker.exec(source);
+  if (!match) return null;
+  let index = match.index + match[0].length;
+  while (/\s/.test(source[index] ?? "")) index += 1;
+  const quote = source[index];
+  if (quote !== "'" && quote !== '"' && quote !== "`") return null;
+  index += 1;
+  let value = "";
+  for (; index < source.length; index += 1) {
+    const char = source[index]!;
+    if (char === "\\" && index + 1 < source.length) {
+      value += char + source[++index]!;
+      continue;
+    }
+    if (char === quote) return decodeJavaScriptString(value);
+    value += char;
+  }
+  return null;
+}
+
+function normalizeToolOutput(output: string): string {
+  const trimmed = output.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      const record = asRecord(parsed);
+      const nested = record?.output ?? record?.stdout;
+      if (typeof nested === "string") return nested;
+    } catch {
+      // The output may be ordinary command output beginning with `{`.
+    }
+  }
+
+  const marker = /\r?\n(?:Final output|final output):\r?\n/g;
+  let found: RegExpExecArray | null = null;
+  for (let match = marker.exec(output); match; match = marker.exec(output)) {
+    found = match;
+  }
+  if (found) {
+    const prefix = output.slice(0, found.index);
+    if (/Process exited with code\s+\d+|\bexit_code\b/i.test(prefix)) {
+      return output.slice(found.index + found[0].length);
+    }
+  }
+  return output;
 }
 
 function extractTurnContext(payload: Record<string, unknown>): TurnContext {
@@ -198,12 +270,13 @@ function newWindow(): WindowState {
 }
 
 function finalizeTool(pending: PendingTool, output: string): ToolCall {
+  const normalizedOutput = normalizeToolOutput(output);
   return {
     name: pending.name,
     input: pending.input,
-    outputSha256: sha256(output),
-    outputBytes: Buffer.byteLength(output, "utf8"),
-    outputPreview: preview(output),
+    outputSha256: sha256(normalizedOutput),
+    outputBytes: Buffer.byteLength(normalizedOutput, "utf8"),
+    outputPreview: preview(normalizedOutput),
   };
 }
 

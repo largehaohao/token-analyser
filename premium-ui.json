@@ -1,0 +1,19 @@
+{
+  "profile": "product-admin",
+  "sourceRoots": ["apps/web/src"],
+  "locale": "zh-CN",
+  "canonicalMap": "UX-CONTRACT.md",
+  "requiredCapabilities": ["Form", "Scrollbar"],
+  "requiredCommands": ["unit", "typecheck", "build", "tokens", "e2e"],
+  "commands": {
+    "unit": "pnpm test",
+    "typecheck": "pnpm --filter web exec tsc --noEmit",
+    "build": "pnpm --filter web build",
+    "tokens": "node scripts/verify-ui-tokens.mjs",
+    "e2e": "pnpm --filter web test:e2e"
+  },
+  "evidence": {
+    "failurePaths": "apps/web/e2e/ux-contract.spec.ts",
+    "accessibility": "apps/web/e2e/ux-contract.spec.ts"
+  }
+}

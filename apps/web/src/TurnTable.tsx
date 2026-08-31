@@ -1,9 +1,17 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Turn } from "./api";
 import { LABEL_CHIP, treeAppearance } from "./buckets";
-import { formatCost, formatCostTitle, formatExactTokens } from "./format";
+import {
+  formatCompactTokens,
+  formatCost,
+  formatCostTitle,
+  formatExactTokens,
+  formatUnitSuffix,
+} from "./format";
 import { MixBar } from "./MixBar";
 import { TurnSparkline } from "./TurnSparkline";
+import { useUnit } from "./UnitContext";
+import { Button, Icon } from "./ui";
 import {
   TURN_PAGE_SIZE,
   highlightScrollBehavior,
@@ -43,6 +51,7 @@ export function TurnTable({
   resetKey,
   scopeLabel,
 }: Props) {
+  const { unit } = useUnit();
   const filtered = useMemo(
     () =>
       turns
@@ -89,26 +98,36 @@ export function TurnTable({
           </div>
         )}
       </div>
+      <p className="chart-desc">展开时间旁的箭头，查看完整用量与调用证据。</p>
       {filtered.length === 0 ? (
-        <p className="empty-turns">
-          该节点没有轮次。点选「本会话」查看全部。
-        </p>
+        <p className="empty-turns">该节点没有轮次。点选「本会话」查看全部。</p>
       ) : (
         <>
-          <div className="turn-table-scroll">
+          <p className="table-overflow-hint">
+            左右滚动查看完整列 · 最新轮次在前
+          </p>
+          <div
+            className="turn-table-scroll"
+            role="region"
+            aria-label="轮次明细表，可横向滚动"
+            tabIndex={0}
+          >
             <table className="turn-table">
+              <caption className="visually-hidden">
+                轮次用量，使用时间旁的按钮展开明细
+              </caption>
               <thead>
                 <tr>
-                  <th>时间</th>
-                  <th>分类</th>
-                  <th>工具</th>
-                  <th>提示</th>
-                  <th>构成</th>
-                  <th>未缓存</th>
-                  <th>缓存</th>
-                  <th>输出</th>
-                  <th>Credits</th>
-                  <th>$</th>
+                  <th scope="col" aria-sort="descending">
+                    时间
+                  </th>
+                  <th scope="col">分类</th>
+                  <th scope="col">工具</th>
+                  <th scope="col">提示</th>
+                  <th scope="col">构成</th>
+                  <th scope="col">
+                    {unit === "tokens" ? "Token 用量" : formatUnitSuffix(unit)}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -130,29 +149,36 @@ export function TurnTable({
                         ]
                           .filter(Boolean)
                           .join(" ")}
-                        tabIndex={0}
-                        aria-expanded={expanded}
-                        onClick={() =>
-                          setExpandedId((current) =>
-                            current === t.id ? null : t.id,
-                          )
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" && event.key !== " ") return;
-                          event.preventDefault();
-                          setExpandedId((current) =>
-                            current === t.id ? null : t.id,
-                          );
-                        }}
                       >
                         <td
                           title={new Date(t.startedAt).toLocaleString("zh-CN", {
                             hour12: false,
                           })}
                         >
-                          {new Date(t.startedAt).toLocaleTimeString("zh-CN", {
-                            hour12: false,
-                          })}
+                          <button
+                            type="button"
+                            className="turn-expand"
+                            aria-expanded={expanded}
+                            aria-controls={
+                              expanded ? `turn-detail-${t.id}` : undefined
+                            }
+                            aria-label={`${expanded ? "收起" : "展开"} ${new Date(t.startedAt).toLocaleString("zh-CN", { hour12: false })} 的轮次明细`}
+                            onClick={() =>
+                              setExpandedId((current) =>
+                                current === t.id ? null : t.id,
+                              )
+                            }
+                          >
+                            <Icon name="chevron" />
+                            <time dateTime={t.startedAt}>
+                              {new Date(t.startedAt).toLocaleTimeString(
+                                "zh-CN",
+                                {
+                                  hour12: false,
+                                },
+                              )}
+                            </time>
+                          </button>
                         </td>
                         <td className="bucket-col">
                           {appearance ? (
@@ -212,25 +238,62 @@ export function TurnTable({
                             ]}
                           />
                         </td>
-                        <td title={formatExactTokens(t.cost.uncached_input)}>
-                          {formatExactTokens(t.cost.uncached_input)}
-                        </td>
-                        <td title={formatExactTokens(t.cost.cached_input)}>
-                          {formatExactTokens(t.cost.cached_input)}
-                        </td>
-                        <td title={formatExactTokens(t.cost.output)}>
-                          {formatExactTokens(t.cost.output)}
-                        </td>
-                        <td title={formatCostTitle(t.cost, "credits")}>
-                          {formatCost(t.cost, "credits")}
-                        </td>
-                        <td title={formatCostTitle(t.cost, "usd")}>
-                          {formatCost(t.cost, "usd")}
+                        <td
+                          className="turn-total"
+                          title={formatCostTitle(t.cost, unit)}
+                        >
+                          {unit === "tokens"
+                            ? formatCompactTokens(t.cost.raw)
+                            : formatCost(t.cost, unit)}
                         </td>
                       </tr>
                       {expanded && (
-                        <tr className="turn-detail">
-                          <td colSpan={10}>
+                        <tr className="turn-detail" id={`turn-detail-${t.id}`}>
+                          <td colSpan={6}>
+                            <p className="turn-evidence-meta">
+                              {new Date(t.startedAt).toLocaleString("zh-CN", {
+                                hour12: false,
+                              })}{" "}
+                              · {t.model ?? "未记录模型"}
+                              {t.effort ? ` · ${t.effort}` : ""}
+                            </p>
+                            <dl
+                              className="turn-detail-metrics"
+                              aria-label="Token 与费用明细"
+                            >
+                              <div>
+                                <dt>总 Token</dt>
+                                <dd>{formatExactTokens(t.cost.raw)}</dd>
+                              </div>
+                              <div>
+                                <dt>未缓存输入</dt>
+                                <dd>
+                                  {formatExactTokens(t.cost.uncached_input)}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>缓存输入</dt>
+                                <dd>
+                                  {formatExactTokens(t.cost.cached_input)}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>输出</dt>
+                                <dd>{formatExactTokens(t.cost.output)}</dd>
+                              </div>
+                              <div>
+                                <dt>Credits</dt>
+                                <dd title={formatCostTitle(t.cost, "credits")}>
+                                  {formatCost(t.cost, "credits")}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>USD</dt>
+                                <dd title={formatCostTitle(t.cost, "usd")}>
+                                  {formatCost(t.cost, "usd")}
+                                </dd>
+                              </div>
+                            </dl>
                             <div className="turn-detail-grid">
                               <div>
                                 <h4>提示</h4>
@@ -239,7 +302,9 @@ export function TurnTable({
                               <div>
                                 <h4>工具</h4>
                                 {t.tools.length === 0 ? (
-                                  <p className="empty-turns">该轮没有工具调用。</p>
+                                  <p className="empty-turns">
+                                    该轮没有工具调用。
+                                  </p>
                                 ) : (
                                   <ul className="turn-tool-list">
                                     {t.tools.map((tool, i) => (
@@ -252,8 +317,12 @@ export function TurnTable({
                                             {tool.outputBytes > 0 && (
                                               <span>
                                                 {" "}
-                                                · {tool.outputBytes.toLocaleString("en-US")}{" "}
-                                                B · {tool.outputSha256.slice(0, 8)}
+                                                ·{" "}
+                                                {tool.outputBytes.toLocaleString(
+                                                  "en-US",
+                                                )}{" "}
+                                                B ·{" "}
+                                                {tool.outputSha256.slice(0, 8)}
                                               </span>
                                             )}
                                           </p>
@@ -274,15 +343,12 @@ export function TurnTable({
             </table>
           </div>
           {visible.length < filtered.length && (
-            <button
-              type="button"
+            <Button
               className="load-more"
-              onClick={() =>
-                setLimit(nextTurnLimit(limit, filtered.length))
-              }
+              onClick={() => setLimit(nextTurnLimit(limit, filtered.length))}
             >
               加载更多（还有 {filtered.length - visible.length} 轮）
-            </button>
+            </Button>
           )}
         </>
       )}

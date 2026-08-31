@@ -12,7 +12,7 @@ export type DonutSlice = {
 const UNATTRIBUTED: Omit<DonutSlice, "raw"> = {
   key: "unattributed",
   label: "未归因",
-  color: "#64706a",
+  color: "var(--chart-neutral)",
 };
 
 export function buildDonutSeries(
@@ -25,7 +25,7 @@ export function buildDonutSeries(
       key: slice.key,
       raw: slice.raw,
       label: meta?.label ?? slice.key,
-      color: meta?.color ?? "#7dffb3",
+      color: meta?.color ?? "var(--accent)",
     };
   });
   const sliceSum = series.reduce((sum, slice) => sum + slice.raw, 0);

@@ -43,12 +43,15 @@ export function watchSessions(
   const watchPaths =
     opts?.watchPaths ?? loadUserConfig().watch_paths;
   const watchers: ReturnType<typeof watch>[] = [];
+  const watchedDirs = new Set<string>();
   const pending = new Map<string, ReturnType<typeof setTimeout>>();
   // fs.watch can miss a create event when a directory is watched immediately
   // before the writer creates its first file.  A short startup rescan closes
   // that race without turning every append into a full directory traversal.
   let startupScan: ReturnType<typeof setTimeout> | undefined;
+  let directoryScan: ReturnType<typeof setInterval> | undefined;
   const useRecursive = opts?.recursive ?? true;
+  let needsDirectoryScan = !useRecursive;
 
   function errorIdFromPath(filePath: string): string {
     const base = path.basename(filePath);
@@ -85,6 +88,8 @@ export function watchSessions(
   }
 
   function watchDirectory(dir: string): void {
+    if (watchedDirs.has(dir)) return;
+    watchedDirs.add(dir);
     try {
       const w = watch(dir, (_event, filename) => {
         if (!filename) return;
@@ -94,6 +99,7 @@ export function watchSessions(
       });
       watchers.push(w);
     } catch {
+      watchedDirs.delete(dir);
       // An inaccessible directory should not prevent other roots from being watched.
     }
   }
@@ -102,6 +108,7 @@ export function watchSessions(
     for (const root of watchPaths) {
       if (!existsSync(root)) continue;
       for (const dir of listDirectories(root)) {
+        if (needsDirectoryScan) watchDirectory(dir);
         let entries: string[];
         try {
           entries = readdirSync(dir);
@@ -134,6 +141,7 @@ export function watchSessions(
         continue;
       } catch {
         // fall through to per-directory watchers
+        needsDirectoryScan = true;
       }
     }
 
@@ -143,9 +151,13 @@ export function watchSessions(
   }
 
   startupScan = setTimeout(scanForRollouts, 25);
+  if (needsDirectoryScan) {
+    directoryScan = setInterval(scanForRollouts, 1_000);
+  }
 
   return () => {
     if (startupScan) clearTimeout(startupScan);
+    if (directoryScan) clearInterval(directoryScan);
     for (const timer of pending.values()) clearTimeout(timer);
     pending.clear();
     for (const w of watchers) w.close();

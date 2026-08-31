@@ -2,7 +2,12 @@ import path from "node:path";
 import { existsSync, statSync } from "node:fs";
 import { buildTree } from "./tree.ts";
 import { computeWaste } from "./waste.ts";
-import { ingestFile, clearLiveReadState, type IngestOptions } from "./ingest.ts";
+import {
+  ingestFile,
+  clearLiveReadState,
+  pruneInactiveLiveReadStates,
+  type IngestOptions,
+} from "./ingest.ts";
 import { isLive, pruneStaleCache } from "./cache.ts";
 import { effectiveRateCard } from "./rate-card.ts";
 import {
@@ -52,6 +57,7 @@ function rebuildDerived(snap: SessionSnapshot): SessionSnapshot {
   const derived = { ...snap, tree, cost: tree.cost, waste };
   return {
     ...derived,
+    live: snap.live || snap.children.some((child) => child.live),
     lastEventAt: latestActivityIso(derived),
   };
 }
@@ -142,6 +148,7 @@ export class SessionStore {
   }
 
   private refreshLiveFlags(): void {
+    pruneInactiveLiveReadStates();
     let changed = false;
     for (const [id, source] of this.sources) {
       let live = source.live;

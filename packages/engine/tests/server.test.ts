@@ -8,6 +8,7 @@ import {
   mkdtempSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SessionStore } from "../src/store.ts";
@@ -184,6 +185,104 @@ describe("startServer", () => {
     ]);
   });
 
+  it("reserves a unique name when same-name uploads arrive concurrently", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-import-race-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({ port: 0, store });
+    const firstBody = waitPollAsS1().replaceAll('"s1"', '"race-one"');
+    const secondBody = waitPollAsS1().replaceAll('"s1"', '"race-two"');
+
+    let finishFirst!: () => void;
+    let firstFinished = false;
+    const firstResponse = new Promise<number>((resolve, reject) => {
+      const url = new URL(`${server.url}/import`);
+      const request = http.request(
+        {
+          hostname: url.hostname,
+          port: Number(url.port),
+          path: url.pathname,
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-ndjson",
+            "X-Filename": "race.ndjson",
+            "Content-Length": Buffer.byteLength(firstBody),
+          },
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve(response.statusCode ?? 0));
+        },
+      );
+      request.on("error", reject);
+      request.write(firstBody.slice(0, 1));
+      finishFirst = () => {
+        if (firstFinished) return;
+        firstFinished = true;
+        request.end(firstBody.slice(1));
+      };
+    });
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const secondResponse = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "X-Filename": "race.ndjson",
+        },
+        body: secondBody,
+      });
+      await secondResponse.text();
+      finishFirst();
+      expect(await firstResponse).toBe(200);
+      expect(secondResponse.status).toBe(200);
+
+      const files = readdirSync(path.join(dir, "imports"))
+        .filter((name) => name.startsWith("race"))
+        .sort();
+      expect(files).toEqual(["race-2.ndjson", "race.ndjson"]);
+      expect(readFileSync(path.join(dir, "imports", files[0]!), "utf8")).toContain(
+        '"race-one"',
+      );
+      expect(readFileSync(path.join(dir, "imports", files[1]!), "utf8")).toContain(
+        '"race-two"',
+      );
+    } finally {
+      finishFirst();
+      await server.close();
+    }
+  });
+
+  it("keeps a loaded canonical session when importing the same id over HTTP", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-import-canonical-http-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    const watchedPath = path.join(dir, "rollout-s1.jsonl");
+    writeFileSync(watchedPath, waitPollAsS1());
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.refresh([watchedPath]);
+    const before = store.get("s1")!;
+    const server = await startServer({ port: 0, store });
+
+    try {
+      const response = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "X-Filename": "stale.ndjson",
+        },
+        body: waitPollAsS1().replace('"input_tokens":90', '"input_tokens":900'),
+      });
+      const imported = (await response.json()) as { id: string; path: string; cost: { raw: number } };
+      expect(response.status).toBe(200);
+      expect(imported.id).toBe("s1");
+      expect(imported.path).toBe(watchedPath);
+      expect(imported.cost.raw).toBe(before.cost.raw);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("keeps a watched session canonical when an import has the same id", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "server-import-duplicate-id-"));
     const importsDir = path.join(dir, "imports");
@@ -239,6 +338,28 @@ describe("startServer", () => {
       });
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "invalid_filename" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("accepts percent-encoded UTF-8 import filenames", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-import-unicode-name-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({ port: 0, store });
+
+    try {
+      const response = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "X-Filename": encodeURIComponent("会话.ndjson"),
+        },
+        body: waitPollAsS1(),
+      });
+      expect(response.status).toBe(200);
+      expect(readdirSync(path.join(dir, "imports"))).toContain("会话.ndjson");
     } finally {
       await server.close();
     }

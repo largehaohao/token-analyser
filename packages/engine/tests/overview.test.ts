@@ -154,6 +154,33 @@ describe("buildOverview", () => {
     ]);
   });
 
+  it("preserves fine-grained behavior buckets in the overview slices", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "fine-grained",
+          startedAt: "2026-08-28T10:00:00.000Z",
+          turns: [
+            turn({ id: "read", bucket: "reading", raw: 10 }),
+            turn({ id: "verify", bucket: "verification", raw: 20 }),
+            turn({ id: "tool", bucket: "tooling", raw: 30 }),
+            turn({ id: "message", bucket: "communication", raw: 40 }),
+          ],
+        }),
+      ],
+      { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z" },
+    );
+
+    expect(
+      Object.fromEntries(overview.slices.map((slice) => [slice.key, slice.raw])),
+    ).toMatchObject({
+      reading: 10,
+      verification: 20,
+      tooling: 30,
+      communication: 40,
+    });
+  });
+
   it("fills eight UTC days ending at now and marks flagged days", () => {
     const overview = buildOverview(
       [

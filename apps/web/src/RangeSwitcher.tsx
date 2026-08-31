@@ -1,7 +1,5 @@
-import {
-  SESSION_RANGES,
-  type SessionRangeId,
-} from "./session-range";
+import { SESSION_RANGES, type SessionRangeId } from "./session-range";
+import { SegmentedControl } from "./ui";
 
 type Props = {
   range: SessionRangeId;
@@ -10,18 +8,12 @@ type Props = {
 
 export function RangeSwitcher({ range, onChange }: Props) {
   return (
-    <div className="range-switch" role="group" aria-label="时间范围">
-      {SESSION_RANGES.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          className={range === item.id ? "active" : ""}
-          aria-pressed={range === item.id}
-          onClick={() => onChange(item.id)}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl
+      className="range-switch"
+      label="时间范围"
+      value={range}
+      options={SESSION_RANGES}
+      onChange={onChange}
+    />
   );
 }

@@ -26,8 +26,12 @@ export type Cost = {
 
 export type Bucket =
   | "planning"
+  | "reading"
+  | "verification"
   | "code"
   | "reread"
+  | "tooling"
+  | "communication"
   | "waiting.poll"
   | "waiting.coord"
   | "other";

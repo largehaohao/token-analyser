@@ -112,7 +112,17 @@ export type SessionSnapshot = {
 };
 
 export type OverviewSlice = {
-  key: "planning" | "code" | "reread" | "subagents" | "waiting" | "other";
+  key:
+    | "planning"
+    | "reading"
+    | "verification"
+    | "code"
+    | "reread"
+    | "tooling"
+    | "communication"
+    | "subagents"
+    | "waiting"
+    | "other";
   raw: number;
   credits: number | null;
   usd: number | null;
@@ -194,10 +204,28 @@ async function parseJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function requestJson<T>(
+  url: string,
+  init?: RequestInit,
+  timeoutMs = 20_000,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await parseJson<T>(
+      await fetch(url, { ...init, signal: controller.signal }),
+    );
+  } catch (error) {
+    if (controller.signal.aborted)
+      throw new Error("请求超时，请确认本地引擎正在运行后重试。");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function listSessions(): Promise<SessionListItem[]> {
-  const body = await parseJson<{ sessions: SessionListItem[] }>(
-    await fetch("/sessions"),
-  );
+  const body = await requestJson<{ sessions: SessionListItem[] }>("/sessions");
   return body.sessions;
 }
 
@@ -215,23 +243,24 @@ export async function getOverview(
   );
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (timezone) params.set("timezone", timezone);
-  return parseJson<Overview>(await fetch(`/overview?${params.toString()}`));
+  return requestJson<Overview>(`/overview?${params.toString()}`);
 }
 
 export async function getSession(id: string): Promise<SessionSnapshot> {
-  return parseJson<SessionSnapshot>(await fetch(`/sessions/${id}`));
+  return requestJson<SessionSnapshot>(`/sessions/${encodeURIComponent(id)}`);
 }
 
 export async function patchToggles(
   id: string,
   toggles: Partial<Record<WasteToggleId, boolean>>,
 ): Promise<SessionSnapshot> {
-  return parseJson<SessionSnapshot>(
-    await fetch(`/sessions/${id}/waste-toggles`, {
+  return requestJson<SessionSnapshot>(
+    `/sessions/${encodeURIComponent(id)}/waste-toggles`,
+    {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(toggles),
-    }),
+    },
   );
 }
 
@@ -239,16 +268,58 @@ export async function importNdjson(
   filename: string,
   text: string,
 ): Promise<SessionSnapshot> {
-  return parseJson<SessionSnapshot>(
-    await fetch("/import", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-ndjson",
-        "X-Filename": filename,
+  try {
+    return await requestJson<SessionSnapshot>(
+      "/import",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "X-Filename": encodeURIComponent(filename),
+        },
+        body: text,
       },
-      body: text,
-    }),
-  );
+      120_000,
+    );
+  } catch (error) {
+    const status = (error as { status?: number })?.status;
+    if (status === 413)
+      throw new Error("文件超过引擎的导入上限，请选择较小的记录。");
+    if (status && status < 500)
+      throw new Error(
+        "无法识别会话记录，请确认文件来自 Codex，且包含有效的 JSONL 内容。",
+      );
+    throw new Error(
+      "导入结果尚未确认。请先检查会话列表，确认未导入后再重新选择文件。",
+    );
+  }
+}
+
+// Import returns a confirmed snapshot before a follow-up list refresh. Keep the
+// new session visible even if that independent read temporarily fails.
+export function sessionSummary(snapshot: SessionSnapshot): SessionListItem {
+  const firstError = snapshot.parse_errors?.[0];
+  return {
+    id: snapshot.id,
+    parentId: snapshot.parentId,
+    nickname: snapshot.nickname,
+    cwd: snapshot.cwd,
+    live: snapshot.live,
+    model: snapshot.model,
+    effort: snapshot.effort,
+    startedAt: snapshot.startedAt,
+    lastEventAt: snapshot.lastEventAt,
+    cost: snapshot.cost,
+    waste: snapshot.waste,
+    parse_error: !!firstError,
+    parse_error_offset: firstError?.offset,
+    parse_error_message: firstError?.message,
+    ledger_warning: snapshot.ledger_warning,
+    toolsChars: snapshot.context?.tools.chars ?? 0,
+    toolsCount: snapshot.context?.tools.items.length ?? 0,
+    skillsChars: snapshot.context?.skills.chars ?? 0,
+    skillsCount: snapshot.context?.skills.items.length ?? 0,
+  };
 }
 
 export type StreamStatus = "connecting" | "open" | "error";

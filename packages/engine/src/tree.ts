@@ -11,8 +11,12 @@ import {
 
 const BUCKET_ORDER: Bucket[] = [
   "planning",
+  "reading",
+  "verification",
   "code",
   "reread",
+  "tooling",
+  "communication",
   "waiting.poll",
   "waiting.coord",
   "other",
@@ -20,8 +24,12 @@ const BUCKET_ORDER: Bucket[] = [
 
 const ROOT_CHILD_LABELS = [
   "planning",
+  "reading",
+  "verification",
   "code",
   "reread",
+  "tooling",
+  "communication",
   "subagents",
   "waiting",
   "other",
@@ -137,8 +145,12 @@ export function buildTree(args: {
 
   const childByLabel: Record<(typeof ROOT_CHILD_LABELS)[number], TreeNode> = {
     planning: bucketNodes.get("planning")!,
+    reading: bucketNodes.get("reading")!,
+    verification: bucketNodes.get("verification")!,
     code: bucketNodes.get("code")!,
     reread: bucketNodes.get("reread")!,
+    tooling: bucketNodes.get("tooling")!,
+    communication: bucketNodes.get("communication")!,
     subagents: subagentsNode,
     waiting: waitingNode,
     other: bucketNodes.get("other")!,

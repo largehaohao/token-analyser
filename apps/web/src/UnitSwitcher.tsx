@@ -1,5 +1,6 @@
 import { useUnit } from "./UnitContext";
 import type { CostUnit } from "./format";
+import { SegmentedControl } from "./ui";
 
 const UNITS: { id: CostUnit; label: string }[] = [
   { id: "tokens", label: "Tokens" },
@@ -11,17 +12,12 @@ export function UnitSwitcher() {
   const { unit, setUnit } = useUnit();
 
   return (
-    <div className="metric-switch" role="group" aria-label="显示单位">
-      {UNITS.map((u) => (
-        <button
-          key={u.id}
-          type="button"
-          className={unit === u.id ? "active" : ""}
-          onClick={() => setUnit(u.id)}
-        >
-          {u.label}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl
+      className="metric-switch"
+      label="显示单位"
+      value={unit}
+      options={UNITS}
+      onChange={setUnit}
+    />
   );
 }

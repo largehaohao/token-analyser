@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getOverview, openStream, type StreamEvent } from "./api";
+import {
+  getOverview,
+  importNdjson,
+  openStream,
+  type StreamEvent,
+} from "./api";
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -78,5 +83,28 @@ describe("getOverview", () => {
     const url = new URL(String(fetchMock.mock.calls[0]![0]), "http://localhost");
     expect(url.searchParams.has("timezone")).toBe(true);
     expect(url.searchParams.has("timezone_offset_minutes")).toBe(true);
+  });
+});
+
+describe("importNdjson", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("percent-encodes UTF-8 filenames in the request header", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("/import");
+      expect(new Headers(init?.headers).get("X-Filename")).toBe(
+        "%E4%BC%9A%E8%AF%9D.ndjson",
+      );
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await importNdjson("会话.ndjson", '{"type":"session_meta"}\n');
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

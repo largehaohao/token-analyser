@@ -7,6 +7,7 @@ const READ_COMMANDS = new Set([
   "bat",
   "less",
   "more",
+  "nl",
   "rg",
   "grep",
   "ag",
@@ -15,6 +16,99 @@ const READ_COMMANDS = new Set([
 ]);
 
 const SEARCH_COMMANDS = new Set(["rg", "grep", "ag", "ack"]);
+
+const ENVIRONMENT_COMMANDS = new Set([
+  "pwd",
+  "ls",
+  "exa",
+  "tree",
+  "find",
+  "ps",
+  "lsof",
+  "which",
+  "where",
+  "type",
+  "command",
+  "env",
+  "printenv",
+  "uname",
+  "date",
+  "whoami",
+  "id",
+  "stat",
+  "file",
+  "du",
+  "sleep",
+  "true",
+  "false",
+  "printf",
+  "echo",
+  "sort",
+  "uniq",
+  "cut",
+  "tr",
+]);
+
+const GIT_INSPECTION_COMMANDS = new Set([
+  "branch",
+  "diff",
+  "log",
+  "ls-files",
+  "remote",
+  "rev-parse",
+  "show",
+  "status",
+  "tag",
+]);
+
+const PACKAGE_MANAGER_COMMANDS = new Set(["pnpm", "npm", "yarn", "bun"]);
+const PACKAGE_MANAGER_TOOLING_SUBCOMMANDS = new Set([
+  "config",
+  "exec",
+  "list",
+  "ls",
+  "why",
+  "store",
+  "version",
+  "--version",
+  "-v",
+  "start",
+  "dev",
+  "preview",
+]);
+const VALIDATION_BINARIES = new Set([
+  "eslint",
+  "biome",
+  "jest",
+  "playwright",
+  "pytest",
+  "tsc",
+  "vitest",
+]);
+const MUTATING_BINARIES = new Set([
+  "chmod",
+  "chown",
+  "cp",
+  "ln",
+  "mkdir",
+  "mv",
+  "rm",
+  "rmdir",
+  "touch",
+]);
+const VALIDATION_TASKS = new Set([
+  "build",
+  "check",
+  "compile",
+  "coverage",
+  "e2e",
+  "lint",
+  "test",
+  "typecheck",
+  "type-check",
+  "validate",
+  "verify",
+]);
 
 function tokensOf(command: string): string[] {
   const tokens: string[] = [];
@@ -55,8 +149,15 @@ function tokensOf(command: string): string[] {
 }
 
 function binaryName(command: string): string {
-  const tokens = tokensOf(command);
+  const tokens = commandTokens(command);
   return path.basename(tokens[0] ?? "");
+}
+
+function commandTokens(command: string): string[] {
+  const tokens = tokensOf(command);
+  let first = 0;
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[first] ?? "")) first += 1;
+  return tokens.slice(first);
 }
 
 const SAFE_ARGV = /^[A-Za-z0-9_./:@%+=,-]+$/;
@@ -152,27 +253,143 @@ function segmentsOf(command: string): string[] {
 }
 
 function isSimpleRead(command: string): boolean {
-  if (/^sed\s+-n\b/.test(command.trim())) return true;
+  const tokens = commandTokens(command);
+  if (path.basename(tokens[0] ?? "") === "sed" && tokens[1] === "-n") {
+    return true;
+  }
   return READ_COMMANDS.has(binaryName(command));
 }
 
-function isSimpleWrite(command: string): boolean {
+function isSimpleMutation(command: string): boolean {
+  if (MUTATING_BINARIES.has(binaryName(command))) return true;
   if (/\bgit\s+apply\b/.test(command)) return true;
   if (/(^|[;&|]\s*)patch\b/.test(command)) return true;
   if (/(^|[;&|]\s*)tee\b/.test(command)) return true;
   if (hasUnquotedOutputRedirect(command)) return true;
   if (/(^|[;&|]\s*)sed\s+-i\b/.test(command)) return true;
-  if (/(^|[;&|]\s*)(?:python3?|pytest|vitest|jest)\b/.test(command)) return true;
-  if (/(^|[;&|]\s*)(?:cargo|go)\s+test\b/.test(command)) return true;
-  if (/(^|[;&|]\s*)(?:pnpm|npm)\s+(?:[^;&|]+\s+)?test\b/.test(command)) {
+  if (/(^|[;&|]\s*)python3?\b/.test(command)) return true;
+  return false;
+}
+
+function isSimpleValidation(command: string): boolean {
+  const trimmed = command.trim();
+  if (/\bgit\s+diff\s+--check\b/.test(trimmed)) return true;
+
+  const tokens = commandTokens(trimmed);
+  const binary = path.basename(tokens[0] ?? "");
+  if (VALIDATION_BINARIES.has(binary)) return true;
+  if (
+    (binary === "curl" || binary === "wget") &&
+    tokens.some((token) =>
+      ["-i", "--fail", "--fail-with-body", "-X", "--request"].includes(token),
+    )
+  ) {
     return true;
   }
+
+  if (binary === "cargo" || binary === "go") {
+    return tokens.slice(1).some((token) => token === "test");
+  }
+  if (binary === "mvn" || binary === "gradle") {
+    return tokens.slice(1).some(
+      (token) => VALIDATION_TASKS.has(token) || token.startsWith("test"),
+    );
+  }
+  if (PACKAGE_MANAGER_COMMANDS.has(binary)) {
+    return tokens.slice(1).some(
+      (token) =>
+        VALIDATION_TASKS.has(token) ||
+        token.startsWith("test:") ||
+        token === "playwright" ||
+        token === "vitest" ||
+        token === "jest" ||
+        token === "tsc",
+    );
+  }
   return false;
+}
+
+function isSimpleEnvironment(command: string): boolean {
+  const trimmed = command.trim();
+  const tokens = commandTokens(trimmed);
+  const binary = path.basename(tokens[0] ?? "");
+  if (ENVIRONMENT_COMMANDS.has(binary)) {
+    if (binary === "find") {
+      return !tokens.some((token) =>
+        ["-delete", "-exec", "-execdir"].includes(token),
+      );
+    }
+    return true;
+  }
+  if (binary === "git") {
+    return GIT_INSPECTION_COMMANDS.has(tokens[1] ?? "");
+  }
+  if (binary === "curl" || binary === "wget") {
+    return !tokens.some((token) =>
+      ["-d", "--data", "--data-raw", "--data-binary", "-XPOST", "-o"].includes(
+        token,
+      ),
+    );
+  }
+  return false;
+}
+
+function isSimpleTooling(command: string): boolean {
+  if (isSimpleEnvironment(command)) return true;
+  const tokens = commandTokens(command);
+  const binary = path.basename(tokens[0] ?? "");
+  if (!PACKAGE_MANAGER_COMMANDS.has(binary)) return false;
+  return tokens
+    .slice(1)
+    .some((token) => PACKAGE_MANAGER_TOOLING_SUBCOMMANDS.has(token));
 }
 
 export function isReadCommand(command: string): boolean {
   const segments = segmentsOf(command);
   return segments.length > 0 && segments.every(isSimpleRead);
+}
+
+/** True for source and file inspection commands that do not mutate state. */
+export function isInspectionCommand(command: string): boolean {
+  const segments = segmentsOf(command);
+  return (
+    segments.length > 0 &&
+    segments.every(
+      (segment) => isSimpleRead(segment) || isSimpleEnvironment(segment),
+    )
+  );
+}
+
+/** True when a command contains source reads plus environment probes. */
+export function hasSourceReadCommand(command: string): boolean {
+  return segmentsOf(command).some(isSimpleRead);
+}
+
+/** True when every shell segment is a test, build, lint, or type-check command. */
+export function isValidationCommand(command: string): boolean {
+  const segments = segmentsOf(command);
+  return segments.length > 0 && segments.every(isSimpleValidation);
+}
+
+/** True for validation commands safely chained with read-only inspection. */
+export function isVerificationCommand(command: string): boolean {
+  const segments = segmentsOf(command);
+  return (
+    segments.length > 0 &&
+    segments.some(isSimpleValidation) &&
+    segments.every(
+      (segment) =>
+        isSimpleValidation(segment) ||
+        isSimpleRead(segment) ||
+        isSimpleEnvironment(segment),
+    )
+  );
+}
+
+/** True for safe environment probes and package-manager/tooling inspection. */
+export function isToolingCommand(command: string): boolean {
+  const segments = segmentsOf(command);
+  return segments.length > 0 && segments.every(isSimpleTooling);
 }
 
 export function extractReadPaths(command: string): string[] {
@@ -185,8 +402,12 @@ export function extractReadPaths(command: string): string[] {
 
 function extractReadPathsFromSegment(command: string): string[] {
   const trimmed = command.trim();
-  if (/^sed\s+-n\b/.test(trimmed)) {
-    const tokens = tokensOf(trimmed).slice(2);
+  const commandParts = commandTokens(trimmed);
+  if (
+    path.basename(commandParts[0] ?? "") === "sed" &&
+    commandParts[1] === "-n"
+  ) {
+    const tokens = commandParts.slice(2);
     return tokens.filter((token, index) => {
       if (token === "--") return false;
       if (token.startsWith("-")) return false;
@@ -198,7 +419,7 @@ function extractReadPathsFromSegment(command: string): string[] {
   const binary = binaryName(trimmed);
   if (!READ_COMMANDS.has(binary)) return [];
 
-  const tokens = tokensOf(trimmed).slice(1);
+  const tokens = commandTokens(trimmed).slice(1);
   const nonFlags: string[] = [];
   const valueFlags = new Set(["-n", "--lines", "-c", "--bytes", "-A", "-B", "-C"]);
   for (let i = 0; i < tokens.length; i++) {
@@ -221,7 +442,13 @@ function extractReadPathsFromSegment(command: string): string[] {
 }
 
 export function isWriteOrTest(command: string): boolean {
-  return segmentsOf(command).some(isSimpleWrite);
+  return segmentsOf(command).some(
+    (segment) => isSimpleMutation(segment) || isSimpleValidation(segment),
+  );
+}
+
+export function isWriteCommand(command: string): boolean {
+  return segmentsOf(command).some(isSimpleMutation);
 }
 
 function hasUnquotedOutputRedirect(command: string): boolean {

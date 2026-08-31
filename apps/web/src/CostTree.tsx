@@ -1,7 +1,13 @@
+import { useState } from "react";
 import type { TreeNode } from "./api";
 import { treeAppearance } from "./buckets";
 import { useUnit } from "./UnitContext";
-import { allocatePercents, formatCost, formatCostTitle } from "./format";
+import {
+  allocatePercents,
+  formatCompactTokens,
+  formatCost,
+  formatCostTitle,
+} from "./format";
 
 export function siblingDisplayPercents(
   children: Array<{ cost: { raw: number } }>,
@@ -22,6 +28,7 @@ function TreeRow({
   depth,
   selectedNodeId,
   displayPercent,
+  showEmpty,
   onSelect,
 }: {
   node: TreeNode;
@@ -30,6 +37,7 @@ function TreeRow({
   depth: number;
   selectedNodeId: string | null;
   displayPercent: number;
+  showEmpty: boolean;
   onSelect: (id: string) => void;
 }) {
   const { unit } = useUnit();
@@ -39,7 +47,13 @@ function TreeRow({
   const muted = node.cost.raw === 0 && depth > 0;
   const selected =
     selectedNodeId === node.id || (selectedNodeId == null && depth === 0);
-  const childPercents = siblingDisplayPercents(node.children);
+  const children = node.children.filter(
+    (child) =>
+      showEmpty ||
+      child.cost.raw !== 0 ||
+      (selectedNodeId != null && findNodeById(child, selectedNodeId) != null),
+  );
+  const childPercents = siblingDisplayPercents(children);
 
   return (
     <>
@@ -53,8 +67,13 @@ function TreeRow({
           {prefix}
           {branch}
         </span>
-        <span className="tree-swatch" style={{ background: appearance.color }} />
-        <span className="tree-label">{appearance.label}</span>
+        <span
+          className="tree-swatch"
+          style={{ background: appearance.color }}
+        />
+        <span className="tree-label" title={appearance.label}>
+          {appearance.label}
+        </span>
         <span className="tree-bar" aria-hidden="true">
           <span
             className="tree-bar-fill"
@@ -71,18 +90,21 @@ function TreeRow({
           {displayPercent.toFixed(1)}%
         </span>
         <span className="tree-cost" title={formatCostTitle(node.cost, unit)}>
-          {formatCost(node.cost, unit)}
+          {unit === "tokens"
+            ? formatCompactTokens(node.cost.raw)
+            : formatCost(node.cost, unit)}
         </span>
       </button>
-      {node.children.map((child, i) => (
+      {children.map((child, i) => (
         <TreeRow
           key={child.id}
           node={child}
           prefix={depth === 0 ? "" : prefix + (isLast ? "  " : "│ ")}
-          isLast={i === node.children.length - 1}
+          isLast={i === children.length - 1}
           depth={depth + 1}
           selectedNodeId={selectedNodeId}
           displayPercent={childPercents[i] ?? 0}
+          showEmpty={showEmpty}
           onSelect={onSelect}
         />
       ))}
@@ -91,12 +113,18 @@ function TreeRow({
 }
 
 export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
+  const [showEmpty, setShowEmpty] = useState(false);
+
+  function hasEmptyBranches(node: TreeNode): boolean {
+    return node.children.some(
+      (child) => child.cost.raw === 0 || hasEmptyBranches(child),
+    );
+  }
+
   return (
     <div className="cost-tree chart-card">
       <h3>成本树</h3>
-      <p className="chart-desc">
-        点选节点过滤右侧轮次。根节点为全部轮次。占比按原始 token 划分，兄弟节点用最大余数法显示为 100%。
-      </p>
+      <p className="chart-desc">按 Token 占比分组，点选分类筛选轮次。</p>
       <TreeRow
         node={tree}
         prefix=""
@@ -104,8 +132,19 @@ export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
         depth={0}
         selectedNodeId={selectedNodeId}
         displayPercent={100}
+        showEmpty={showEmpty}
         onSelect={onSelect}
       />
+      {hasEmptyBranches(tree) && (
+        <button
+          type="button"
+          className="secondary-action tree-empty-toggle"
+          aria-pressed={showEmpty}
+          onClick={() => setShowEmpty((current) => !current)}
+        >
+          {showEmpty ? "隐藏零用量分类" : "显示零用量分类"}
+        </button>
+      )}
     </div>
   );
 }
@@ -127,7 +166,10 @@ export function resolveSelectedNode(
   return findNodeById(root, id) ?? root;
 }
 
-export function findNodeForTurnId(root: TreeNode, turnId: string): TreeNode | null {
+export function findNodeForTurnId(
+  root: TreeNode,
+  turnId: string,
+): TreeNode | null {
   for (const child of root.children) {
     const found = findNodeForTurnId(child, turnId);
     if (found) return found;

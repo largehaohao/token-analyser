@@ -110,7 +110,18 @@ describe("buildTree", () => {
 
     expect(root.cost.raw).toBe(600);
     const names = root.children.map((c) => c.label);
-    expect(names).toEqual(["planning", "code", "reread", "subagents", "waiting", "other"]);
+    expect(names).toEqual([
+      "planning",
+      "reading",
+      "verification",
+      "code",
+      "reread",
+      "tooling",
+      "communication",
+      "subagents",
+      "waiting",
+      "other",
+    ]);
     const code = root.children.find((c) => c.label === "code")!;
     expect(code.cost.raw).toBe(300);
     expect(code.percentOfParent).toBeCloseTo(50, 5);

@@ -48,6 +48,14 @@ Fast mode is accounted per turn, so switching `/fast` on or off during a
 conversation changes only the affected turns. Each Fast turn is marked in the
 detail table, and model-specific multipliers come from the dated rate card.
 
+The behavior breakdown uses mutually exclusive categories: planning and
+thinking, source reading and search, tests/builds/checks, code changes and
+execution, duplicate reads, tool/environment operations, user messaging,
+polling and coordination waits, and a final “other / unknown” fallback. A
+turn is only kept in the fallback when its tool shape does not match any of
+the explicit rules, so the breakdown remains auditable instead of hiding all
+read or verification work in one bucket.
+
 ## Test
 
 ```bash

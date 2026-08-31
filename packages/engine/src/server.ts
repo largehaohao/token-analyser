@@ -100,6 +100,14 @@ function isImportFilename(name: string): boolean {
   return lower.endsWith(".jsonl") || lower.endsWith(".ndjson");
 }
 
+function decodeImportFilename(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
 export function collectImportFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
   let entries;
@@ -260,9 +268,14 @@ async function handleImport(
   const contentType = req.headers["content-type"] ?? "";
 
   if (contentType.startsWith("application/x-ndjson")) {
-    const filename = req.headers["x-filename"];
-    if (!filename || Array.isArray(filename)) {
+    const encodedFilename = req.headers["x-filename"];
+    if (!encodedFilename || Array.isArray(encodedFilename)) {
       sendJson(res, 400, { error: "missing_filename" });
+      return;
+    }
+    const filename = decodeImportFilename(encodedFilename);
+    if (!filename) {
+      sendJson(res, 400, { error: "invalid_filename" });
       return;
     }
     if (!isImportFilename(filename)) {
@@ -270,12 +283,13 @@ async function handleImport(
       return;
     }
 
+    const body = await readBody(req, maxImportBytes);
     const importsDir = path.join(tokenAnalyserHome(), "imports");
     mkdirSync(importsDir, { recursive: true });
     const dest = uniqueImportPath(importsDir, filename);
-    writeFileSync(dest, await readBody(req, maxImportBytes));
+    writeFileSync(dest, body);
 
-    const id = store.ingestPath(dest);
+    const id = store.ingestPath(dest, { skipExisting: true });
     if (!id) {
       removeFailedImport(dest);
       sendJson(res, 500, { error: "ingest_failed" });
@@ -356,7 +370,7 @@ async function handleImport(
     const dest = uniqueImportPath(importsDir, filename);
     writeFileSync(dest, fileData, "binary");
 
-    const id = store.ingestPath(dest);
+    const id = store.ingestPath(dest, { skipExisting: true });
     if (!id) {
       removeFailedImport(dest);
       sendJson(res, 500, { error: "ingest_failed" });

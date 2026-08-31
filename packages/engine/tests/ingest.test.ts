@@ -3,7 +3,11 @@ import { appendFileSync, readFileSync, writeFileSync, mkdtempSync, utimesSync } 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ingestFile, hasLiveReadState, readJsonlFile } from "../src/ingest.ts";
+import {
+  ingestFile,
+  hasLiveReadState,
+  readJsonlFile,
+} from "../src/ingest.ts";
 import { SessionStore } from "../src/store.ts";
 
 const fixtures = path.resolve(
@@ -123,6 +127,23 @@ describe("readJsonlFile", () => {
     store.ingestPath(filePath, { allowAppend: true });
     expect(hasLiveReadState(filePath)).toBe(true);
     store.removePath(filePath);
+    expect(hasLiveReadState(filePath)).toBe(false);
+  });
+
+  it("evicts live append state once the file is no longer active", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-expire-"));
+    const filePath = path.join(dir, "rollout-expire.jsonl");
+    writeFileSync(
+      filePath,
+      '{"timestamp":"2026-08-27T00:00:00.000Z","type":"session_meta","payload":{"id":"expire"}}\n',
+    );
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.ingestPath(filePath, { allowAppend: true });
+    expect(hasLiveReadState(filePath)).toBe(true);
+
+    const old = new Date(Date.now() - 180_000);
+    utimesSync(filePath, old, old);
+    expect(store.list()[0]!.live).toBe(false);
     expect(hasLiveReadState(filePath)).toBe(false);
   });
 

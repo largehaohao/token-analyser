@@ -11,8 +11,12 @@ import { loadRateCard } from "./rate-card.ts";
 
 export const OVERVIEW_SLICE_KEYS = [
   "planning",
+  "reading",
+  "verification",
   "code",
   "reread",
+  "tooling",
+  "communication",
   "subagents",
   "waiting",
   "other",
@@ -99,27 +103,34 @@ function collectQuality(
   return { ledgerWarningSessions, parseErrors };
 }
 
+function createTimezoneFormatter(
+  timezone: string | undefined,
+): Intl.DateTimeFormat | undefined {
+  if (!timezone) return undefined;
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 function calendarDay(
   iso: string,
-  timezone: string | undefined,
+  timezoneFormatter: Intl.DateTimeFormat | undefined,
   timezoneOffsetMinutes = 0,
 ): string | null {
   const time = Date.parse(iso);
   if (!Number.isFinite(time)) return null;
-  if (timezone) {
-    try {
-      const parts = new Intl.DateTimeFormat("en-CA", {
-        timeZone: timezone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).formatToParts(time);
-      const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-      const day = `${value.year}-${value.month}-${value.day}`;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
-    } catch {
-      // Fall through to the validated numeric offset.
-    }
+  if (timezoneFormatter) {
+    const parts = timezoneFormatter.formatToParts(time);
+    const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const day = `${value.year}-${value.month}-${value.day}`;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
   }
   const day = new Date(time + timezoneOffsetMinutes * 60_000)
     .toISOString()
@@ -130,10 +141,14 @@ function calendarDay(
 function dayRange(
   nowIso: string,
   count: number,
-  timezone: string | undefined,
+  timezoneFormatter: Intl.DateTimeFormat | undefined,
   timezoneOffsetMinutes = 0,
 ): string[] {
-  const currentDay = calendarDay(nowIso, timezone, timezoneOffsetMinutes);
+  const currentDay = calendarDay(
+    nowIso,
+    timezoneFormatter,
+    timezoneOffsetMinutes,
+  );
   const end = Date.parse(`${currentDay ?? nowIso.slice(0, 10)}T00:00:00.000Z`);
   const days: string[] = [];
   for (let i = count - 1; i >= 0; i--) {
@@ -145,8 +160,12 @@ function dayRange(
 function emptySliceMap(): Record<OverviewSliceKey, Cost> {
   return {
     planning: emptyMaybeCost(),
+    reading: emptyMaybeCost(),
+    verification: emptyMaybeCost(),
     code: emptyMaybeCost(),
     reread: emptyMaybeCost(),
+    tooling: emptyMaybeCost(),
+    communication: emptyMaybeCost(),
     subagents: emptyMaybeCost(),
     waiting: emptyMaybeCost(),
     other: emptyMaybeCost(),
@@ -273,9 +292,14 @@ export function buildOverview(
   const now = opts.now ?? new Date().toISOString();
   const included = sessions.filter((session) => inRange(session, opts.sinceMs));
   const dayCount = opts.dayCount ?? 8;
-  const timezone = opts.timezone;
+  const timezoneFormatter = createTimezoneFormatter(opts.timezone);
   const timezoneOffsetMinutes = opts.timezoneOffsetMinutes ?? 0;
-  const days = dayRange(now, dayCount, timezone, timezoneOffsetMinutes);
+  const days = dayRange(
+    now,
+    dayCount,
+    timezoneFormatter,
+    timezoneOffsetMinutes,
+  );
   const lastDay = days[days.length - 1] ?? "";
   const dayCosts = new Map(days.map((date) => [date, emptyMaybeCost()]));
   const dayFlagged = new Map(days.map((date) => [date, emptyMaybeCost()]));
@@ -325,7 +349,7 @@ export function buildOverview(
 
       const day = calendarDay(
         turn.endedAt || turn.startedAt,
-        timezone,
+        timezoneFormatter,
         timezoneOffsetMinutes,
       );
       const unpriced = turn.cost.credits == null ? turn.cost.raw : 0;

@@ -2,6 +2,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const apiTarget = process.env.TOKEN_ANALYSER_API_URL ?? "http://127.0.0.1:7789";
+
 export default defineConfig({
   plugins: [react()],
   test: {
@@ -12,10 +14,10 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 7788,
     proxy: {
-      "/sessions": "http://127.0.0.1:7789",
-      "/overview": "http://127.0.0.1:7789",
-      "/stream": { target: "http://127.0.0.1:7789", ws: false },
-      "/import": "http://127.0.0.1:7789",
+      "/sessions": apiTarget,
+      "/overview": apiTarget,
+      "/stream": { target: apiTarget, ws: false },
+      "/import": apiTarget,
     },
   },
   build: { outDir: "dist" },
