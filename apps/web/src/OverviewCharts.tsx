@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import type { OverviewDay, OverviewModel, OverviewSlice } from "./api";
 import {
   barHeightPct,
@@ -40,6 +40,12 @@ type TrendProps = {
 
 export function TrendChart({ days, rangeLabel }: TrendProps) {
   const [inspectedDay, setInspectedDay] = useState<string | null>(null);
+  const [tooltipAnchor, setTooltipAnchor] = useState<{
+    date: string;
+    x: number;
+    y: number;
+    below: boolean;
+  } | null>(null);
   const { unit } = useUnit();
   const metric = unitToChartMetric(unit);
   const values = days.map((day) => dayMetricValue(day, metric));
@@ -51,6 +57,21 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
       (dayMetricValue(day, metric) == null && day.cost.raw > 0) ||
       dayHasMixedUnpriced(day, metric),
   );
+  const inspectDay = (date: string, target: HTMLButtonElement) => {
+    const rect = target.getBoundingClientRect();
+    const below = rect.top < 96;
+    setInspectedDay(date);
+    setTooltipAnchor({
+      date,
+      x: rect.left + rect.width / 2,
+      y: below ? rect.bottom + 8 : rect.top,
+      below,
+    });
+  };
+  const clearInspectedDay = () => {
+    setInspectedDay(null);
+    setTooltipAnchor(null);
+  };
 
   return (
     <section className="chart-card">
@@ -83,16 +104,24 @@ export function TrendChart({ days, rangeLabel }: TrendProps) {
               <button
                 type="button"
                 key={day.date}
-                className={`trend-col${isOverflowDate(day.date) ? " overflow" : ""}${inspectedDay === day.date ? " inspected" : ""}${index < days.length / 3 ? " tooltip-start" : index >= (days.length * 2) / 3 ? " tooltip-end" : ""}`}
+                className={`trend-col${isOverflowDate(day.date) ? " overflow" : ""}${inspectedDay === day.date ? " inspected" : ""}${tooltipAnchor?.date === day.date && tooltipAnchor.below ? " tooltip-below" : ""}${index < days.length / 3 ? " tooltip-start" : index >= (days.length * 2) / 3 ? " tooltip-end" : ""}`}
+                style={
+                  tooltipAnchor?.date === day.date
+                    ? ({
+                        "--tooltip-x": `${tooltipAnchor.x}px`,
+                        "--tooltip-y": `${tooltipAnchor.y}px`,
+                      } as CSSProperties)
+                    : undefined
+                }
                 aria-label={trendColumnAriaLabel(day, metric)}
-                onMouseEnter={() => setInspectedDay(day.date)}
-                onMouseLeave={() => setInspectedDay(null)}
-                onFocus={() => setInspectedDay(day.date)}
-                onBlur={() => setInspectedDay(null)}
-                onClick={() => setInspectedDay(day.date)}
+                onMouseEnter={(event) => inspectDay(day.date, event.currentTarget)}
+                onMouseLeave={clearInspectedDay}
+                onFocus={(event) => inspectDay(day.date, event.currentTarget)}
+                onBlur={clearInspectedDay}
+                onClick={(event) => inspectDay(day.date, event.currentTarget)}
                 onKeyDown={(event) => {
                   if (!event.nativeEvent.isComposing && event.key === "Escape")
-                    setInspectedDay(null);
+                    clearInspectedDay();
                 }}
               >
                 <div
@@ -228,18 +257,28 @@ export function DonutChart({
           </text>
           <text
             x="100"
-            y="114"
+            y={hovered ? "108" : "114"}
             textAnchor="middle"
             className="donut-center-value"
           >
             {hovered
-              ? `${formatExactTokens(hovered.raw)} · ${formatPercent(
-                  percents[series.findIndex((s) => s.key === hovered.key)] ?? 0,
-                )}`
+              ? formatExactTokens(hovered.raw)
               : totalRaw >= 1_000_000
                 ? `${(totalRaw / 1_000_000).toFixed(1)}M tokens`
                 : `${totalRaw.toLocaleString("en-US")} tokens`}
           </text>
+          {hovered && (
+            <text
+              x="100"
+              y="126"
+              textAnchor="middle"
+              className="donut-center-share"
+            >
+              {formatPercent(
+                percents[series.findIndex((s) => s.key === hovered.key)] ?? 0,
+              )}
+            </text>
+          )}
         </svg>
         <ul className="donut-legend">
           {series.map((slice, i) => (

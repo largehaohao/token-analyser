@@ -192,8 +192,9 @@ export function OverviewPage({
             <IconDoc /> 已分析会话
           </div>
           <div className="kpi-value">{overview.sessionCount}</div>
-          <div className="kpi-sub">
-            {overview.turnCount.toLocaleString("en-US")} 次调用 · 查看明细 →
+          <div className="kpi-sub kpi-session-meta">
+            <span>{overview.turnCount.toLocaleString("en-US")} 次调用</span>
+            <span className="kpi-session-action">查看明细 →</span>
           </div>
         </button>
       </div>

@@ -1,3 +1,6 @@
+/* Hallmark · macrostructure: Workbench · tone: technical · anchor hue: mint
+ * system: DESIGN.md · source of truth: this stylesheet · pre-emit critique: P4 H4 E4 S5 R4 V3
+ */
 :root {
   color-scheme: dark;
   --bg: #070a08;
@@ -33,6 +36,12 @@
   --display: "Avenir Next", "Segoe UI", "PingFang SC", system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  --shadow-tooltip: 0 10px 24px rgba(0, 0, 0, 0.35);
+  --surface-overlay: rgba(16, 22, 18, 0.5);
+  --accent-overlay: rgba(125, 255, 179, 0.025);
+  --accent-selection-ring: rgba(125, 255, 179, 0.18);
+  --warn-overlay: rgba(245, 197, 66, 0.12);
+  --selected-overlay: rgba(125, 255, 179, 0.04);
   --radius: 14px;
   --radius-control: 8px;
   --space-panel: 24px;
@@ -47,6 +56,11 @@
   scrollbar-width: thin;
   scrollbar-gutter: stable;
   scroll-padding-top: 7rem;
+}
+
+html,
+body {
+  overflow-x: clip;
 }
 
 *,
@@ -349,7 +363,7 @@ button:not(:disabled):active,
 .session-list.dragging {
   outline: 1px dashed var(--accent);
   outline-offset: -6px;
-  background: rgba(125, 255, 179, 0.04);
+  background: var(--selected-overlay);
 }
 
 .session-list-head {
@@ -421,7 +435,7 @@ button:not(:disabled):active,
 .session-list li.selected .session-card {
   background: var(--bg-raised);
   border-color: var(--border-hot);
-  box-shadow: inset 0 0 0 1px rgba(125, 255, 179, 0.18);
+  box-shadow: inset 0 0 0 1px var(--accent-selection-ring);
 }
 
 .session-list li.parse-error .session-card {
@@ -624,7 +638,7 @@ button:not(:disabled):active,
   border-radius: 10px;
   padding: 0.6rem;
   font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   color: var(--text);
 }
 
@@ -940,7 +954,7 @@ button:not(:disabled):active,
 
 .context-item-name {
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1057,7 +1071,7 @@ button:not(:disabled):active,
 .tree-prefix {
   color: var(--text-dim);
   white-space: pre;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
 }
 
 .tree-label {
@@ -1241,7 +1255,7 @@ button:not(:disabled):active,
 }
 
 .turn-table tbody tr.highlighted {
-  background: rgba(245, 197, 66, 0.12);
+  background: var(--warn-overlay);
   outline: 1px solid var(--warn-border);
 }
 
@@ -1380,7 +1394,7 @@ button:not(:disabled):active,
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: rgba(16, 22, 18, 0.5);
+  background: var(--surface-overlay);
 }
 
 .detail-section > summary {
@@ -1399,7 +1413,7 @@ button:not(:disabled):active,
 }
 
 .detail-section > summary:hover {
-  background: rgba(125, 255, 179, 0.025);
+  background: var(--accent-overlay);
 }
 
 .detail-section-title {
@@ -1554,16 +1568,6 @@ button:not(:disabled):active,
 .kpi-card:first-child {
   border-color: var(--border-hot);
 }
-.kpi-card:first-child::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 3px;
-  border-radius: var(--radius) 0 0 var(--radius);
-  background: var(--accent);
-}
 .kpi-card.warn .kpi-value {
   color: var(--warn);
 }
@@ -1603,6 +1607,17 @@ button:not(:disabled):active,
   color: var(--text-dim);
   font-size: 12px;
   line-height: 1.65;
+}
+
+.kpi-session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.35rem;
+}
+
+.kpi-session-action {
+  white-space: nowrap;
 }
 
 .quality-strip {
@@ -1885,6 +1900,12 @@ button:not(:disabled):active,
   font-weight: 650;
 }
 
+.donut-center-share {
+  fill: var(--text-muted);
+  font-size: 10px;
+  font-weight: 550;
+}
+
 .donut-legend {
   list-style: none;
   margin: 0;
@@ -2023,7 +2044,7 @@ button:not(:disabled):active,
   color: var(--text);
   font-size: 11px;
   z-index: 3;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-tooltip);
   pointer-events: auto;
   text-align: left;
 }
@@ -2045,6 +2066,53 @@ button:not(:disabled):active,
 
 .trend-col.inspected .chart-tooltip {
   display: block;
+}
+
+@media (max-width: 800px) {
+  .trend-plot {
+    overflow-x: auto;
+  }
+
+  .trend-col {
+    flex: 0 0 44px;
+    min-width: 44px;
+  }
+
+  .trend-col .chart-tooltip,
+  .trend-col.tooltip-start .chart-tooltip,
+  .trend-col.tooltip-end .chart-tooltip {
+    position: fixed;
+    left: clamp(
+      0.5rem,
+      calc(var(--tooltip-x) - 9rem),
+      calc(100vw - 18rem - 0.5rem)
+    );
+    right: auto;
+    top: var(--tooltip-y);
+    bottom: auto;
+    width: min(18rem, calc(100vw - 1rem));
+    max-width: calc(100vw - 1rem);
+    transform: translateY(calc(-100% + 0.5rem));
+  }
+
+  .trend-col.tooltip-below .chart-tooltip {
+    transform: none;
+  }
+
+  .header-controls .segmented-control button,
+  .primary-nav a,
+  .turn-expand,
+  .donut-legend button {
+    min-height: 44px;
+  }
+
+  .donut-legend button {
+    padding-block: 0.5rem;
+  }
+
+  .turn-expand {
+    padding-block: 0.4rem;
+  }
 }
 
 .headline-note {
@@ -2919,5 +2987,15 @@ button:not(:disabled):active,
   }
   .tree-cost {
     min-width: 3.8rem;
+  }
+}
+
+@media (max-width: 800px) {
+  .header-controls .segmented-control button {
+    min-height: 44px;
+  }
+
+  .turn-expand {
+    min-height: 44px;
   }
 }
