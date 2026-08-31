@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendFileSync,
   readFileSync,
   writeFileSync,
   mkdtempSync,
@@ -148,6 +149,25 @@ describe("SessionStore", () => {
     }
   });
 
+  it("re-reads the final events when a live file becomes historical", () => {
+    const waitPoll = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8");
+    const [first, ...rest] = waitPoll.trimEnd().split("\n");
+    const dir = mkdtempSync(path.join(tmpdir(), "store-live-final-"));
+    const filePath = path.join(dir, "rollout-live.jsonl");
+    writeFileSync(filePath, `${first}\n`);
+
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.ingestPath(filePath, { allowAppend: true });
+    writeFileSync(filePath, `${first}\n${rest.join("\n")}\n`);
+    const old = new Date(Date.now() - 180_000);
+    utimesSync(filePath, old, old);
+
+    const snapshot = store.get("s-poll");
+    expect(snapshot?.live).toBe(false);
+    expect(snapshot?.turns.length).toBeGreaterThan(0);
+    expect(snapshot?.cost.raw).toBeGreaterThan(0);
+  });
+
   it("rolls child activity into list timestamps and reports unpriced leftover", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "store-list-meta-"));
     const cacheDir = path.join(dir, "cache");
@@ -244,6 +264,44 @@ describe("watchSessions", () => {
 
       expect(store.list()).toHaveLength(1);
       expect(store.list()[0]!.id).toBe("w1");
+    } finally {
+      stop();
+    }
+  });
+
+  it("detects appended events in nested rollout files with per-directory scanning", async () => {
+    const waitPoll = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8");
+    const [first, ...rest] = waitPoll.trimEnd().split("\n");
+    const dir = mkdtempSync(path.join(tmpdir(), "watch-append-nested-"));
+    const nested = path.join(dir, "2026", "08", "31");
+    mkdirSync(nested, { recursive: true });
+    const filePath = path.join(nested, "rollout-append.jsonl");
+    writeFileSync(filePath, `${first}\n`);
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    let changes = 0;
+    const stop = watchSessions(store, () => {
+      changes += 1;
+    }, {
+      watchPaths: [dir],
+      recursive: false,
+    });
+
+    try {
+      const initialDeadline = Date.now() + 2000;
+      while (Date.now() < initialDeadline && !store.get("s-poll")) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(store.get("s-poll")?.turns).toHaveLength(0);
+
+      appendFileSync(filePath, `${rest.join("\n")}\n`);
+      const appendDeadline = Date.now() + 3000;
+      while (Date.now() < appendDeadline) {
+        if ((store.get("s-poll")?.turns.length ?? 0) > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      expect(store.get("s-poll")?.turns.length).toBeGreaterThan(0);
+      expect(changes).toBeGreaterThan(1);
     } finally {
       stop();
     }

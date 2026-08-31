@@ -711,7 +711,13 @@ async function main(): Promise<void> {
   console.log(`token-analyser engine listening on ${url}`);
 
   if (!fixtureDir) {
-    watchSessions(store, () => {}, { onError: onIngestError });
+    // Codex writes append-only JSONL files below dated directories. On macOS,
+    // the recursive watcher can miss content changes in that tree, so use the
+    // per-directory watcher plus its stat-based scan for reliable ingestion.
+    watchSessions(store, () => {}, {
+      recursive: process.platform !== "darwin",
+      onError: onIngestError,
+    });
   }
 }
 

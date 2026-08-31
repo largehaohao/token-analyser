@@ -158,6 +158,28 @@ export class SessionStore {
         // Keep the previous state when a file is being replaced.
       }
       if (live !== source.live) {
+        try {
+          // A watcher event can be missed just before a session becomes
+          // historical. Re-read once on the transition so the final events
+          // are not stranded in an empty or partial in-memory snapshot.
+          const refreshed = ingestFile(source.path, {
+            cacheHome: this.cacheHome,
+          });
+          const currentToggles = this.toggles.get(id);
+          if (refreshed.id !== id) {
+            this.sources.delete(id);
+            this.toggles.delete(id);
+            if (currentToggles) this.toggles.set(refreshed.id, currentToggles);
+          }
+          if (!this.toggles.has(refreshed.id)) {
+            this.toggles.set(refreshed.id, { ...refreshed.toggles });
+          }
+          this.sources.set(refreshed.id, { ...refreshed, children: [] });
+          changed = true;
+          continue;
+        } catch {
+          // Keep the live transition even if a file is temporarily unreadable.
+        }
         this.sources.set(id, { ...source, live });
         changed = true;
       }

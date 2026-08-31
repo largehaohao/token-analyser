@@ -45,6 +45,7 @@ export function watchSessions(
   const watchers: ReturnType<typeof watch>[] = [];
   const watchedDirs = new Set<string>();
   const pending = new Map<string, ReturnType<typeof setTimeout>>();
+  const observedFiles = new Map<string, string>();
   // fs.watch can miss a create event when a directory is watched immediately
   // before the writer creates its first file.  A short startup rescan closes
   // that race without turning every append into a full directory traversal.
@@ -62,14 +63,17 @@ export function watchSessions(
     const base = path.basename(fullPath);
     if (!isRolloutJsonl(base)) return;
     if (!existsSync(fullPath)) {
+      observedFiles.delete(fullPath);
       const removed = store.removePath(fullPath);
       if (removed) onChange(removed.id);
       return;
     }
     try {
       const id = store.ingestPath(fullPath, { allowAppend: true });
+      rememberFile(fullPath);
       if (id) onChange(id);
     } catch (err) {
+      observedFiles.delete(fullPath);
       opts?.onError?.(
         errorIdFromPath(fullPath),
         err instanceof Error ? err.message : String(err),
@@ -85,6 +89,28 @@ export function watchSessions(
       ingestIfRollout(fullPath);
     }, 50);
     pending.set(fullPath, timer);
+  }
+
+  function fileSignature(fullPath: string): string | undefined {
+    try {
+      const stat = statSync(fullPath);
+      return [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
+    } catch {
+      return undefined;
+    }
+  }
+
+  function scheduleIfChanged(fullPath: string): void {
+    const signature = fileSignature(fullPath);
+    if (!signature || observedFiles.get(fullPath) === signature) return;
+    observedFiles.set(fullPath, signature);
+    scheduleIngest(fullPath);
+  }
+
+  function rememberFile(fullPath: string): void {
+    const signature = fileSignature(fullPath);
+    if (signature) observedFiles.set(fullPath, signature);
+    else observedFiles.delete(fullPath);
   }
 
   function watchDirectory(dir: string): void {
@@ -116,7 +142,7 @@ export function watchSessions(
           continue;
         }
         for (const entry of entries) {
-          if (isRolloutJsonl(entry)) scheduleIngest(path.join(dir, entry));
+          if (isRolloutJsonl(entry)) scheduleIfChanged(path.join(dir, entry));
         }
       }
     }
