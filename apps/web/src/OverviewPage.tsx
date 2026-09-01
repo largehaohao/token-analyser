@@ -106,7 +106,8 @@ export function OverviewPage({
   return (
     <main className="overview" data-testid="overview-page">
       <header className="page-heading">
-        <div>
+        <div className="page-heading-copy">
+          <span className="page-eyebrow">本地账本 · 总览</span>
           <h1 tabIndex={-1}>成本总览</h1>
           <p>从总量到每轮调用，看清用量花在哪里。</p>
         </div>

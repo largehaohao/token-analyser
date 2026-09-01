@@ -464,15 +464,17 @@ function AppShell() {
         >
           跳到主要内容
         </a>
-        <header className="app-header">
+        <header className="app-header" data-layout="catalogue">
           <div className="header-primary">
             <div className="brand">
               <LedgerMark />
               <div>
+                <span className="brand-kicker">本地运行索引</span>
                 <p className="brand-name">Token Analyser</p>
                 <p className="crumb">Codex 本地用量账本</p>
               </div>
             </div>
+            <span className="nav-caption">视图</span>
             <nav className="nav-pills primary-nav" aria-label="视图">
               <a
                 href="#overview"

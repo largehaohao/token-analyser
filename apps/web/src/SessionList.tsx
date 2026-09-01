@@ -217,9 +217,12 @@ export function SessionList({
       }
     >
       <div className="session-list-head">
-        <h2>会话</h2>
-        <span className="session-count">
-          {filtered.length}
+        <div>
+          <span className="session-list-eyebrow">本地运行索引</span>
+          <h2>会话</h2>
+        </div>
+        <span className="session-count" aria-label="会话数量">
+          <strong>{filtered.length}</strong>
           {filtered.length !== totalCount ? ` / ${totalCount}` : ""}
         </span>
       </div>

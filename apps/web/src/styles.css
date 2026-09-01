@@ -1,5 +1,8 @@
-/* Hallmark · macrostructure: Workbench · tone: technical · anchor hue: mint
- * system: DESIGN.md · source of truth: this stylesheet · pre-emit critique: P4 H4 E4 S5 R4 V3
+/* Hallmark · genre: modern-minimal · macrostructure: Catalogue-led index
+ * nav: N9 edge-aligned minimal · footer: Ft2 inline-rule · designed-as-app
+ * system: DESIGN.md · source of truth: this stylesheet · pre-emit critique: P5 H5 E4 S5 R4 V5
+ * contrast: pass (40–41) · slop: pass (42–45) · honest: pass (46) · chrome: pass (47)
+ * tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34,49,50–57)
  */
 :root {
   color-scheme: dark;
@@ -1648,7 +1651,7 @@ button:not(:disabled):active,
   left: 0;
   top: 0;
   bottom: 0;
-  width: 3px;
+  width: 2px;
   background: var(--text-dim);
 }
 
@@ -2296,6 +2299,7 @@ button:not(:disabled):active,
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
+  white-space: nowrap;
 }
 .button-outline:hover:not(:disabled) {
   border-color: var(--accent);
@@ -2997,5 +3001,766 @@ button:not(:disabled):active,
 
   .turn-expand {
     min-height: 44px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Catalogue-led index refresh
+   The existing token set remains the single source of truth. This layer only
+   changes hierarchy, rhythm, and component voice; state and route contracts
+   continue to be owned by the existing React components.
+   -------------------------------------------------------------------------- */
+
+.app-header[data-layout="catalogue"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 78px;
+  padding: 0.9rem clamp(1.25rem, 4vw, 3.25rem);
+  gap: 2rem;
+  border-bottom-color: var(--border-hot);
+}
+
+.app-header[data-layout="catalogue"] .header-primary {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(1rem, 3vw, 2.6rem);
+}
+
+.app-header[data-layout="catalogue"] .brand {
+  gap: 0.8rem;
+}
+
+.brand-kicker,
+.nav-caption,
+.page-eyebrow,
+.session-list-eyebrow {
+  display: block;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.brand-kicker {
+  margin-bottom: 0.12rem;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+
+.app-header[data-layout="catalogue"] .brand-name {
+  font-size: 17px;
+  letter-spacing: -0.04em;
+}
+
+.app-header[data-layout="catalogue"] .crumb {
+  margin-top: 0.1rem;
+  font-size: 11px;
+}
+
+.nav-caption {
+  align-self: center;
+  color: var(--text-dim);
+  letter-spacing: 0.16em;
+}
+
+.app-header[data-layout="catalogue"] .primary-nav {
+  justify-self: start;
+  gap: clamp(1rem, 2.5vw, 2.25rem);
+  padding: 0;
+}
+
+.app-header[data-layout="catalogue"] .primary-nav a {
+  position: relative;
+  min-height: 2.4rem;
+  padding: 0.4rem 0 0.35rem;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.app-header[data-layout="catalogue"] .primary-nav a::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: transparent;
+  transform: scaleX(0.35);
+  transform-origin: left;
+  transition: background var(--motion), transform var(--motion);
+}
+
+.app-header[data-layout="catalogue"] .primary-nav a.active {
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
+}
+
+.app-header[data-layout="catalogue"] .primary-nav a.active::after {
+  background: var(--accent);
+  transform: scaleX(1);
+}
+
+.app-header[data-layout="catalogue"] .primary-nav a:hover,
+.app-header[data-layout="catalogue"] .primary-nav a.active:hover {
+  background: transparent;
+  color: var(--accent-hover);
+}
+
+.app-header[data-layout="catalogue"] .header-right {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.app-header[data-layout="catalogue"] .status-pills {
+  padding-left: 0.9rem;
+  border-left: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.app-header[data-layout="catalogue"] .header-controls {
+  gap: 0.45rem;
+}
+
+.app-header[data-layout="catalogue"] .segmented-control {
+  border-color: var(--border);
+  border-radius: 999px;
+  padding: 2px;
+}
+
+.app-header[data-layout="catalogue"] .segmented-control button {
+  border-radius: 999px;
+}
+
+.app-content {
+  background: var(--bg);
+}
+
+.overview {
+  max-width: 1440px;
+  padding: clamp(2rem, 4vw, 3.5rem) clamp(1.25rem, 4vw, 2.75rem) 4rem;
+}
+
+.overview .page-heading,
+.session-view .page-heading {
+  align-items: flex-end;
+  margin-bottom: 1.75rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--border);
+}
+
+.page-heading-copy {
+  min-width: 0;
+}
+
+.page-heading .page-eyebrow {
+  margin-bottom: 0.65rem;
+}
+
+.page-heading h1 {
+  font-size: clamp(2rem, 3.5vw, 2.8rem);
+  letter-spacing: -0.055em;
+}
+
+.page-heading p {
+  margin-top: 0.45rem;
+  max-width: 60ch;
+}
+
+.page-range {
+  border: 0;
+  border-left: 1px solid var(--border-hot);
+  border-radius: 0;
+  padding: 0.25rem 0 0.25rem 0.8rem;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.kpi-grid {
+  grid-template-columns: minmax(0, 1.35fr) repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "lead cost waste"
+    "lead sessions sessions";
+  gap: 1px;
+  margin-bottom: 0.9rem;
+  border: 1px solid var(--border);
+  background: var(--border);
+}
+
+.kpi-card {
+  min-height: 134px;
+  border: 0;
+  border-radius: 0;
+  padding: 1.35rem 1.45rem;
+  background: var(--bg-raised);
+}
+
+.kpi-card:first-child {
+  grid-area: lead;
+  display: flex;
+  min-height: 270px;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 0;
+  background: var(--accent-dim);
+}
+
+.kpi-card:nth-child(2) {
+  grid-area: cost;
+}
+
+.kpi-card:nth-child(3) {
+  grid-area: waste;
+}
+
+.kpi-card:nth-child(4) {
+  grid-area: sessions;
+}
+
+.kpi-card.warn {
+  border: 0;
+  background: var(--warn-bg);
+}
+
+.kpi-card:first-child .kpi-label {
+  color: var(--accent);
+}
+
+.kpi-card:first-child .kpi-value {
+  font-size: clamp(2.25rem, 5vw, 3.8rem);
+}
+
+.kpi-value {
+  margin: 0.9rem 0 0.55rem;
+  font-size: clamp(1.55rem, 2.8vw, 2.25rem);
+}
+
+.kpi-card:first-child .kpi-sub {
+  max-width: 20rem;
+}
+
+.kpi-session-action {
+  color: var(--accent);
+}
+
+.data-notice {
+  margin: 1.1rem 0 0;
+  border-left-width: 2px;
+  padding: 0.65rem 1rem;
+  background: var(--warn-bg);
+}
+
+.overview > .chart-card {
+  margin-top: 2.35rem;
+  padding: 1.5rem;
+  border-radius: 12px;
+}
+
+.chart-card {
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.chart-title {
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+}
+
+.chart-desc {
+  max-width: 72ch;
+}
+
+.overview .detail-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 2.35rem;
+  border: 1px solid var(--border);
+  background: var(--border);
+}
+
+.overview .detail-section {
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-raised);
+}
+
+.overview .detail-section:last-child {
+  grid-column: 1 / -1;
+}
+
+.detail-section > summary {
+  min-height: 86px;
+  border-radius: 0;
+  padding: 1rem 1.35rem;
+}
+
+.detail-section > summary:hover {
+  background: var(--accent-overlay);
+}
+
+.detail-section[open] > summary {
+  border-radius: 0;
+}
+
+.detail-section-body {
+  padding: 1.35rem;
+  background: var(--bg-inset);
+}
+
+.layout {
+  max-width: 1760px;
+  padding: 2.1rem clamp(1.25rem, 4vw, 3.25rem) 4rem;
+  gap: 0;
+}
+
+.session-list {
+  width: 336px;
+  max-height: calc(100vh - 8.2rem);
+  margin-right: clamp(1.25rem, 3vw, 2.25rem);
+  padding: 0 1.45rem 0 0;
+  border-right-color: var(--border-hot);
+}
+
+.session-list-head {
+  align-items: flex-end;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.session-list-head h2 {
+  margin-top: 0.3rem;
+  font-family: var(--display);
+  font-size: 1.45rem;
+  letter-spacing: -0.04em;
+}
+
+.session-list-eyebrow {
+  color: var(--text-dim);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.session-count {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.session-count strong {
+  color: var(--accent);
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.session-list ul {
+  counter-reset: session-index;
+}
+
+.session-list li {
+  counter-increment: session-index;
+}
+
+.session-card {
+  position: relative;
+  margin-bottom: 0;
+  border-color: var(--border);
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+.session-card::after {
+  content: counter(session-index, decimal-leading-zero);
+  position: absolute;
+  top: 0.95rem;
+  right: 0.65rem;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.session-main {
+  position: relative;
+  padding: 1rem 0.65rem 0.95rem;
+}
+
+.session-list li.selected .session-card {
+  border-color: var(--border-hot);
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: var(--accent-dim);
+  box-shadow: none;
+}
+
+.session-list li.selected .session-card::before {
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+.session-id {
+  padding-right: 2.2rem;
+  font-size: 12px;
+}
+
+.session-context-meta {
+  padding: 0.4rem 0.65rem 0.85rem;
+}
+
+.session-context-meta button {
+  border-radius: 6px;
+}
+
+.import-actions {
+  border-radius: 10px;
+  padding: 0.9rem;
+}
+
+.main-panel {
+  min-width: 0;
+}
+
+.session-view {
+  min-width: 0;
+}
+
+.session-page-heading {
+  margin-bottom: 0.8rem !important;
+}
+
+.session-kicker {
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.95rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.session-reference {
+  max-width: 50%;
+  padding: 0.25rem 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.session-headline {
+  margin-bottom: 0.8rem;
+}
+
+.headline-main {
+  padding: 1.5rem;
+  border-radius: 12px;
+  background: var(--bg-raised);
+}
+
+.session-metrics {
+  gap: 0;
+}
+
+.headline-row {
+  min-height: 112px;
+  justify-content: space-between;
+  padding: 0 1.3rem;
+  border-left: 1px solid var(--border);
+}
+
+.headline-row:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.headline-value {
+  font-size: clamp(1.8rem, 3.3vw, 2.65rem);
+}
+
+.headline-main .mix-bar.headline-mix {
+  margin-top: 1.2rem;
+}
+
+.session-body {
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.session-left {
+  min-width: 0;
+}
+
+.cost-tree,
+.turn-table-wrap {
+  border-radius: 12px;
+}
+
+.tree-row {
+  min-height: 42px;
+  border-radius: 6px;
+}
+
+.tree-row.selected {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.turn-table-wrap {
+  min-width: 0;
+}
+
+.turn-table-scroll {
+  border-radius: 8px;
+}
+
+.detail-stack {
+  margin-top: 1.25rem;
+}
+
+.session-view .detail-section {
+  border-radius: 12px;
+}
+
+.app-footer {
+  justify-content: flex-start;
+  max-width: none;
+  margin: 0 clamp(1.25rem, 4vw, 3.25rem);
+  padding: 1rem 0 1.7rem;
+  border-top-color: var(--border-hot);
+}
+
+.app-footer > span {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+@media (min-width: 1501px) {
+  .session-body {
+    grid-template-columns: minmax(290px, 0.82fr) minmax(0, 1.65fr);
+  }
+}
+
+@media (max-width: 1500px) and (min-width: 781px) {
+  .session-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1100px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "lead cost"
+      "lead waste"
+      "sessions sessions";
+  }
+}
+
+@media (max-width: 780px) {
+  .app-header[data-layout="catalogue"] {
+    display: block;
+    min-height: 0;
+    padding: 1rem;
+  }
+
+  .app-header[data-layout="catalogue"] .header-primary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.7rem 1rem;
+  }
+
+  .app-header[data-layout="catalogue"] .brand {
+    min-width: 0;
+  }
+
+  .app-header[data-layout="catalogue"] .nav-caption {
+    display: none;
+  }
+
+  .app-header[data-layout="catalogue"] .primary-nav {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: space-between;
+    gap: 1.25rem;
+  }
+
+  .app-header[data-layout="catalogue"] .primary-nav a {
+    flex: 0 1 auto;
+  }
+
+  .app-header[data-layout="catalogue"] .header-right {
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 0.7rem;
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .app-header[data-layout="catalogue"] .status-pills {
+    align-self: center;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .app-header[data-layout="catalogue"] .header-controls {
+    flex: 1;
+    justify-content: flex-end;
+  }
+
+  .app-header[data-layout="catalogue"] .header-controls .segmented-control {
+    flex: 1 1 auto;
+  }
+
+  .app-header[data-layout="catalogue"] .header-controls .segmented-control button {
+    flex: 1;
+    min-height: 40px;
+  }
+
+  .overview {
+    padding: 1.75rem 1rem 3rem;
+  }
+
+  .overview .page-heading,
+  .session-view .page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1.35rem;
+  }
+
+  .page-range {
+    max-width: none;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "lead lead"
+      "cost waste"
+      "sessions sessions";
+  }
+
+  .kpi-card:first-child {
+    min-height: 208px;
+  }
+
+  .overview .detail-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .overview .detail-section:last-child {
+    grid-column: auto;
+  }
+
+  .layout {
+    padding: 1.5rem 1rem 3rem;
+  }
+
+  .session-list {
+    width: 100%;
+    max-height: 24rem;
+    margin-right: 0;
+    padding: 0 0 1rem;
+    border-right: 0;
+    border-bottom-color: var(--border-hot);
+  }
+
+  .session-body {
+    grid-template-columns: 1fr;
+  }
+
+  .headline-row,
+  .headline-row:first-child {
+    min-height: 96px;
+    padding: 0 1rem;
+  }
+
+  .headline-value {
+    font-size: 1.7rem;
+  }
+
+  .headline-row:nth-child(3) {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+    padding: 1rem 0 0;
+  }
+
+  .app-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+    margin: 0 1rem;
+  }
+}
+
+@media (max-width: 540px) {
+  .app-header[data-layout="catalogue"] .header-primary {
+    grid-template-columns: 1fr;
+  }
+
+  .app-header[data-layout="catalogue"] .primary-nav {
+    grid-column: auto;
+  }
+
+  .app-header[data-layout="catalogue"] .header-right {
+    display: block;
+  }
+
+  .app-header[data-layout="catalogue"] .header-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+    margin-top: 0.65rem;
+  }
+
+  .app-header[data-layout="catalogue"] .header-controls .segmented-control {
+    width: 100%;
+  }
+
+  .kpi-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "lead"
+      "cost"
+      "waste"
+      "sessions";
+  }
+
+  .kpi-card,
+  .kpi-card:first-child {
+    min-height: 132px;
+  }
+
+  .kpi-card:first-child {
+    min-height: 196px;
+  }
+
+  .overview > .chart-card,
+  .headline-main {
+    padding: 1.1rem;
+  }
+
+  .headline-main .session-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .headline-row,
+  .headline-row:first-child {
+    min-height: 88px;
+    padding: 0 0.7rem;
+  }
+
+  .headline-row:nth-child(3) {
+    padding-top: 0.8rem;
   }
 }

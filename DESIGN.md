@@ -63,6 +63,14 @@ components:
 
 The reference is an `htop` ledger: precise numeric columns, visible branches, quiet dark surfaces, and a mint trace through recorded usage. Preserve the approved terminal identity in [the product brief](docs/superpowers/specs/2026-08-27-agent-token-monitor-design.md). This is a product surface for people auditing local Codex runs, primarily on a laptop, with phone layouts for checking a run. The job is to connect a total to its evidence, not to sell an analytics service.
 
+## Macrostructure family
+
+App pages use a **Catalogue-led index**: the session inventory is the first reading surface, and the selected session opens into an evidence split. Overview keeps the same inventory-to-evidence order by leading with one total and a compact metric register before trends and disclosures. The variant changes hierarchy and rhythm from the earlier workbench presentation without changing the underlying data model or route behavior.
+
+- Navigation: edge-aligned links with a quiet active rule (N9-inspired)
+- App footer: single inline rule with local-processing and read-only notes (Ft2-inspired)
+- Enrichment: none; data and evidence carry the page
+
 The existing interface establishes Simplified Chinese (`zh-CN`); model IDs, Tokens, Credits, USD, Fast, and tool names remain technical terms. Locale does not establish a geographic market. There is no Japan-specific market or workflow evidence. No remote fonts, analytics, or decorative media are needed.
 
 The signature is the token partition: the same colors and exact numerical semantics connect overview charts, session composition, the cost tree, and individual turns. Keep secondary analysis behind the established disclosures. Avoid marketing heroes, ornamental gradients, glowing badges, and treating expensive work as inherently wasteful.
@@ -81,7 +89,7 @@ The body stack is local and Chinese-capable; no download or font swap changes la
 
 ## Layout
 
-The document owns page scrolling. Overview uses a 1440px maximum width; session analysis uses 1760px. Four summary cards become two columns below 1100px. Below 780px the header reflows, stops sticking, and the session selector becomes a bounded region above the natural-height detail page. Controls stay usable at 360px. No page shell has a fixed height to accommodate a table.
+The document owns page scrolling. Overview uses a 1440px maximum width; session analysis uses 1760px. The overview opens with a lead total plus a compact metric register, then a full-width trend and disclosures. The session page keeps a catalogue rail beside the evidence pane on wide screens and moves the rail above the detail on narrow screens. Four summary cards become two columns below 1100px. Below 780px the header reflows, stops sticking, and the session selector becomes a bounded region above the natural-height detail page. Controls stay usable at 360px. No page shell has a fixed height to accommodate a table.
 
 Use the existing 24px panel spacing and 20px gaps. Only the session selector, turn table, and long evidence blocks own internal overflow; every scroll region inherits the global scrollbar baseline. Reserve loading surfaces and feedback lines. The header's controls, disclosure summaries, and busy buttons keep stable dimensions.
 

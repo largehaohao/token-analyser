@@ -118,7 +118,8 @@ export function SessionView({
       )}
 
       <header className="page-heading session-page-heading">
-        <div>
+        <div className="page-heading-copy">
+          <span className="page-eyebrow">会话证据 · 当前选中</span>
           <h1 tabIndex={-1}>{snapshot.nickname ?? "会话明细"}</h1>
           <p className="source-path" title={snapshot.cwd ?? undefined}>
             {snapshot.cwd ?? "本地会话"}
