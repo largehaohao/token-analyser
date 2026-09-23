@@ -16,6 +16,40 @@ function gate() {
   return { promise, release };
 }
 
+test("overview updates model pricing with visible loading and success states", async ({
+  page,
+}) => {
+  const update = gate();
+  await page.route("**/pricing/update", async (route) => {
+    await update.promise;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ asOf: "2026-09-23", modelCount: 13 }),
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.getByTestId("overview-page")).toBeVisible({
+    timeout: 10_000,
+  });
+  const button = page.getByRole("button", { name: "更新模型价格" });
+  await expect(button).toBeVisible();
+  await button.click();
+  await expect(button).toBeDisabled();
+  await expect(
+    page.getByText("正在从 OpenAI 官网读取模型价格…"),
+  ).toBeVisible();
+
+  update.release();
+  await expect(
+    page.getByText(
+      "已同步 13 种模型价格（2026-09-23），并重新计算本地成本。",
+    ),
+  ).toBeVisible();
+  await expect(button).toBeEnabled();
+});
+
 test("Back and reload retain private filters, selection, and range", async ({
   page,
 }) => {

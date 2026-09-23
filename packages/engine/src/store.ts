@@ -217,6 +217,27 @@ export class SessionStore {
     this.rebuildAll();
   }
 
+  refreshPricing(): number {
+    const refreshedSources = new Map<string, SessionSnapshot>();
+    const refreshedToggles = new Map<string, Record<WasteToggleId, boolean>>();
+
+    for (const [id, source] of this.sources) {
+      const refreshed = ingestFile(source.path, { cacheHome: this.cacheHome });
+      refreshedSources.set(refreshed.id, { ...refreshed, children: [] });
+      refreshedToggles.set(
+        refreshed.id,
+        this.toggles.get(id) ?? this.toggles.get(refreshed.id) ?? {
+          ...refreshed.toggles,
+        },
+      );
+    }
+
+    this.sources = refreshedSources;
+    this.toggles = refreshedToggles;
+    this.rebuildAll();
+    return refreshedSources.size;
+  }
+
   removePath(filePath: string): { id: string; parentId: string | null } | undefined {
     const resolved = path.resolve(filePath);
     for (const [id, source] of this.sources) {

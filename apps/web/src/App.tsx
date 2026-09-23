@@ -10,6 +10,7 @@ import {
   type SessionListItem,
   type SessionSnapshot,
   type StreamStatus,
+  updateModelPrices as requestModelPriceUpdate,
 } from "./api";
 import { errorMessage, isNotFound, streamErrorBanner } from "./app-errors";
 import { UnitProvider } from "./UnitContext";
@@ -39,6 +40,10 @@ import {
 } from "./session-range";
 
 type View = SessionNavigationView;
+type PricingUpdateNotice = {
+  tone: "info" | "warning" | "error" | "success";
+  message: string;
+};
 
 const STREAM_LABEL: Record<StreamStatus, string> = {
   connecting: "实时连接中",
@@ -73,6 +78,9 @@ function AppShell() {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const [appError, setAppError] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
+  const [pricingUpdateNotice, setPricingUpdateNotice] =
+    useState<PricingUpdateNotice | null>(null);
+  const [updatingModelPrices, setUpdatingModelPrices] = useState(false);
   const importInFlight = useRef(false);
   const importedSnapshot = useRef<SessionSnapshot | null>(null);
   const listRequest = useRef(0);
@@ -165,10 +173,10 @@ function AppShell() {
   const rangeLabel =
     SESSION_RANGES.find((item) => item.id === range)?.label ?? range;
 
-  const refreshOverview = useCallback(async () => {
+  const refreshOverview = useCallback(async (force = false) => {
     const requestedRange = rangeRef.current;
     const active = overviewInFlight.current;
-    if (active?.range === requestedRange) return active.promise;
+    if (!force && active?.range === requestedRange) return active.promise;
     const requestId = ++overviewRequest.current;
     setOverviewError(null);
     const promise = (async () => {
@@ -201,8 +209,8 @@ function AppShell() {
     return promise;
   }, []);
 
-  const refreshList = useCallback(async () => {
-    if (listInFlight.current) return listInFlight.current;
+  const refreshList = useCallback(async (force = false) => {
+    if (!force && listInFlight.current) return listInFlight.current;
     const requestId = ++listRequest.current;
     const promise = (async () => {
       try {
@@ -287,6 +295,44 @@ function AppShell() {
     );
     return promise;
   }, []);
+
+  const updateModelPrices = useCallback(async () => {
+    setUpdatingModelPrices(true);
+    setPricingUpdateNotice({
+      tone: "info",
+      message: "正在从 OpenAI 官网读取模型价格…",
+    });
+    try {
+      const result = await requestModelPriceUpdate();
+      const [overviewRefreshed, sessionsRefreshed] = await Promise.all([
+        refreshOverview(true).then(
+          () => true,
+          () => false,
+        ),
+        refreshList(true).then(
+          () => true,
+          () => false,
+        ),
+      ]);
+      const allRefreshed = overviewRefreshed && sessionsRefreshed;
+      setPricingUpdateNotice({
+        tone: allRefreshed ? "success" : "warning",
+        message: allRefreshed
+          ? `已同步 ${result.modelCount} 种模型价格（${result.asOf}），并重新计算本地成本。`
+          : overviewRefreshed
+            ? `已同步 ${result.modelCount} 种模型价格（${result.asOf}），成本总览已更新，但会话列表刷新失败。`
+            : `已同步 ${result.modelCount} 种模型价格（${result.asOf}），但成本总览刷新失败，请重试。`,
+      });
+    } catch (error) {
+      setPricingUpdateNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "模型价格更新失败。",
+      });
+    } finally {
+      setUpdatingModelPrices(false);
+    }
+  }, [refreshList, refreshOverview]);
 
   useEffect(() => {
     void refreshOverview().catch(() => undefined);
@@ -563,6 +609,9 @@ function AppShell() {
               <OverviewPage
                 overview={overview}
                 onOpenSessions={openSessions}
+                onUpdateModelPrices={() => void updateModelPrices()}
+                updatingModelPrices={updatingModelPrices}
+                pricingUpdateNotice={pricingUpdateNotice}
                 refreshError={overviewError != null}
                 onRetry={() => void refreshOverview().catch(() => undefined)}
                 rangeLabel={

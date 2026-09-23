@@ -22,6 +22,12 @@ import { Button, Icon, Notice } from "./ui";
 type Props = {
   overview: Overview;
   onOpenSessions: () => void;
+  onUpdateModelPrices: () => void;
+  updatingModelPrices: boolean;
+  pricingUpdateNotice: {
+    tone: "info" | "warning" | "error" | "success";
+    message: string;
+  } | null;
   rangeLabel: string;
   refreshError?: boolean;
   onRetry: () => void;
@@ -78,6 +84,9 @@ function IconDoc() {
 export function OverviewPage({
   overview,
   onOpenSessions,
+  onUpdateModelPrices,
+  updatingModelPrices,
+  pricingUpdateNotice,
   rangeLabel,
   refreshError,
   onRetry,
@@ -111,11 +120,22 @@ export function OverviewPage({
           <h1 tabIndex={-1}>成本总览</h1>
           <p>从总量到每轮调用，看清用量花在哪里。</p>
         </div>
-        <span className="page-range">
-          <Icon name="clock" />
-          {rangeLabel}
-        </span>
+        <div className="page-heading-actions">
+          <Button onClick={onUpdateModelPrices} busy={updatingModelPrices}>
+            <Icon name="refresh" />
+            更新模型价格
+          </Button>
+          <span className="page-range">
+            <Icon name="clock" />
+            {rangeLabel}
+          </span>
+        </div>
       </header>
+      {pricingUpdateNotice && (
+        <Notice tone={pricingUpdateNotice.tone}>
+          {pricingUpdateNotice.message}
+        </Notice>
+      )}
       {refreshError && (
         <Notice tone="error" action={<Button onClick={onRetry}>重试</Button>}>
           总览更新失败，当前显示上次成功读取的数据。

@@ -246,6 +246,46 @@ export async function getOverview(
   return requestJson<Overview>(`/overview?${params.toString()}`);
 }
 
+export type ModelPricingUpdate = {
+  asOf: string;
+  modelCount: number;
+};
+
+export async function updateModelPrices(): Promise<ModelPricingUpdate> {
+  try {
+    return await requestJson<ModelPricingUpdate>(
+      "/pricing/update",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+      30_000,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("official_pricing_unavailable")) {
+      throw new Error("无法连接 OpenAI Codex 官网价格页，请检查网络后重试。");
+    }
+    if (message.includes("official_pricing_format_changed")) {
+      throw new Error("官网价格表格式发生变化，未修改本地价格配置。");
+    }
+    if (message.includes("rate_card_read_failed")) {
+      throw new Error("无法读取本地模型价格配置文件。");
+    }
+    if (message.includes("rate_card_write_failed")) {
+      throw new Error("本地价格配置写入失败，请检查文件权限。");
+    }
+    if (message.includes("pricing_recalculation_failed")) {
+      throw new Error("重新计算本地成本失败，价格配置已恢复原样。");
+    }
+    if (message.includes("pricing_recalculation_rollback_failed")) {
+      throw new Error("重新计价失败且配置回滚未完成，请检查本地价格配置。");
+    }
+    throw error;
+  }
+}
+
 export async function getSession(id: string): Promise<SessionSnapshot> {
   return requestJson<SessionSnapshot>(`/sessions/${encodeURIComponent(id)}`);
 }

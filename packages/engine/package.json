@@ -6,7 +6,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "analyse": "tsx src/analyse-cli.ts",
-    "start": "tsx src/server.ts"
+    "start": "node ../../scripts/start-engine.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

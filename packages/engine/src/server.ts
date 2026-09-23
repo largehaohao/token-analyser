@@ -11,6 +11,11 @@ import {
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadUserConfig, tokenAnalyserHome } from "./config.ts";
+import {
+  restoreRateCard,
+  updateRateCardFromOfficial,
+  type PricingUpdateOptions,
+} from "./pricing-update.ts";
 import { SessionStore, type SessionIngestOptions } from "./store.ts";
 import { watchSessions } from "./watch.ts";
 import type { SessionSnapshot, WasteToggleId } from "./types.ts";
@@ -437,6 +442,7 @@ export async function startServer(opts?: {
   store?: SessionStore;
   staticDir?: string;
   maxImportBytes?: number;
+  pricingUpdate?: PricingUpdateOptions;
 }): Promise<{
   url: string;
   close: () => Promise<void>;
@@ -489,6 +495,55 @@ export async function startServer(opts?: {
 
     if (req.method === "GET" && parts[0] === "sessions" && parts.length === 1) {
       sendJson(res, 200, { sessions: store.list() });
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      parts[0] === "pricing" &&
+      parts[1] === "update" &&
+      parts.length === 2
+    ) {
+      const origin = req.headers.origin;
+      const contentType = req.headers["content-type"] ?? "";
+      if (
+        (origin && origin !== CORS_ORIGIN) ||
+        !contentType.startsWith("application/json")
+      ) {
+        sendJson(res, 403, { error: "forbidden" });
+        return;
+      }
+
+      let update: Awaited<ReturnType<typeof updateRateCardFromOfficial>>;
+      try {
+        update = await updateRateCardFromOfficial(opts?.pricingUpdate);
+      } catch (err) {
+        const code = err instanceof Error ? err.message : "pricing_update_failed";
+        const status = code === "official_pricing_unavailable" ? 502 : 500;
+        sendJson(res, status, { error: code });
+        return;
+      }
+
+      try {
+        store.refreshPricing();
+      } catch {
+        try {
+          restoreRateCard(
+            update.previousContent,
+            opts?.pricingUpdate?.rateCardPath,
+          );
+        } catch {
+          sendJson(res, 500, { error: "pricing_recalculation_rollback_failed" });
+          return;
+        }
+        sendJson(res, 500, { error: "pricing_recalculation_failed" });
+        return;
+      }
+
+      sendJson(res, 200, {
+        asOf: update.asOf,
+        modelCount: update.modelCount,
+      });
       return;
     }
 
