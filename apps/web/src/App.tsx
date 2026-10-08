@@ -18,6 +18,13 @@ import type { CostUnit } from "./format";
 import { OverviewPage } from "./OverviewPage";
 import { RangeSwitcher } from "./RangeSwitcher";
 import { SessionList } from "./SessionList";
+import { SourceSwitcher } from "./SourceSwitcher";
+import {
+  filterSessionsBySource,
+  sourceCounts,
+  sourceEmptyCopy,
+  type SessionSourceFilter,
+} from "./session-source";
 import { SessionView } from "./SessionView";
 import { UnitSwitcher } from "./UnitSwitcher";
 import { NowProvider, useNow } from "./useNow";
@@ -58,7 +65,7 @@ function AppShell() {
   const [unit, setUnit] = useState<CostUnit>(readUnitPref);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
-  const [appliedRange, setAppliedRange] = useState<SessionRangeId | null>(null);
+  const [appliedScope, setAppliedScope] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
@@ -75,6 +82,9 @@ function AppShell() {
     null,
   );
   const [range, setRange] = useState<SessionRangeId>(initialNavigation.range);
+  const [source, setSource] = useState<SessionSourceFilter>(
+    initialNavigation.source,
+  );
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const [appError, setAppError] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
@@ -93,7 +103,7 @@ function AppShell() {
     promise: Promise<SessionSnapshot | undefined>;
   } | null>(null);
   const overviewInFlight = useRef<{
-    range: SessionRangeId;
+    scope: string;
     promise: Promise<Overview>;
   } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -104,17 +114,19 @@ function AppShell() {
   );
   const viewRef = useRef<View>(view);
   const rangeRef = useRef<SessionRangeId>(range);
+  const sourceRef = useRef<SessionSourceFilter>(source);
   selectedIdRef.current = selectedId;
   viewRef.current = view;
   rangeRef.current = range;
+  sourceRef.current = source;
 
   useEffect(() => {
     writeUnitPref(unit);
   }, [unit]);
 
   useEffect(() => {
-    writeSessionNavigation({ view, selectedId, range });
-  }, [selectedId, view, range]);
+    writeSessionNavigation({ view, selectedId, range, source });
+  }, [selectedId, view, range, source]);
 
   useEffect(() => {
     if (previousView.current === view) return;
@@ -134,6 +146,7 @@ function AppShell() {
       setView(next.view);
       setSelectedId(next.selectedId);
       setRange(next.range);
+      setSource(next.source);
       setSelectedNodeId(null);
       setContextOpen(null);
     }
@@ -166,25 +179,32 @@ function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const matchingSource = useMemo(
+    () => filterSessionsBySource(sessions, source),
+    [sessions, source],
+  );
+  const counts = useMemo(() => sourceCounts(sessions), [sessions]);
   const visibleSessions = useMemo(
-    () => filterSessionsByRange(sessions, range, now),
-    [sessions, range, now],
+    () => filterSessionsByRange(matchingSource, range, now),
+    [matchingSource, range, now],
   );
   const rangeLabel =
     SESSION_RANGES.find((item) => item.id === range)?.label ?? range;
 
   const refreshOverview = useCallback(async (force = false) => {
     const requestedRange = rangeRef.current;
+    const requestedSource = sourceRef.current;
+    const requestedScope = `${requestedSource}:${requestedRange}`;
     const active = overviewInFlight.current;
-    if (!force && active?.range === requestedRange) return active.promise;
+    if (!force && active?.scope === requestedScope) return active.promise;
     const requestId = ++overviewRequest.current;
     setOverviewError(null);
     const promise = (async () => {
       try {
-        const data = await getOverview(requestedRange, Date.now());
+        const data = await getOverview(requestedRange, Date.now(), requestedSource);
         if (requestId !== overviewRequest.current) return data;
         setOverview(data);
-        setAppliedRange(requestedRange);
+        setAppliedScope(requestedScope);
         setOverviewError(null);
         return data;
       } catch (err) {
@@ -193,7 +213,7 @@ function AppShell() {
         throw err;
       }
     })();
-    overviewInFlight.current = { range: requestedRange, promise };
+    overviewInFlight.current = { scope: requestedScope, promise };
     void promise.then(
       () => {
         if (overviewInFlight.current?.promise === promise) {
@@ -336,7 +356,7 @@ function AppShell() {
 
   useEffect(() => {
     void refreshOverview().catch(() => undefined);
-  }, [range, now, refreshOverview]);
+  }, [range, source, now, refreshOverview]);
 
   useEffect(() => {
     void refreshList().catch(() => undefined);
@@ -393,12 +413,15 @@ function AppShell() {
         view: "sessions",
         selectedId: snap.id,
         range: "all",
+        source: snap.source ?? "codex",
       });
     sessionRequest.current += 1;
     preferredSessionIdRef.current = snap.id;
     selectedIdRef.current = snap.id;
     rangeRef.current = "all";
+    sourceRef.current = snap.source ?? "codex";
     setRange("all");
+    setSource(snap.source ?? "codex");
     setView("sessions");
     setSelectedId(snap.id);
     setSelectedNodeId(null);
@@ -451,6 +474,22 @@ function AppShell() {
     setContextOpen(null);
   }
 
+  function handleSourceChange(next: SessionSourceFilter) {
+    if (next === source) return;
+    const nextId = resolveSelectedSession(
+      null,
+      filterSessionsByRange(filterSessionsBySource(sessions, next), range, now),
+    );
+    pushSessionNavigation({ view, selectedId: nextId, range, source: next });
+    writeSessionListState({ query: "", limit: SESSION_PAGE_SIZE, scrollTop: 0 });
+    sourceRef.current = next;
+    preferredSessionIdRef.current = null;
+    setSource(next);
+    setSelectedId(nextId);
+    setSelectedNodeId(null);
+    setContextOpen(null);
+  }
+
   function handleInspectContext(id: string, bucket: "tools" | "skills") {
     preferredSessionIdRef.current = null;
     setSelectedId(id);
@@ -459,8 +498,8 @@ function AppShell() {
   }
 
   const overviewState = overviewDisplayState({
-    requestedRange: range,
-    appliedRange,
+    requestedRange: `${source}:${range}`,
+    appliedRange: appliedScope,
     hasOverview: overview != null,
     error: overviewError,
   });
@@ -468,7 +507,7 @@ function AppShell() {
   function openSessions() {
     const nextId = resolveSelectedSession(selectedId, visibleSessions);
     if (view !== "sessions")
-      pushSessionNavigation({ view: "sessions", selectedId: nextId, range });
+      pushSessionNavigation({ view: "sessions", selectedId: nextId, range, source });
     setView("sessions");
     setSelectedId(nextId);
   }
@@ -486,7 +525,7 @@ function AppShell() {
     if (next === view) return;
     if (next === "sessions") openSessions();
     else {
-      pushSessionNavigation({ view: "overview", selectedId, range });
+      pushSessionNavigation({ view: "overview", selectedId, range, source });
       setView("overview");
     }
   }
@@ -557,6 +596,15 @@ function AppShell() {
             </div>
           </div>
         </header>
+        <SourceSwitcher
+          source={source}
+          counts={counts}
+          loaded={sessionsLoaded}
+          visibleCount={visibleSessions.length}
+          rangeLabel={rangeLabel}
+          onChange={handleSourceChange}
+          onShowAllTime={() => setRange("all")}
+        />
         {view === "overview" && importStatus && (
           <div className="app-notice">
             <Notice
@@ -649,8 +697,10 @@ function AppShell() {
           ) : (
             <div className="layout">
               <SessionList
+                key={source}
+                source={source}
                 sessions={visibleSessions}
-                totalCount={sessions.length}
+                totalCount={matchingSource.length}
                 selectedId={selectedId}
                 contextOpen={contextOpen}
                 onSelect={handleSelectSession}
@@ -742,17 +792,11 @@ function AppShell() {
                     kind="empty"
                     title="选择一个会话查看费用。"
                     description={
-                      sessions.length > 0
+                      matchingSource.length > 0
                         ? "当前时间范围没有会话，可以切换为全部时间。"
-                        : "运行 Codex、Claude Code、Cursor、pi 或导入 JSONL 记录，开始查看用量。"
+                        : sourceEmptyCopy(source)
                     }
-                  >
-                    {sessions.length > 0 && (
-                      <Button onClick={() => setRange("all")}>
-                        查看全部时间
-                      </Button>
-                    )}
-                  </StatePanel>
+                  />
                 )}
               </main>
             </div>

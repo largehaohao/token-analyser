@@ -1,5 +1,6 @@
 import type {
   PerformanceSummary,
+  RequestPerformance,
   RolloutLine,
   SessionSnapshot,
   TaskTiming,
@@ -15,6 +16,38 @@ function nonnegative(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : null;
+}
+
+/** Read only metadata belonging to this request; never infer timing from a
+ * ledger window or task_complete, which can also include tools and other calls. */
+export function requestPerformance(
+  outputTokens: number | null,
+  ...metadata: unknown[]
+): RequestPerformance {
+  const containers = metadata.flatMap((value) => {
+    const item = record(value);
+    return item ? [record(item.request_performance), record(item.performance),
+      record(item.timing), record(item.metrics), item].filter((item) => item != null) : [];
+  });
+  function field(...names: string[]): number | null {
+    for (const item of containers) for (const name of names) {
+      if (item[name] !== undefined) return nonnegative(item[name]);
+    }
+    return null;
+  }
+  const duration = field("request_duration_ms", "duration_ms", "durationMs");
+  const durationMs = duration != null && duration > 0 ? duration : null;
+  const ttft = field("time_to_first_token_ms", "ttft_ms", "ttftMs");
+  const ttftMs = ttft != null && (durationMs == null || ttft <= durationMs) ? ttft : null;
+  const recordedSpeed = field("output_tokens_per_second", "tokens_per_second", "outputTokensPerSecond");
+  const output = nonnegative(outputTokens);
+  const calculatedSpeed = durationMs != null && output != null ? output * 1000 / durationMs : null;
+  const outputTokensPerSecond = recordedSpeed ??
+    (calculatedSpeed != null && Number.isFinite(calculatedSpeed) ? calculatedSpeed : null);
+  return {
+    ttftMs, durationMs, outputTokensPerSecond,
+    speedSource: recordedSpeed != null ? "recorded" : outputTokensPerSecond != null ? "duration" : null,
+  };
 }
 
 /** Codex task timestamps can be ISO strings or Unix seconds. */

@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 async function openSessionDetail(page: Page) {
   await page.getByRole("link", { name: "会话明细" }).click();
+  await page.getByRole("button", { name: "全部", exact: true }).click();
 }
 
 test("overview keeps secondary analysis collapsed and accessible by keyboard", async ({
@@ -16,7 +17,7 @@ test("overview keeps secondary analysis collapsed and accessible by keyboard", a
   await expect(viewNavigation).toBeVisible();
   await expect(viewNavigation.getByRole("link")).toHaveCount(2);
   await expect(page.getByRole("group", { name: "时间范围" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "全部" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "全部", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "全部", exact: true }).click();
   await expect(page.locator(".kpi-label", { hasText: "总用量" })).toBeVisible();
   await expect(
@@ -156,7 +157,9 @@ test("shows mix bars for headline, tree, sessions, and turns", async ({
   await expect(page.locator(".tree-row .tree-bar").first()).toBeVisible();
   await page.locator(".tree-row").first().click();
   await expect(page.locator(".turn-mix").first()).toBeVisible();
-  await expect(page.locator(".turn-table th")).toHaveCount(6);
+  await expect(page.locator(".turn-table th")).toHaveCount(8);
+  await expect(page.getByRole("columnheader", { name: "TTFT (s)" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "tok/s", exact: true })).toBeVisible();
   const turnRow = page.locator(".turn-table tbody tr").first();
   const exactRaw = await turnRow.locator(".turn-total").getAttribute("title");
   await turnRow.getByRole("button").press("Enter");
@@ -216,7 +219,7 @@ test("renders rate limit gauges instead of raw JSON", async ({ page }) => {
     sessions: { id: string }[];
   };
   let targetId: string | null = null;
-  for (const session of sessions.slice(0, 8)) {
+  for (const session of sessions) {
     const snapResponse = await page.request.get(`/sessions/${session.id}`);
     if (!snapResponse.ok()) continue;
     const snap = (await snapResponse.json()) as { rate_limits: unknown };
@@ -225,7 +228,13 @@ test("renders rate limit gauges instead of raw JSON", async ({ page }) => {
       break;
     }
   }
-  test.skip(!targetId, "no session with rate limits");
+  if (!targetId) {
+    targetId = "s-poll";
+    const snapshot = await (await page.request.get(`/sessions/${targetId}`)).json();
+    await page.route(`**/sessions/${targetId}`, (route) => route.fulfill({ json: {
+      ...snapshot, rate_limits: { primary: { used_percent: 27, window_minutes: 300 }, secondary: { used_percent: 4, window_minutes: 10080 } },
+    } }));
+  }
   await page.goto("/");
   await openSessionDetail(page);
   await page.getByRole("button", { name: new RegExp(targetId!) }).click();
@@ -617,7 +626,7 @@ test("overview keeps data warnings visible while quality details are collapsed",
   await expect(page.getByLabel("数据质量", { exact: true })).toBeHidden();
 });
 
-for (const width of [1600, 1440, 390]) {
+for (const width of [1920, 1701, 1600, 1440, 390]) {
   test(`summary and drilldowns stay within the page at ${width}px`, async ({
     page,
   }) => {

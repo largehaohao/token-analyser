@@ -310,7 +310,7 @@ export class SessionStore {
   }
 
   overview(
-    opts: Pick<OverviewOptions, "watchPath" | "collecting" | "sinceMs" | "dayCount">,
+    opts: Omit<OverviewOptions, "now">,
   ): Overview {
     return buildOverview(this.rootSnapshots(), opts);
   }

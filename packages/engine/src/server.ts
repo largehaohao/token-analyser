@@ -524,6 +524,11 @@ export async function startServer(opts?: {
       const url = new URL(req.url ?? "/", "http://localhost");
       const sinceRaw = url.searchParams.get("since");
       const daysRaw = url.searchParams.get("days");
+      const source = url.searchParams.get("source");
+      if (source != null && source !== "all" && source !== "codex" && source !== "claude" && source !== "cursor" && source !== "pi") {
+        sendJson(res, 400, { error: "invalid_source" });
+        return;
+      }
       const timezoneRaw = url.searchParams.get("timezone_offset_minutes");
       const timezone = url.searchParams.get("timezone")?.trim();
       const sinceMs = sinceRaw ? Date.parse(sinceRaw) : Number.NaN;
@@ -535,6 +540,7 @@ export async function startServer(opts?: {
         res,
         200,
         store.overview({
+          ...(source && source !== "all" ? { source } : {}),
           watchPath: config.watch_paths.join("\n"),
           collecting: process.env.FIXTURE_DIR == null,
           ...(Number.isFinite(sinceMs) ? { sinceMs } : {}),

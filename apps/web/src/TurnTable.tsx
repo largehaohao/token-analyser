@@ -7,6 +7,7 @@ import {
   formatCostTitle,
   formatExactTokens,
   formatUnitSuffix,
+  formatPerformanceNumber,
 } from "./format";
 import { MixBar } from "./MixBar";
 import { TurnSparkline } from "./TurnSparkline";
@@ -129,6 +130,8 @@ export function TurnTable({
                   <th scope="col">工具</th>
                   <th scope="col">提示</th>
                   <th scope="col">构成</th>
+                  <th scope="col" className="turn-performance" title="本次请求到首 token 的等待时间">TTFT (s)</th>
+                  <th scope="col" className="turn-performance" title="本次请求的输出 token 速度">tok/s</th>
                   <th scope="col">
                     {unit === "tokens" ? "Token 用量" : formatUnitSuffix(unit)}
                   </th>
@@ -140,6 +143,13 @@ export function TurnTable({
                     ? treeAppearance(t.bucket, "bucket", t.bucket)
                     : null;
                   const expanded = expandedId === t.id;
+                  const performance = t.requestPerformance;
+                  const ttft = formatPerformanceNumber(performance?.ttftMs == null ? null : performance.ttftMs / 1000);
+                  const speed = formatPerformanceNumber(performance?.outputTokensPerSecond);
+                  const speedNote = performance?.speedSource === "duration"
+                    ? "本次请求输出 token ÷ 请求总耗时（含首 token 等待）"
+                    : performance?.speedSource === "recorded" ? "采用日志记录的本次请求输出速度"
+                      : "日志未记录本次请求的输出速度或完整耗时";
                   return (
                     <Fragment key={t.id}>
                       <tr
@@ -248,6 +258,10 @@ export function TurnTable({
                             ]}
                           />
                         </td>
+                        <td className="turn-performance" title={performance?.ttftMs == null ? "日志未记录本次请求的首 token 等待时间" : `${performance.ttftMs.toLocaleString("en-US")} ms`}>
+                          {ttft}
+                        </td>
+                        <td className="turn-performance" title={speedNote}>{speed}</td>
                         <td
                           className="turn-total"
                           title={formatCostTitle(t.cost, unit)}
@@ -259,13 +273,21 @@ export function TurnTable({
                       </tr>
                       {expanded && (
                         <tr className="turn-detail" id={`turn-detail-${t.id}`}>
-                          <td colSpan={6}>
+                          <td colSpan={8}>
                             <p className="turn-evidence-meta">
                               {new Date(t.startedAt).toLocaleString("zh-CN", {
                                 hour12: false,
                               })}{" "}
                               · {t.model ?? "未记录模型"}
                               {t.effort ? ` · ${t.effort}` : ""}
+                            </p>
+                            <dl className="turn-detail-metrics" aria-label="本次 LLM 请求性能">
+                              <div><dt>TTFT</dt><dd title="本次请求到首 token 的等待时间">{ttft} s</dd></div>
+                              <div><dt>tok/s</dt><dd title={speedNote}>{speed} tok/s</dd></div>
+                            </dl>
+                            <p className="turn-evidence-meta">
+                              {performance?.ttftMs == null ? "日志未记录本次请求的 TTFT。" : "TTFT 为本次请求到首 token 的等待时间。"}
+                              {speedNote}。
                             </p>
                             <dl
                               className="turn-detail-metrics"

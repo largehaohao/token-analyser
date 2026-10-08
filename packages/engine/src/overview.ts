@@ -6,6 +6,7 @@ import {
   type SessionSnapshot,
   type Turn,
   type PerformanceSummary,
+  type SessionSource,
 } from "./types.ts";
 import { computeWaste } from "./waste.ts";
 import { loadRateCard } from "./rate-card.ts";
@@ -71,6 +72,7 @@ export type Overview = {
 };
 
 export type OverviewOptions = {
+  source?: SessionSource;
   watchPath: string;
   collecting?: boolean;
   now?: string;
@@ -294,7 +296,9 @@ export function buildOverview(
   opts: OverviewOptions,
 ): Overview {
   const now = opts.now ?? new Date().toISOString();
-  const included = sessions.filter((session) => inRange(session, opts.sinceMs));
+  const included = sessions.filter((session) =>
+    (!opts.source || (session.source ?? "codex") === opts.source) && inRange(session, opts.sinceMs),
+  );
   const dayCount = opts.dayCount ?? 8;
   const timezoneFormatter = createTimezoneFormatter(opts.timezone);
   const timezoneOffsetMinutes = opts.timezoneOffsetMinutes ?? 0;

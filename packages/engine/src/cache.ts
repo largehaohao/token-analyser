@@ -13,8 +13,8 @@ import { sha256 } from "./hash.ts";
 import { tokenAnalyserHome } from "./config.ts";
 import type { SessionSnapshot } from "./types.ts";
 
-// v11 includes source identity, raw native events, and usage coverage.
-export const CACHE_VERSION = 11;
+// v12 includes request-level timing alongside the existing task metrics.
+export const CACHE_VERSION = 12;
 
 export function cacheDir(home?: string): string {
   return path.join(home ?? tokenAnalyserHome(), "cache");

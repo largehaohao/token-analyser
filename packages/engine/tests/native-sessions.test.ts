@@ -121,6 +121,25 @@ describe("Cursor database and multi-source integration", () => {
     } finally { db.close(); }
   });
 
+  it("deduplicates the same Cursor sessions discovered in global and workspace stores and retains request timing", () => {
+    const dir = home();
+    const globalDir = path.join(dir, "globalStorage");
+    const workspaceDir = path.join(dir, "workspaceStorage", "workspace");
+    mkdirSync(globalDir, { recursive: true }); mkdirSync(workspaceDir, { recursive: true });
+    const first = cursorDb(globalDir); const second = cursorDb(workspaceDir);
+    try {
+      const row = second.db.prepare("SELECT value FROM cursorDiskKV WHERE key=?").get("bubbleId:parent:assistant")!;
+      const bubble = JSON.parse(String(row.value));
+      bubble.request_performance = { ttft_ms: 120, duration_ms: 1000, tokens_per_second: 15 };
+      second.db.prepare("UPDATE cursorDiskKV SET value=? WHERE key=?").run(JSON.stringify(bubble), "bubbleId:parent:assistant");
+      const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+      store.refresh(collectSessionFiles([globalDir, path.join(dir, "workspaceStorage")]));
+      expect(store.list()).toHaveLength(1);
+      expect(store.list()[0].cost.raw).toBe(120);
+      expect(store.get("cursor:parent")?.turns[0].requestPerformance).toMatchObject({ ttftMs: 120, outputTokensPerSecond: 15 });
+    } finally { first.db.close(); second.db.close(); }
+  });
+
   it("discovers JSONL and DB file roots and updates Cursor sessions when only WAL changes", async () => {
     const dir = home(); const { file, db, session } = cursorDb(dir);
     const pi = write(dir, "pi.jsonl", fixture("pi"));
@@ -151,8 +170,29 @@ describe("Cursor database and multi-source integration", () => {
       const overview = await (await fetch(`${server.url}/overview`)).json();
       expect(overview.sessionCount).toBe(3); expect(overview.cost).toMatchObject({ raw: 720, credits: null, unmeasured: 1 });
       expect(overview.cost.usd).toBeCloseTo(0.001395, 10); expect(overview.unpricedRaw).toBe(0);
+      for (const source of ["claude", "pi", "cursor", "codex"]) {
+        const filtered = await (await fetch(`${server.url}/overview?source=${source}`)).json();
+        expect(filtered.sessionCount).toBe(source === "codex" ? 0 : 1);
+        expect(filtered.cost.raw).toBe(source === "claude" || source === "pi" ? 360 : 0);
+        expect(filtered.cost.unmeasured ?? 0).toBe(source === "cursor" ? 1 : 0);
+      }
+      const ranged = await (await fetch(`${server.url}/overview?source=pi&since=2026-10-09T00:00:00Z`)).json();
+      expect(ranged.sessionCount).toBe(0); expect(ranged.cost.raw).toBe(0);
+      expect((await fetch(`${server.url}/overview?source=invalid`)).status).toBe(400);
       const restored = new SessionStore({ cacheDir: path.join(dir, "cache") });
       loadImportedSessions(restored, path.join(dir, "imports")); expect(restored.list()).toHaveLength(3);
     } finally { await server.close(); }
+  });
+
+  it("preserves explicit per-request timings in all native formats", () => {
+    const dir = home();
+    for (const source of ["claude", "pi", "cursor"]) {
+      const events = fixture(source).trim().split("\n").map((line) => JSON.parse(line));
+      const replies = events.filter((event) => event.message?.role === "assistant" || event.role === "assistant");
+      const reply = replies.at(-1)!;
+      reply.message.request_performance = { ttft_ms: 300, duration_ms: 1000, tokens_per_second: 10 };
+      const snap = ingestFile(write(dir, `timing-${source}.jsonl`, events.map((event) => JSON.stringify(event)).join("\n")), { cacheHome: dir });
+      expect(snap.turns[0].requestPerformance).toEqual({ ttftMs: 300, durationMs: 1000, outputTokensPerSecond: 10, speedSource: "recorded" });
+    }
   });
 });

@@ -106,7 +106,8 @@ export function readCursorSessions(databasePath: string): RolloutLine[][] {
           count.inputTokens + count.outputTokens > 0 ? count : undefined;
         const timestamp = iso(bubble.createdAt) || iso(composer.lastUpdatedAt);
         events.push({ type: "message", source: "cursor", sessionId: id, timestamp, role,
-          message: { role, id: bubbleId, model: currentModel || null, content, usage } });
+          message: { role, id: bubbleId, model: currentModel || null, content, usage,
+            request_performance: bubble.request_performance } });
         if (Object.keys(tool).length) {
           events.push({ type: "message", timestamp, message: { role: "toolResult",
             toolCallId: text(tool.toolCallId) || bubbleId, content: text(tool.result) || JSON.stringify(tool.result ?? "") } });

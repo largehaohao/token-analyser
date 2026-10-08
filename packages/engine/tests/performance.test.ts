@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractTaskTimings, summarizePerformance } from "../src/performance.ts";
+import { extractTaskTimings, requestPerformance, summarizePerformance } from "../src/performance.ts";
 import { analyseSession } from "../src/snapshot.ts";
 import { buildOverview } from "../src/overview.ts";
 import type { RolloutLine } from "../src/types.ts";
@@ -101,5 +101,32 @@ describe("task performance", () => {
       taskCount: 1, ttftSampleCount: 1, speedSampleCount: 1,
       avgTtftMs: 2000, outputTokensPerSecond: 20,
     });
+  });
+});
+
+describe("per-request performance", () => {
+  it("uses explicit request metadata, prefers recorded speed, and supports nested metrics", () => {
+    expect(requestPerformance(100, { request_performance: { time_to_first_token_ms: 250, duration_ms: 2000, tokens_per_second: 70 } })).toEqual({
+      ttftMs: 250, durationMs: 2000, outputTokensPerSecond: 70, speedSource: "recorded",
+    });
+    expect(requestPerformance(100, { timing: { ttftMs: 250, durationMs: 2000 } })).toEqual({
+      ttftMs: 250, durationMs: 2000, outputTokensPerSecond: 50, speedSource: "duration",
+    });
+  });
+  it("preserves real zeros and leaves missing or invalid measurements unknown", () => {
+    expect(requestPerformance(0, { ttft_ms: 0, duration_ms: 1000 })).toMatchObject({ ttftMs: 0, outputTokensPerSecond: 0 });
+    expect(requestPerformance(null, { duration_ms: 1000 })).toMatchObject({ outputTokensPerSecond: null, speedSource: null });
+    expect(requestPerformance(100, { ttft_ms: 3000, duration_ms: 1000 })).toMatchObject({ ttftMs: null });
+    expect(requestPerformance(100, { duration_ms: 0, ttft_ms: -1, tokens_per_second: Infinity })).toEqual({ ttftMs: null, durationMs: null, outputTokensPerSecond: null, speedSource: null });
+    expect(requestPerformance(100)).toEqual({ ttftMs: null, durationMs: null, outputTokensPerSecond: null, speedSource: null });
+  });
+  it("attaches distinct request metrics to ledger turns without copying task measurements", () => {
+    const first = count(2, 100);
+    first.payload!.request_performance = { ttft_ms: 200, duration_ms: 2000 };
+    const snap = analyseSession({ sessionId: "requests", path: "/tmp/requests.jsonl", events: [start(0), first, count(5, 50, 150), complete(10, "t1", { duration_ms: 10000, time_to_first_token_ms: 1200 })] });
+    expect(snap.turns).toHaveLength(2);
+    expect(snap.turns[0].requestPerformance).toMatchObject({ ttftMs: 200, outputTokensPerSecond: 50 });
+    expect(snap.turns[1].requestPerformance).toMatchObject({ ttftMs: null, outputTokensPerSecond: null });
+    expect(snap.performance?.avgTtftMs).toBe(1200);
   });
 });

@@ -69,6 +69,17 @@ describe("getOverview", () => {
     vi.unstubAllGlobals();
   });
 
+  it("sends the selected source along with the time range", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await getOverview("all", Date.now(), "pi");
+    const url = new URL(String(fetchMock.mock.calls[0]![0]), "http://localhost");
+    expect(url.searchParams.get("source")).toBe("pi");
+    expect(url.searchParams.has("since")).toBe(false);
+    await getOverview();
+    expect(new URL(String(fetchMock.mock.calls[1]![0]), "http://localhost").searchParams.has("source")).toBe(false);
+  });
+
   it("sends the browser timezone so daily totals follow local calendar days", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
       new Response(JSON.stringify({}), {

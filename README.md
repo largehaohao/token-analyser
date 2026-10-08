@@ -41,7 +41,19 @@ changes are watched. The database schema is internal to Cursor and may change.
 Zero-valued Cursor token placeholders are treated as missing telemetry, not
 measured zero. The UI shows `—` for missing usage and `≥` for partial totals.
 TTFT and tok/s stay unavailable for logs that do not record the required timings.
+The request detail table and its expanded rows show TTFT (seconds) and tok/s
+for each LLM call. Request-level `time_to_first_token_ms` / `ttft_ms`,
+`duration_ms`, and `output_tokens_per_second` fields are read from the call's
+metadata (including `metrics`, `timing`, or `request_performance`). Recorded
+speed takes precedence; otherwise tok/s is output tokens divided by the
+recorded request duration, including first-token wait. Task-level measurements
+are kept in the summary and are not copied into individual request rows.
 
+Use the visible **会话来源** buttons below the header to select all sources,
+Codex, Claude Code, Cursor, or pi in both the overview and session detail views.
+Their counts include all discovered root sessions across all time. The default
+7-day range can hide older sessions; **查看全部时间** reveals that history.
+The selected source is restored on reload and browser back navigation.
 Search the session list by source name, model, directory, or session ID.
 Claude streaming records sharing a message ID are combined using the latest
 reported usage fields. Claude subagent paths identify their parent session.

@@ -1,4 +1,5 @@
 import { overviewQuery, type SessionRangeId } from "./session-range";
+import type { SessionSourceFilter } from "./session-source";
 
 export type Cost = {
   raw: number;
@@ -18,6 +19,13 @@ export type PerformanceSummary = {
   speedSampleCount: number;
   avgTtftMs: number | null;
   outputTokensPerSecond: number | null;
+};
+
+export type RequestPerformance = {
+  ttftMs: number | null;
+  durationMs: number | null;
+  outputTokensPerSecond: number | null;
+  speedSource: "recorded" | "duration" | null;
 };
 
 export type WasteToggleId =
@@ -61,6 +69,7 @@ export type Turn = {
   } | null;
   usageRecorded?: boolean;
   response?: string;
+  requestPerformance?: RequestPerformance;
   prompt: string;
   tools: {
     name: string;
@@ -264,9 +273,11 @@ export async function listSessions(): Promise<SessionListItem[]> {
 export async function getOverview(
   range: SessionRangeId = "7d",
   nowMs = Date.now(),
+  source: SessionSourceFilter = "all",
 ): Promise<Overview> {
   const query = overviewQuery(range, nowMs);
   const params = new URLSearchParams();
+  if (source !== "all") params.set("source", source);
   if (query.since) params.set("since", query.since);
   params.set("days", String(query.days));
   params.set(

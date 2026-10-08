@@ -1,6 +1,7 @@
 import { preview, sha256 } from "./hash.ts";
 import { effectiveRateCard, priceUsage, tokenPricingForModel } from "./rate-card.ts";
 import { formatArgv } from "./exec-command.ts";
+import { requestPerformance } from "./performance.ts";
 import type {
   RolloutLine,
   SessionMeta,
@@ -544,6 +545,7 @@ export class LedgerBuilder {
           prompt,
           tools: this.window.tools,
           usage: lastUsage,
+          requestPerformance: requestPerformance(lastUsage.output_tokens, payload, info?.last_token_usage),
           cost: priceUsage(
             lastUsage,
             this.turnContext.model,

@@ -56,6 +56,14 @@ export type PerformanceSummary = {
   outputTokensPerSecond: number | null;
 };
 
+/** Timing recorded for one model request, independent of task-level timing. */
+export type RequestPerformance = {
+  ttftMs: number | null;
+  durationMs: number | null;
+  outputTokensPerSecond: number | null;
+  speedSource: "recorded" | "duration" | null;
+};
+
 export type Bucket =
   | "planning"
   | "reading"
@@ -90,6 +98,7 @@ export type Turn = {
   pricing?: TokenPricing | null;
   usageRecorded?: boolean;
   response?: string;
+  requestPerformance?: RequestPerformance;
   prompt: string;
   tools: ToolCall[];
   usage: TokenUsage;

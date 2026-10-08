@@ -2,6 +2,7 @@ import path from "node:path";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { preview, sha256 } from "./hash.ts";
 import { nativeCost } from "./native-pricing.ts";
+import { requestPerformance } from "./performance.ts";
 import type { RolloutLine, SessionMeta, SessionSource, TaskTiming, TokenUsage, ToolCall, Turn } from "./types.ts";
 
 export function record(value: unknown): Record<string, unknown> {
@@ -199,6 +200,7 @@ export function parseNativeSession(events: RolloutLine[], filePath: string, sour
       endedAt: iso(call.event.timestamp) || iso(message.timestamp) || lastEventAt || "",
       model, effort: text(message.thinkingLevel) || call.effort, fastMode: fast,
       pricing: native.pricing, usageRecorded: usage != null,
+      requestPerformance: requestPerformance(usage?.output_tokens ?? null, message, message.usage, call.event),
       prompt: call.prompt, response: contentText(message.content ?? call.event.content),
       tools: toolData.tools, usage: usage ?? { input_tokens: 0, cached_input_tokens: 0,
         cache_write_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 0 },

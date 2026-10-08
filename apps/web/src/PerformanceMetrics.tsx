@@ -1,15 +1,7 @@
 import type { PerformanceSummary } from "./api";
+import { formatPerformanceNumber } from "./format";
 
 type Props = { performance?: PerformanceSummary };
-
-function formatNumber(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value) || value < 0) return "—";
-  if (value > 0 && value < 0.01) return "<0.01";
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
 
 export function PerformanceMetrics({ performance }: Props) {
   const ttft = performance?.avgTtftMs;
@@ -20,7 +12,7 @@ export function PerformanceMetrics({ performance }: Props) {
         <article className="performance-card">
           <h2>平均 TTFT</h2>
           <div className="performance-value" data-testid="ttft-value">
-            {formatNumber(ttft == null ? null : ttft / 1000)} <small>s</small>
+            {formatPerformanceNumber(ttft == null ? null : ttft / 1000)} <small>s</small>
           </div>
           <p>
             {ttft == null
@@ -31,7 +23,7 @@ export function PerformanceMetrics({ performance }: Props) {
         <article className="performance-card">
           <h2>任务平均 tok/s</h2>
           <div className="performance-value" data-testid="token-speed-value">
-            {formatNumber(speed)} <small>tok/s</small>
+            {formatPerformanceNumber(speed)} <small>tok/s</small>
           </div>
           <p>
             {speed == null

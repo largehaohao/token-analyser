@@ -2,6 +2,12 @@ import type { Cost, SessionSource } from "./api";
 
 export type CostUnit = "tokens" | "credits" | "usd";
 
+export function formatPerformanceNumber(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value) || value < 0) return "—";
+  if (value > 0 && value < 0.01) return "<0.01";
+  return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 const relativeFormatter = new Intl.RelativeTimeFormat("zh-CN", {
   numeric: "auto",
 });

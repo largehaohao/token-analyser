@@ -16,6 +16,44 @@ function gate() {
   return { promise, release };
 }
 
+test("per-request TTFT and tok/s show recorded, calculated, and missing measurements", async ({ page }, testInfo) => {
+  const id = "request-performance-e2e";
+  const now = Date.now() - 20000;
+  const usage = (output: number) => ({ input_tokens: 1000, cached_input_tokens: 0, cache_write_input_tokens: 0,
+    output_tokens: output, reasoning_output_tokens: 0, total_tokens: 1000 + output });
+  const rows = [
+    { type: "session_meta", payload: { id, cwd: "/request-performance-test" } },
+    { type: "turn_context", payload: { model: "gpt-6.1-sol" } },
+    { type: "event_msg", payload: { type: "task_started", turn_id: "task" } },
+    { type: "event_msg", payload: { type: "token_count", request_performance: { ttft_ms: 250, duration_ms: 1000, tokens_per_second: 75 }, info: { last_token_usage: usage(100), total_token_usage: usage(100) } } },
+    { type: "event_msg", payload: { type: "token_count", request_performance: { ttft_ms: 500, duration_ms: 2000 }, info: { last_token_usage: usage(100), total_token_usage: usage(200) } } },
+    { type: "event_msg", payload: { type: "token_count", info: { last_token_usage: usage(100), total_token_usage: usage(300) } } },
+    { type: "event_msg", payload: { type: "task_complete", turn_id: "task", duration_ms: 10000, time_to_first_token_ms: 1500 } },
+  ].map((row, i) => JSON.stringify({ timestamp: new Date(now + i * 1000).toISOString(), ...row })).join("\n") + "\n";
+  const res = await page.request.post("/import", { headers: { "Content-Type": "application/x-ndjson", "X-Filename": "request-performance.jsonl" }, data: rows });
+  expect(res.ok()).toBe(true);
+  await page.goto("/#sessions");
+  await page.getByRole("button", { name: "全部", exact: true }).click();
+  await page.getByRole("searchbox", { name: "筛选会话" }).fill(id);
+  await page.locator(".session-main").first().click();
+  await expect(page.getByRole("columnheader", { name: "TTFT (s)" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "tok/s", exact: true })).toBeVisible();
+  const requests = page.locator(".turn-table tbody tr:not(.turn-detail-row)").filter({ has: page.locator(".turn-expand") });
+  await expect(requests).toHaveCount(3);
+  await expect(requests.nth(0).locator("td.turn-performance")).toHaveText(["—", "—"]);
+  await expect(requests.nth(1).locator("td.turn-performance")).toHaveText(["0.50", "50.00"]);
+  await expect(requests.nth(2).locator("td.turn-performance")).toHaveText(["0.25", "75.00"]);
+  await requests.nth(1).getByRole("button").click();
+  await expect(page.getByLabel("本次 LLM 请求性能")).toContainText("50.00 tok/s");
+  await expect(page.locator(".turn-detail")).toContainText("含首 token 等待");
+  await requests.nth(0).getByRole("button").click();
+  await expect(page.getByLabel("本次 LLM 请求性能")).toContainText("— s");
+  await expect(page.locator(".turn-detail")).toContainText("日志未记录本次请求的 TTFT");
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator(".turn-detail").screenshot({ path: testInfo.outputPath("request-performance-mobile.png") });
+});
+
 test("Fast pricing follows desktop tier changes and shows effective token rates", async ({ page }, testInfo) => {
   const id = "fast-pricing-e2e";
   const now = Date.now() - 10_000;
@@ -357,9 +395,14 @@ test("import blocks duplicate drops, shows pending state, and opens historical r
     await route.fulfill({ json: snapshot });
   });
   await openSessions(page);
-  await page.getByRole("button", { name: "5小时" }).click();
+  await page.getByRole("button", { name: "5小时", exact: true }).click();
   const picker = page.getByRole("button", { name: "选择文件", exact: true });
-  const before = await picker.boundingBox();
+  // Layout coordinates exclude browser scroll anchoring after a range change.
+  const pickerLayout = () => picker.evaluate((element) => ({
+    x: element.offsetLeft, y: element.offsetTop,
+    width: element.offsetWidth, height: element.offsetHeight,
+  }));
+  const before = await pickerLayout();
   await page.getByLabel("选择会话 JSONL 文件").setInputFiles({
     name: "historical.jsonl",
     mimeType: "application/x-ndjson",
@@ -370,7 +413,7 @@ test("import blocks duplicate drops, shows pending state, and opens historical r
   await expect(page.locator("#import-feedback")).toContainText(
     "正在导入 historical.jsonl",
   );
-  expect(await picker.boundingBox()).toEqual(before);
+  expect(await pickerLayout()).toEqual(before);
   const drop = await page.evaluateHandle(() => {
     const data = new DataTransfer();
     data.items.add(

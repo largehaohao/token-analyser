@@ -4,6 +4,7 @@ import {
   type SessionRangeId,
 } from "./session-range";
 import { SESSION_PAGE_SIZE } from "./session-page";
+import { normalizeSourceFilter, type SessionSourceFilter } from "./session-source";
 
 export type SessionNavigationView = "overview" | "sessions";
 
@@ -11,6 +12,7 @@ export type SessionNavigation = {
   view: SessionNavigationView;
   selectedId: string | null;
   range: SessionRangeId;
+  source: SessionSourceFilter;
 };
 
 const STORAGE_KEY = "token-analyser.navigation.v1";
@@ -18,6 +20,7 @@ const DEFAULT_NAVIGATION: SessionNavigation = {
   view: "overview",
   selectedId: null,
   range: DEFAULT_SESSION_RANGE,
+  source: "all",
 };
 
 function storage(): Storage | null {
@@ -52,6 +55,7 @@ export function readSessionNavigation(): SessionNavigation {
         range:
           SESSION_RANGES.find((item) => item.id === record.range)?.id ??
           DEFAULT_SESSION_RANGE,
+        source: normalizeSourceFilter(record.source),
       };
     }
   } catch {

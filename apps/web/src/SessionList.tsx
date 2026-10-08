@@ -31,14 +31,14 @@ import {
   writeSessionListState,
 } from "./session-navigation";
 import { Button, Icon, SearchField, StatePanel } from "./ui";
+import { sourceEmptyCopy, type SessionSourceFilter } from "./session-source";
 
-const EMPTY_COPY =
-  "在本机运行 Codex、Claude Code、Cursor 或 pi 后，会话会自动出现在这里。也可以选择或拖入已有的 JSONL 记录。";
 const EMPTY_RANGE_COPY = "该时间范围内没有会话";
 
 type ContextBucketId = "tools" | "skills";
 
 type Props = {
+  source: SessionSourceFilter;
   sessions: SessionListItem[];
   totalCount: number;
   selectedId: string | null;
@@ -53,6 +53,7 @@ type Props = {
 };
 
 export function SessionList({
+  source,
   sessions,
   totalCount,
   selectedId,
@@ -312,7 +313,7 @@ export function SessionList({
           compact
           kind="empty"
           title="还没有会话"
-          description={EMPTY_COPY}
+          description={sourceEmptyCopy(source)}
         />
       ) : filtered.length === 0 ? (
         <StatePanel
