@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Turn } from "./api";
 import { LABEL_CHIP, treeAppearance } from "./buckets";
 import {
-  formatCompactTokens,
+  formatCostTokens,
   formatCost,
   formatCostTitle,
   formatExactTokens,
@@ -206,7 +206,7 @@ export function TurnTable({
                               className="badge fast turn-fast"
                               title={
                                 t.pricing
-                                  ? `该轮使用 Fast；购入 credits 费用 ×${t.pricing.multiplier}`
+                                  ? `该轮使用 Fast；${t.pricing.unit === "usd" ? "USD" : "购入 credits"} 费用 ×${t.pricing.multiplier}`
                                   : t.cost.credits == null
                                     ? "该轮使用 Fast；模型尚未定价"
                                     : "该轮使用 Fast；费用倍率按模型费率计算"
@@ -253,7 +253,7 @@ export function TurnTable({
                           title={formatCostTitle(t.cost, unit)}
                         >
                           {unit === "tokens"
-                            ? formatCompactTokens(t.cost.raw)
+                            ? formatCostTokens(t.cost)
                             : formatCost(t.cost, unit)}
                         </td>
                       </tr>
@@ -277,29 +277,30 @@ export function TurnTable({
                                   {t.fastMode ? "Fast" : "Standard"}
                                   {t.pricing
                                     ? ` ×${t.pricing.multiplier}`
-                                    : t.cost.credits == null ? " · 未定价" : ""}
+                                    : t.cost.credits == null && t.cost.usd == null ? " · 未定价" : t.cost.usd != null && t.cost.credits == null ? " · 日志费用" : ""}
                                 </dd>
                               </div>
                               <div>
                                 <dt>总 Token</dt>
-                                <dd>{formatExactTokens(t.cost.raw)}</dd>
+                                <dd>{t.usageRecorded === false ? "用量未记录" : formatExactTokens(t.cost.raw)}</dd>
                               </div>
                               <div>
                                 <dt>未缓存输入</dt>
                                 <dd>
-                                  {formatExactTokens(t.cost.uncached_input)}
+                                  {t.usageRecorded === false ? "—" : formatExactTokens(t.cost.uncached_input)}
                                 </dd>
                               </div>
                               <div>
                                 <dt>缓存输入</dt>
                                 <dd>
-                                  {formatExactTokens(t.cost.cached_input)}
+                                  {t.usageRecorded === false ? "—" : formatExactTokens(t.cost.cached_input)}
                                 </dd>
                               </div>
                               <div>
                                 <dt>输出</dt>
-                                <dd>{formatExactTokens(t.cost.output)}</dd>
+                                <dd>{t.usageRecorded === false ? "—" : formatExactTokens(t.cost.output)}</dd>
                               </div>
+                              {t.usage.cache_write_input_tokens > 0 && <div><dt>缓存写入（含于输入）</dt><dd>{formatExactTokens(t.usage.cache_write_input_tokens)}</dd></div>}
                               <div>
                                 <dt>Credits</dt>
                                 <dd title={formatCostTitle(t.cost, "credits")}>
@@ -318,13 +319,15 @@ export function TurnTable({
                                 className="turn-evidence-meta"
                                 aria-label="Token 单价"
                               >
-                                每百万 token（credits）：未缓存输入{" "}
+                                每百万 token（{t.pricing.unit === "usd" ? "USD" : "credits"}）：未缓存输入{" "}
                                 {formatTokenRate(t.pricing.input)} · 缓存输入{" "}
                                 {formatTokenRate(t.pricing.cached)} · 输出{" "}
                                 {formatTokenRate(t.pricing.output)}
+                                {t.pricing.cacheWrite != null ? ` · 缓存写入 ${formatTokenRate(t.pricing.cacheWrite)}（5 分钟）` : ""}
                               </p>
                             )}
                             <div className="turn-detail-grid">
+                              {t.response ? <div><h4>回复</h4><pre>{t.response}</pre></div> : null}
                               <div>
                                 <h4>提示</h4>
                                 <pre>{t.prompt || "（无用户提示）"}</pre>

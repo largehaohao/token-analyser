@@ -251,7 +251,7 @@ function windowedWaste(session: SessionSnapshot, sinceMs?: number): Cost {
     if (!inWindow.has(id)) continue;
     waste = addKnownCost(waste, byId.get(id)!.cost);
   }
-  return waste.raw === 0 ? emptyCost() : waste;
+  return normalizeCost(waste);
 }
 
 function filterSessionTurns(
@@ -277,7 +277,7 @@ function sliceKey(turn: Turn, nested: boolean): OverviewSliceKey {
 }
 
 function normalizeCost(cost: Cost): Cost {
-  return cost.raw === 0 ? emptyCost() : cost;
+  return cost.raw === 0 && !cost.unmeasured && !cost.usd ? emptyCost() : cost;
 }
 
 function makeDay(date: string, cost: Cost, flagged: Cost, unpricedRaw: number): OverviewDay {
@@ -336,7 +336,7 @@ export function buildOverview(
     turnCount += countTurns(ranged);
 
     walkTurns(ranged, (turn, flagged, nested) => {
-      if (turn.cost.credits == null) unpricedRaw += turn.cost.raw;
+      if (turn.cost.credits == null && turn.cost.usd == null) unpricedRaw += turn.cost.raw;
       cost = addKnownCost(cost, turn.cost);
       const key = sliceKey(turn, nested);
       slices[key] = addKnownCost(slices[key], turn.cost);
@@ -348,7 +348,7 @@ export function buildOverview(
       };
       prev.cost = addKnownCost(prev.cost, turn.cost);
       prev.turnCount += 1;
-      if (turn.cost.credits == null) prev.unpricedRaw += turn.cost.raw;
+      if (turn.cost.credits == null && turn.cost.usd == null) prev.unpricedRaw += turn.cost.raw;
       models.set(model, prev);
 
       const day = calendarDay(
@@ -356,7 +356,7 @@ export function buildOverview(
         timezoneFormatter,
         timezoneOffsetMinutes,
       );
-      const unpriced = turn.cost.credits == null ? turn.cost.raw : 0;
+      const unpriced = turn.cost.credits == null && turn.cost.usd == null ? turn.cost.raw : 0;
       if (day && dayCosts.has(day)) {
         dayCosts.set(day, addKnownCost(dayCosts.get(day)!, turn.cost));
         dayUnpriced.set(day, (dayUnpriced.get(day) ?? 0) + unpriced);
@@ -383,12 +383,12 @@ export function buildOverview(
       dayUnpriced.get(date) ?? 0,
     ),
   );
-  if (overflow.raw !== 0 || overflowFlagged.raw !== 0) {
+  if (overflow.raw !== 0 || overflowFlagged.raw !== 0 || overflow.unmeasured || overflow.usd) {
     chartDays.unshift(
       makeDay(OVERVIEW_EARLIER_DATE, overflow, overflowFlagged, overflowUnpriced),
     );
   }
-  if (later.raw !== 0 || laterFlagged.raw !== 0) {
+  if (later.raw !== 0 || laterFlagged.raw !== 0 || later.unmeasured || later.usd) {
     chartDays.push(makeDay(OVERVIEW_LATER_DATE, later, laterFlagged, laterUnpriced));
   }
 

@@ -10,6 +10,9 @@ import {
 } from "./cache.ts";
 import type { ParseError, RolloutLine, SessionSnapshot } from "./types.ts";
 import { effectiveRateCard } from "./rate-card.ts";
+import { loadApiPrices } from "./native-pricing.ts";
+import { detectSource } from "./session-adapters.ts";
+import { readCursorSessions } from "./cursor-store.ts";
 
 export const READ_CHUNK_BYTES = 64 * 1024;
 
@@ -139,7 +142,7 @@ export function ingestFile(
 ): SessionSnapshot {
   const st = statSync(filePath);
   const live = isLive(st.mtimeMs);
-  const key = cacheKey(filePath, JSON.stringify(effectiveRateCard()));
+  const key = cacheKey(filePath, pricingCacheContext());
 
   if (!live) {
     const cached = readCache(key, opts?.cacheHome);
@@ -169,7 +172,8 @@ export function ingestFile(
       ? [...previous.parse_errors, ...details.parse_errors]
       : details.parse_errors;
     const info = extractSessionInfo(events);
-    if (canAppend && previous.builder) {
+    const codex = (detectSource(events, filePath) ?? "codex") === "codex";
+    if (codex && canAppend && previous.builder) {
       const prev = previous.builder.identity();
       if (prev.id === info.id && prev.isSubagent === info.isSubagent) {
         previous.builder.consume(details.events);
@@ -178,7 +182,7 @@ export function ingestFile(
         builder = new LedgerBuilder(info.id, { isSubagent: info.isSubagent });
         builder.consume(events);
       }
-    } else {
+    } else if (codex) {
       builder = new LedgerBuilder(info.id, { isSubagent: info.isSubagent });
       builder.consume(events);
     }
@@ -211,4 +215,17 @@ export function ingestFile(
   }
 
   return snapshot;
+}
+
+export function pricingCacheContext(): string {
+  return JSON.stringify([effectiveRateCard(), loadApiPrices()]);
+}
+
+/** A Cursor database contains many sessions; JSONL contains one. */
+export function ingestSessions(filePath: string, opts?: IngestOptions): SessionSnapshot[] {
+  if (!filePath.endsWith(".vscdb")) return [ingestFile(filePath, opts)];
+  return readCursorSessions(filePath).map((events) => {
+    const snapshot = analyseSession({ events, path: filePath, live: false, parse_errors: [] });
+    return { ...snapshot, live: snapshot.lastEventAt != null && isLive(Date.parse(snapshot.lastEventAt)) };
+  });
 }

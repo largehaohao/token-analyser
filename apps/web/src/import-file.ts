@@ -15,7 +15,7 @@ export async function readDroppedFile(file: {
 }): Promise<{ filename: string; text: string }> {
   if (!isImportableFilename(file.name)) {
     throw new Error(
-      "只支持 .jsonl / .ndjson 文件，请重新选择 Codex 会话记录。",
+      "只支持 .jsonl / .ndjson 文件，请重新选择会话记录。",
     );
   }
   if (file.size != null && file.size > MAX_IMPORT_BYTES) {

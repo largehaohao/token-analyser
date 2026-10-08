@@ -15,6 +15,8 @@ export type TokenUsage = {
   total_tokens: number;
 };
 
+export type SessionSource = "codex" | "claude" | "cursor" | "pi";
+
 export type Cost = {
   raw: number;
   uncached_input: number;
@@ -22,6 +24,8 @@ export type Cost = {
   output: number;
   credits: number | null;
   usd: number | null;
+  /** Calls whose log contains no measured token usage. */
+  unmeasured?: number;
 };
 
 /** Effective purchased-credit rates per million tokens for one call. */
@@ -31,6 +35,8 @@ export type TokenPricing = {
   input: number;
   cached: number;
   output: number;
+  unit?: "credits" | "usd";
+  cacheWrite?: number;
 };
 
 export type TaskTiming = {
@@ -82,6 +88,8 @@ export type Turn = {
   /** Fast service tier recorded for this turn. */
   fastMode: boolean;
   pricing?: TokenPricing | null;
+  usageRecorded?: boolean;
+  response?: string;
   prompt: string;
   tools: ToolCall[];
   usage: TokenUsage;
@@ -155,6 +163,10 @@ export type RateCard = {
 
 export type SessionSnapshot = {
   id: string;
+  source?: SessionSource;
+  sourceId?: string;
+  messageCount?: number;
+  forkedFrom?: string;
   parentId: string | null;
   nickname: string | null;
   cwd: string | null;
@@ -183,6 +195,9 @@ export type SessionSnapshot = {
 
 export type SessionListItem = {
   id: string;
+  source?: SessionSource;
+  sourceId?: string;
+  messageCount?: number;
   parentId: string | null;
   nickname: string | null;
   cwd: string | null;
@@ -213,6 +228,7 @@ export type SessionMeta = {
 };
 
 export type RolloutLine = {
+  [key: string]: unknown;
   timestamp: string;
   type: string;
   ordinal?: number;
@@ -241,6 +257,8 @@ export function addCost(a: Cost, b: Cost): Cost {
     output: a.output + b.output,
     credits,
     usd,
+    ...((a.unmeasured ?? 0) + (b.unmeasured ?? 0) > 0
+      ? { unmeasured: (a.unmeasured ?? 0) + (b.unmeasured ?? 0) } : {}),
   };
 }
 
@@ -267,6 +285,8 @@ export function addKnownCost(a: Cost, b: Cost): Cost {
     output: a.output + b.output,
     credits,
     usd,
+    ...((a.unmeasured ?? 0) + (b.unmeasured ?? 0) > 0
+      ? { unmeasured: (a.unmeasured ?? 0) + (b.unmeasured ?? 0) } : {}),
   };
 }
 

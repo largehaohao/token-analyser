@@ -18,6 +18,7 @@ import {
 } from "./pricing-update.ts";
 import { SessionStore, type SessionIngestOptions } from "./store.ts";
 import { watchSessions } from "./watch.ts";
+import { collectSessionFiles, isSessionFile } from "./session-files.ts";
 import type { SessionSnapshot, WasteToggleId } from "./types.ts";
 
 const CORS_ORIGIN = "http://127.0.0.1:7788";
@@ -96,10 +97,6 @@ function parsePathname(url: string | undefined): string {
   return new URL(url ?? "/", "http://localhost").pathname;
 }
 
-function isRolloutJsonl(name: string): boolean {
-  return name.startsWith("rollout-") && name.endsWith(".jsonl");
-}
-
 function isImportFilename(name: string): boolean {
   const lower = name.toLowerCase();
   return lower.endsWith(".jsonl") || lower.endsWith(".ndjson");
@@ -174,33 +171,6 @@ function removeFailedImport(filePath: string): void {
   } catch {
     // The failed copy may already have been removed by another process.
   }
-}
-
-function collectRolloutFiles(roots: string[]): string[] {
-  const results: string[] = [];
-
-  function walk(dir: string): void {
-    if (!existsSync(dir)) return;
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (isRolloutJsonl(entry.name)) {
-        results.push(full);
-      }
-    }
-  }
-
-  for (const root of roots) {
-    walk(root);
-  }
-  return results;
 }
 
 function errorIdFromPath(filePath: string): string {
@@ -318,7 +288,7 @@ async function handleImport(
     }
 
     const filePath = body && typeof body.path === "string" ? body.path : undefined;
-    if (!filePath || !path.isAbsolute(filePath) || !filePath.endsWith(".jsonl")) {
+    if (!filePath || !path.isAbsolute(filePath) || !isSessionFile(filePath)) {
       sendJson(res, 400, { error: "invalid_path" });
       return;
     }
@@ -491,7 +461,9 @@ export async function startServer(opts?: {
     }
 
     const pathname = parsePathname(req.url);
-    const parts = pathname.split("/").filter(Boolean);
+    let parts: string[];
+    try { parts = pathname.split("/").filter(Boolean).map(decodeURIComponent); }
+    catch { sendJson(res, 400, { error: "invalid_path" }); return; }
 
     if (req.method === "GET" && parts[0] === "sessions" && parts.length === 1) {
       sendJson(res, 200, { sessions: store.list() });
@@ -563,7 +535,7 @@ export async function startServer(opts?: {
         res,
         200,
         store.overview({
-          watchPath: config.watch_paths[0] ?? "",
+          watchPath: config.watch_paths.join("\n"),
           collecting: process.env.FIXTURE_DIR == null,
           ...(Number.isFinite(sinceMs) ? { sinceMs } : {}),
           ...(Number.isFinite(dayCount) && dayCount > 0
@@ -730,7 +702,7 @@ async function main(): Promise<void> {
       }
     }
   } else {
-    store.refresh(collectRolloutFiles(config.watch_paths), {
+    store.refresh(collectSessionFiles(config.watch_paths), {
       onError: (filePath, err) => {
         ingestErrors.push({ id: errorIdFromPath(filePath), reason: err.message });
         console.error(`ingest failed ${filePath}: ${err.message}`);

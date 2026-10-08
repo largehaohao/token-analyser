@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { defaultSessionPaths } from "./session-files.ts";
 
 export type UserConfig = {
   watch_paths: string[];
@@ -8,7 +9,7 @@ export type UserConfig = {
 };
 
 function defaultWatchPaths(): string[] {
-  return [path.join(homedir(), ".codex/sessions")];
+  return defaultSessionPaths();
 }
 
 export function tokenAnalyserHome(): string {

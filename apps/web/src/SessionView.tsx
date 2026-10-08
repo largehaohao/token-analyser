@@ -4,7 +4,9 @@ import { useUnit } from "./UnitContext";
 import {
   cacheHitRatio,
   disclaimer,
-  formatCompactTokens,
+  formatCostTokens,
+  sourceLabel,
+  usageNote,
   formatCost,
   formatCostTitle,
   formatPercent,
@@ -131,6 +133,7 @@ export function SessionView({
         </span>
       </header>
       <p className="session-kicker">
+        <span className="badge">{sourceLabel(snapshot.source)}</span>
         {snapshot.live && <span className="badge live">LIVE</span>}
         {snapshot.fastMode && (
           <span
@@ -147,6 +150,8 @@ export function SessionView({
           <RelativeTime iso={snapshot.lastEventAt ?? snapshot.startedAt} />
         </span>
       </p>
+      {snapshot.cost.unmeasured ? <p className="banner" role="status">{usageNote(snapshot.cost)}对话和工具调用仍可展开查看。</p> : null}
+      {snapshot.forkedFrom ? <p className="source-path">分叉自：{snapshot.forkedFrom} · 已识别的继承记录不重复计费。</p> : null}
 
       <header className="session-headline">
         <div className="chart-card headline-main">
@@ -160,7 +165,7 @@ export function SessionView({
                 title={formatCostTitle(snapshot.cost, unit)}
               >
                 {unit === "tokens"
-                  ? formatCompactTokens(snapshot.cost.raw)
+                  ? formatCostTokens(snapshot.cost)
                   : formatCost(snapshot.cost, unit)}
               </span>
               <small>
@@ -176,7 +181,7 @@ export function SessionView({
                 title={formatCostTitle(snapshot.waste, unit)}
               >
                 {unit === "tokens"
-                  ? formatCompactTokens(snapshot.waste.raw)
+                  ? formatCostTokens(snapshot.waste)
                   : formatCost(snapshot.waste, unit)}
               </span>
               <small>
@@ -314,7 +319,7 @@ export function SessionView({
                   }
                 />
                 账本校验{" "}
-                <strong>{snapshot.ledger_warning ? "需复核" : "通过"}</strong>
+                <strong>{snapshot.source && snapshot.source !== "codex" ? "按原始消息用量统计" : snapshot.ledger_warning ? "需复核" : "通过"}</strong>
               </span>
             </div>
             <p className="source-path">会话 ID：{snapshot.id}</p>

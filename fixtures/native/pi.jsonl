@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"native-pi","timestamp":"2026-10-08T00:00:00.000Z","cwd":"/workspace/demo"}
+{"type":"session_info","id":"info","parentId":null,"timestamp":"2026-10-08T00:00:00.000Z","name":"pi demo"}
+{"type":"message","id":"u1","parentId":"info","timestamp":"2026-10-08T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Read the README"}]}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-10-08T00:00:02.000Z","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet-4-6","content":[{"type":"text","text":"README reviewed."},{"type":"toolCall","id":"tool1","name":"read","arguments":{"path":"README.md"}}],"usage":{"input":100,"output":10,"cacheRead":200,"cacheWrite":50,"totalTokens":360,"cost":{"input":0.0003,"output":0.00015,"cacheRead":0.00006,"cacheWrite":0.0001875,"total":0.0006975}}}}
+{"type":"message","id":"r1","parentId":"a1","timestamp":"2026-10-08T00:00:03.000Z","message":{"role":"toolResult","toolCallId":"tool1","content":[{"type":"text","text":"Demo README"}]}}

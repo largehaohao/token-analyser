@@ -4,12 +4,14 @@ import { buildTree } from "./tree.ts";
 import { computeWaste } from "./waste.ts";
 import {
   ingestFile,
+  ingestSessions,
+  pricingCacheContext,
   clearLiveReadState,
   pruneInactiveLiveReadStates,
   type IngestOptions,
 } from "./ingest.ts";
 import { isLive, pruneStaleCache } from "./cache.ts";
-import { effectiveRateCard } from "./rate-card.ts";
+import { isSessionFile } from "./session-files.ts";
 import { collectTaskTimings, summarizePerformance } from "./performance.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
@@ -36,7 +38,7 @@ function latestActivityIso(session: SessionSnapshot): string | null {
 function unpricedRawFromSession(session: SessionSnapshot): number {
   let raw = 0;
   for (const turn of session.turns) {
-    if (turn.cost.credits == null) raw += turn.cost.raw;
+    if (turn.cost.credits == null && turn.cost.usd == null) raw += turn.cost.raw;
   }
   for (const child of session.children) raw += unpricedRawFromSession(child);
   return raw;
@@ -67,6 +69,9 @@ function rebuildDerived(snap: SessionSnapshot): SessionSnapshot {
 function toListItem(snap: SessionSnapshot): SessionListItem {
   return {
     id: snap.id,
+    source: snap.source,
+    sourceId: snap.sourceId,
+    messageCount: snap.messageCount,
     parentId: snap.parentId,
     nickname: snap.nickname,
     cwd: snap.cwd,
@@ -109,7 +114,7 @@ export class SessionStore {
     if (opts?.cacheDir) {
       this.cacheHome = path.dirname(opts.cacheDir);
     }
-    pruneStaleCache(this.cacheHome, JSON.stringify(effectiveRateCard()));
+    pruneStaleCache(this.cacheHome, pricingCacheContext());
   }
 
   private rebuildAll(): void {
@@ -153,6 +158,11 @@ export class SessionStore {
     pruneInactiveLiveReadStates();
     let changed = false;
     for (const [id, source] of this.sources) {
+      if (source.path.endsWith(".vscdb")) {
+        const live = source.lastEventAt != null && isLive(Date.parse(source.lastEventAt));
+        if (live !== source.live) { this.sources.set(id, { ...source, live }); changed = true; }
+        continue;
+      }
       let live = source.live;
       try {
         if (existsSync(source.path)) live = isLive(statSync(source.path).mtimeMs);
@@ -195,11 +205,9 @@ export class SessionStore {
   ): void {
     const ingested: SessionSnapshot[] = [];
     for (const p of paths) {
-      if (!p.endsWith(".jsonl")) continue;
-      const base = path.basename(p);
-      if (!base.startsWith("rollout-")) continue;
+      if (!isSessionFile(p)) continue;
       try {
-        ingested.push(ingestFile(p, { cacheHome: this.cacheHome }));
+        ingested.push(...ingestSessions(p, { cacheHome: this.cacheHome }));
       } catch (err) {
         opts?.onError?.(
           p,
@@ -214,6 +222,7 @@ export class SessionStore {
     }
     this.sources.clear();
     for (const snap of ingested) {
+      if (this.sources.get(snap.id)?.path.endsWith(".vscdb") && !snap.path.endsWith(".vscdb")) continue;
       this.sources.set(snap.id, { ...snap, children: [] });
     }
     this.rebuildAll();
@@ -223,15 +232,15 @@ export class SessionStore {
     const refreshedSources = new Map<string, SessionSnapshot>();
     const refreshedToggles = new Map<string, Record<WasteToggleId, boolean>>();
 
-    for (const [id, source] of this.sources) {
-      const refreshed = ingestFile(source.path, { cacheHome: this.cacheHome });
-      refreshedSources.set(refreshed.id, { ...refreshed, children: [] });
-      refreshedToggles.set(
-        refreshed.id,
-        this.toggles.get(id) ?? this.toggles.get(refreshed.id) ?? {
-          ...refreshed.toggles,
-        },
-      );
+    for (const filePath of new Set([...this.sources.values()].map((source) => source.path))) {
+      for (const refreshed of ingestSessions(filePath, { cacheHome: this.cacheHome })) {
+        if (refreshedSources.get(refreshed.id)?.path.endsWith(".vscdb") && !filePath.endsWith(".vscdb")) continue;
+        refreshedSources.set(refreshed.id, { ...refreshed, children: [] });
+        refreshedToggles.set(
+          refreshed.id,
+          this.toggles.get(refreshed.id) ?? { ...refreshed.toggles },
+        );
+      }
     }
 
     this.sources = refreshedSources;
@@ -242,39 +251,44 @@ export class SessionStore {
 
   removePath(filePath: string): { id: string; parentId: string | null } | undefined {
     const resolved = path.resolve(filePath);
+    let removed: { id: string; parentId: string | null } | undefined;
     for (const [id, source] of this.sources) {
       if (path.resolve(source.path) !== resolved) continue;
       const parentId = source.parentId;
       this.sources.delete(id);
       this.toggles.delete(id);
       clearLiveReadState(source.path);
-      this.rebuildAll();
-      return { id, parentId };
+      removed ??= { id, parentId };
     }
-    return undefined;
+    if (removed) this.rebuildAll();
+    return removed;
   }
 
   ingestPath(
     filePath: string,
     opts?: SessionIngestOptions,
   ): string | undefined {
-    const snap = ingestFile(filePath, {
+    const snapshots = ingestSessions(filePath, {
       cacheHome: this.cacheHome,
       allowAppend: opts?.allowAppend,
     });
-    if (opts?.skipExisting && this.sources.has(snap.id)) return snap.id;
     const resolved = path.resolve(filePath);
+    const ids = new Set(snapshots.map((snap) => snap.id));
     for (const [id, source] of this.sources) {
-      if (id === snap.id) continue;
+      if (ids.has(id)) continue;
       if (path.resolve(source.path) !== resolved) continue;
       this.sources.delete(id);
       this.toggles.delete(id);
     }
-    const currentToggles = this.toggles.get(snap.id);
-    if (!currentToggles) this.toggles.set(snap.id, { ...snap.toggles });
-    this.sources.set(snap.id, { ...snap, children: [] });
+    for (const snap of snapshots) {
+      const existing = this.sources.get(snap.id);
+      if (opts?.skipExisting && existing) continue;
+      if (existing?.path.endsWith(".vscdb") && !filePath.endsWith(".vscdb")) continue;
+      if (!this.toggles.has(snap.id)) this.toggles.set(snap.id, { ...snap.toggles });
+      this.sources.set(snap.id, { ...snap, children: [] });
+    }
     this.rebuildAll();
-    return snap.id;
+    return snapshots[0]?.id;
   }
 
   private rootSnapshots(): SessionSnapshot[] {

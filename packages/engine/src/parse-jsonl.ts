@@ -6,15 +6,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function parseJsonlLine(line: string): RolloutLine {
   const value: unknown = JSON.parse(line);
-  if (!isRecord(value) || typeof value.type !== "string") {
+  if (!isRecord(value) || (typeof value.type !== "string" && typeof value.role !== "string")) {
     throw new Error("JSONL event must be an object with a string type");
   }
   if (value.payload !== undefined && !isRecord(value.payload)) {
     throw new Error("JSONL event payload must be an object");
   }
   return {
+    ...value,
     timestamp: typeof value.timestamp === "string" ? value.timestamp : "",
-    type: value.type,
+    type: typeof value.type === "string" ? value.type : "message",
     ...(typeof value.ordinal === "number" ? { ordinal: value.ordinal } : {}),
     ...(value.payload !== undefined ? { payload: value.payload } : {}),
   };

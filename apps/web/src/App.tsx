@@ -517,7 +517,7 @@ function AppShell() {
               <div>
                 <span className="brand-kicker">本地运行索引</span>
                 <p className="brand-name">Token Analyser</p>
-                <p className="crumb">Codex 本地用量账本</p>
+                <p className="crumb">AI 会话本地用量账本</p>
               </div>
             </div>
             <span className="nav-caption">视图</span>
@@ -744,7 +744,7 @@ function AppShell() {
                     description={
                       sessions.length > 0
                         ? "当前时间范围没有会话，可以切换为全部时间。"
-                        : "运行 Codex 或导入 JSONL 记录，开始查看用量。"
+                        : "运行 Codex、Claude Code、Cursor、pi 或导入 JSONL 记录，开始查看用量。"
                     }
                   >
                     {sessions.length > 0 && (

@@ -7,7 +7,10 @@ export type Cost = {
   output: number;
   credits: number | null;
   usd: number | null;
+  unmeasured?: number;
 };
+
+export type SessionSource = "codex" | "claude" | "cursor" | "pi";
 
 export type PerformanceSummary = {
   taskCount: number;
@@ -53,7 +56,11 @@ export type Turn = {
     input: number;
     cached: number;
     output: number;
+    unit?: "credits" | "usd";
+    cacheWrite?: number;
   } | null;
+  usageRecorded?: boolean;
+  response?: string;
   prompt: string;
   tools: {
     name: string;
@@ -102,6 +109,10 @@ export type ContextProfile = {
 
 export type SessionSnapshot = {
   id: string;
+  source?: SessionSource;
+  sourceId?: string;
+  messageCount?: number;
+  forkedFrom?: string;
   parentId: string | null;
   nickname: string | null;
   cwd: string | null;
@@ -183,6 +194,9 @@ export type OverviewModel = {
 
 export type SessionListItem = {
   id: string;
+  source?: SessionSource;
+  sourceId?: string;
+  messageCount?: number;
   parentId: string | null;
   nickname: string | null;
   cwd: string | null;
@@ -345,7 +359,7 @@ export async function importNdjson(
       throw new Error("文件超过引擎的导入上限，请选择较小的记录。");
     if (status && status < 500)
       throw new Error(
-        "无法识别会话记录，请确认文件来自 Codex，且包含有效的 JSONL 内容。",
+        "无法识别会话记录，请确认文件来自 Codex、Claude Code、Cursor 或 pi，且包含有效的 JSONL 内容。",
       );
     throw new Error(
       "导入结果尚未确认。请先检查会话列表，确认未导入后再重新选择文件。",
@@ -359,6 +373,9 @@ export function sessionSummary(snapshot: SessionSnapshot): SessionListItem {
   const firstError = snapshot.parse_errors?.[0];
   return {
     id: snapshot.id,
+    source: snapshot.source,
+    sourceId: snapshot.sourceId,
+    messageCount: snapshot.messageCount,
     parentId: snapshot.parentId,
     nickname: snapshot.nickname,
     cwd: snapshot.cwd,

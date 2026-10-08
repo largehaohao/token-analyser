@@ -1,4 +1,4 @@
-import type { Cost } from "./api";
+import type { Cost, SessionSource } from "./api";
 
 export type CostUnit = "tokens" | "credits" | "usd";
 
@@ -11,7 +11,7 @@ function relativeTimeFormat(): Intl.RelativeTimeFormat {
 }
 
 export function costValue(cost: Cost, unit: CostUnit): number | null {
-  if (unit === "tokens") return cost.raw;
+  if (unit === "tokens") return cost.raw === 0 && cost.unmeasured ? null : cost.raw;
   if (unit === "credits") return cost.credits;
   return cost.usd;
 }
@@ -61,7 +61,8 @@ function formatUsdNumber(n: number): string {
 export function formatCost(cost: Cost, unit: CostUnit): string {
   const value = costValue(cost, unit);
   if (unit === "tokens") {
-    return (value ?? 0).toLocaleString("en-US");
+    if (value == null) return "—";
+    return `${cost.unmeasured ? "≥ " : ""}${value.toLocaleString("en-US")}`;
   }
   if (value == null) return "—";
   if (unit === "credits") return formatCreditsNumber(value);
@@ -72,7 +73,8 @@ export function formatCost(cost: Cost, unit: CostUnit): string {
 export function formatCostTitle(cost: Cost, unit: CostUnit): string {
   const value = costValue(cost, unit);
   if (unit === "tokens") {
-    return `${(value ?? 0).toLocaleString("en-US")} tokens`;
+    return cost.unmeasured ? `已记录 ${cost.raw.toLocaleString("en-US")} tokens，另有 ${cost.unmeasured} 次调用用量未记录`
+      : `${(value ?? 0).toLocaleString("en-US")} tokens`;
   }
   if (value == null) return "未定价";
   if (unit === "credits") {
@@ -135,11 +137,11 @@ export function unpricedNote(unpricedRaw: number): string {
 }
 
 export function unpricedRawFromTurns(
-  turns: Array<{ cost: { raw: number; credits: number | null } }>,
+  turns: Array<{ cost: { raw: number; credits: number | null; usd?: number | null } }>,
 ): number {
   let raw = 0;
   for (const turn of turns) {
-    if (turn.cost.credits == null) raw += turn.cost.raw;
+    if (turn.cost.credits == null && turn.cost.usd == null) raw += turn.cost.raw;
   }
   return raw;
 }
@@ -227,5 +229,18 @@ export function formatAbsoluteTime(iso: string | null): string {
 }
 
 export function disclaimer(rateCardAsOf: string): string {
-  return `基于本地遥测与 ${rateCardAsOf} 公共费率表的估算，不代表 OpenAI 账单。`;
+  return `基于本地日志与公共费率的估算，不代表 OpenAI 账单或其他服务商账单。Codex credits 费率日期 ${rateCardAsOf}；其他来源的 USD 优先采用日志费用，Claude 无费用时按 API 费率估算。`;
+}
+
+export function sourceLabel(source: SessionSource = "codex"): string {
+  return { codex: "Codex", claude: "Claude Code", cursor: "Cursor", pi: "pi" }[source];
+}
+
+export function formatCostTokens(cost: Cost): string {
+  if (cost.unmeasured && cost.raw === 0) return "—";
+  return `${cost.unmeasured ? "≥ " : ""}${formatCompactTokens(cost.raw)}`;
+}
+
+export function usageNote(cost: Cost): string {
+  return cost.unmeasured ? `${cost.unmeasured.toLocaleString("en-US")} 次调用的 token 用量未记录；统计只包含已记录用量。` : "";
 }

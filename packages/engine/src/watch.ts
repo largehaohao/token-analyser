@@ -2,6 +2,7 @@ import { watch, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { loadUserConfig } from "./config.ts";
 import type { SessionStore } from "./store.ts";
+import { isSessionFile } from "./session-files.ts";
 
 export type WatchOptions = {
   watchPaths?: string[];
@@ -10,8 +11,8 @@ export type WatchOptions = {
   onError?: (id: string, reason: string) => void;
 };
 
-function isRolloutJsonl(name: string): boolean {
-  return name.startsWith("rollout-") && name.endsWith(".jsonl");
+function sessionPath(name: string): string {
+  return name.endsWith("state.vscdb-wal") ? name.slice(0, -4) : name;
 }
 
 function listDirectories(root: string): string[] {
@@ -59,9 +60,8 @@ export function watchSessions(
     return base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : base;
   }
 
-  function ingestIfRollout(fullPath: string): void {
-    const base = path.basename(fullPath);
-    if (!isRolloutJsonl(base)) return;
+  function ingestIfSession(fullPath: string): void {
+    if (!isSessionFile(fullPath)) return;
     if (!existsSync(fullPath)) {
       observedFiles.delete(fullPath);
       const removed = store.removePath(fullPath);
@@ -82,11 +82,13 @@ export function watchSessions(
   }
 
   function scheduleIngest(fullPath: string): void {
+    fullPath = sessionPath(fullPath);
+    if (!isSessionFile(fullPath)) return;
     const previous = pending.get(fullPath);
     if (previous) clearTimeout(previous);
     const timer = setTimeout(() => {
       pending.delete(fullPath);
-      ingestIfRollout(fullPath);
+      ingestIfSession(fullPath);
     }, 50);
     pending.set(fullPath, timer);
   }
@@ -94,7 +96,11 @@ export function watchSessions(
   function fileSignature(fullPath: string): string | undefined {
     try {
       const stat = statSync(fullPath);
-      return [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
+      let wal = "";
+      if (fullPath.endsWith(".vscdb")) {
+        try { const st = statSync(`${fullPath}-wal`); wal = `${st.size}:${st.mtimeMs}:${st.ctimeMs}`; } catch { /* No active WAL. */ }
+      }
+      return [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs, wal].join(":");
     } catch {
       return undefined;
     }
@@ -119,8 +125,6 @@ export function watchSessions(
     try {
       const w = watch(dir, (_event, filename) => {
         if (!filename) return;
-        const base = path.basename(filename);
-        if (!isRolloutJsonl(base)) return;
         scheduleIngest(path.join(dir, filename));
       });
       watchers.push(w);
@@ -130,9 +134,10 @@ export function watchSessions(
     }
   }
 
-  function scanForRollouts(): void {
+  function scanForSessions(): void {
     for (const root of watchPaths) {
       if (!existsSync(root)) continue;
+      if (statSync(root).isFile()) { scheduleIfChanged(root); continue; }
       for (const dir of listDirectories(root)) {
         if (needsDirectoryScan) watchDirectory(dir);
         let entries: string[];
@@ -142,14 +147,22 @@ export function watchSessions(
           continue;
         }
         for (const entry of entries) {
-          if (isRolloutJsonl(entry)) scheduleIfChanged(path.join(dir, entry));
+          if (isSessionFile(entry)) scheduleIfChanged(path.join(dir, entry));
         }
       }
+    }
+    for (const fullPath of observedFiles.keys()) {
+      if (!existsSync(fullPath)) ingestIfSession(fullPath);
     }
   }
 
   for (const root of watchPaths) {
-    if (!existsSync(root)) continue;
+    if (!existsSync(root)) { needsDirectoryScan = true; continue; }
+    if (statSync(root).isFile()) {
+      needsDirectoryScan = true;
+      watchDirectory(path.dirname(root));
+      continue;
+    }
 
     if (useRecursive) {
       try {
@@ -158,8 +171,6 @@ export function watchSessions(
           { recursive: true },
           (_event, filename) => {
             if (!filename) return;
-            const base = path.basename(filename);
-            if (!isRolloutJsonl(base)) return;
             scheduleIngest(path.join(root, filename));
           },
         );
@@ -176,9 +187,9 @@ export function watchSessions(
     }
   }
 
-  startupScan = setTimeout(scanForRollouts, 25);
+  startupScan = setTimeout(scanForSessions, 25);
   if (needsDirectoryScan) {
-    directoryScan = setInterval(scanForRollouts, 1_000);
+    directoryScan = setInterval(scanForSessions, 1_000);
   }
 
   return () => {

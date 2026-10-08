@@ -1,8 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Cost, TreeNode } from "./types.ts";
-import { parseJsonlChunk } from "./parse-jsonl.ts";
-import { analyseSession } from "./snapshot.ts";
+import { ingestSessions } from "./ingest.ts";
 
 function resolveWorkspaceRoot(start: string): string {
   let dir = start;
@@ -25,7 +24,7 @@ function formatCredits(credits: number | null): string {
 }
 
 function formatCost(cost: Cost): string {
-  return `raw=${cost.raw} credits=${formatCredits(cost.credits)}`;
+  return `raw=${cost.unmeasured ? `${cost.raw}+unknown` : cost.raw} credits=${formatCredits(cost.credits)} usd=${formatCredits(cost.usd)}`;
 }
 
 function printTreeNode(node: TreeNode, prefix: string, isLast: boolean): void {
@@ -49,30 +48,22 @@ function main(): void {
   const filePath = args.find((arg) => arg !== "--json");
 
   if (!filePath) {
-    console.error("Usage: analyse-cli.ts <file.jsonl> [--json]");
+    console.error("Usage: analyse-cli.ts <session.jsonl|state.vscdb> [--json]");
     process.exit(1);
   }
 
   const absolutePath = resolveInputPath(filePath);
-  const text = readFileSync(absolutePath, "utf8");
-  const { events, errors } = parseJsonlChunk(
-    text.endsWith("\n") ? text : text + "\n",
-    0,
-  );
-
-  const snapshot = analyseSession({
-    events,
-    path: absolutePath,
-    parse_errors: errors,
-  });
+  const snapshots = ingestSessions(absolutePath);
 
   if (jsonMode) {
-    console.log(JSON.stringify(snapshot));
+    console.log(JSON.stringify(absolutePath.endsWith(".vscdb") ? snapshots : snapshots[0]));
     return;
   }
 
-  printTreeNode(snapshot.tree, "", true);
-  console.log(`waste: ${formatCost(snapshot.waste)}`);
+  for (const snapshot of snapshots) {
+    printTreeNode(snapshot.tree, "", true);
+    console.log(`waste: ${formatCost(snapshot.waste)}`);
+  }
 }
 
 main();

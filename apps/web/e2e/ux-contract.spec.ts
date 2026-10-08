@@ -327,7 +327,7 @@ test("import validates files before sending data", async ({ page }) => {
     return route.fulfill({ status: 400, json: { error: "unexpected upload" } });
   });
   await openSessions(page);
-  const input = page.getByLabel("选择 rollout JSONL 文件");
+  const input = page.getByLabel("选择会话 JSONL 文件");
   await input.setInputFiles({
     name: "notes.txt",
     mimeType: "text/plain",
@@ -360,7 +360,7 @@ test("import blocks duplicate drops, shows pending state, and opens historical r
   await page.getByRole("button", { name: "5小时" }).click();
   const picker = page.getByRole("button", { name: "选择文件", exact: true });
   const before = await picker.boundingBox();
-  await page.getByLabel("选择 rollout JSONL 文件").setInputFiles({
+  await page.getByLabel("选择会话 JSONL 文件").setInputFiles({
     name: "historical.jsonl",
     mimeType: "application/x-ndjson",
     buffer: Buffer.from('{"type":"session_meta"}\n'),
@@ -406,7 +406,7 @@ test("import remains single-flight across navigation and completion respects the
   });
   await openSessions(page);
   await page.getByRole("searchbox", { name: "筛选会话" }).fill("s-poll");
-  await page.getByLabel("选择 rollout JSONL 文件").setInputFiles({
+  await page.getByLabel("选择会话 JSONL 文件").setInputFiles({
     name: "background.jsonl",
     mimeType: "application/x-ndjson",
     buffer: Buffer.from("{}\n"),
@@ -420,7 +420,7 @@ test("import remains single-flight across navigation and completion respects the
   await expect(
     page.getByRole("button", { name: "选择文件", exact: true }),
   ).toBeDisabled();
-  await expect(page.getByLabel("选择 rollout JSONL 文件")).toBeDisabled();
+  await expect(page.getByLabel("选择会话 JSONL 文件")).toBeDisabled();
   await expect(page.locator("#import-feedback")).toContainText(
     "正在导入 background.jsonl",
   );
@@ -452,7 +452,7 @@ test("confirmed imports remain successful when follow-up list refresh fails", as
   await page.route("**/sessions", (route) =>
     route.fulfill({ status: 503, json: { error: "read failed after commit" } }),
   );
-  await page.getByLabel("选择 rollout JSONL 文件").setInputFiles({
+  await page.getByLabel("选择会话 JSONL 文件").setInputFiles({
     name: "confirmed.jsonl",
     mimeType: "application/x-ndjson",
     buffer: Buffer.from("{}\n"),
@@ -474,7 +474,7 @@ test("uncertain import failure is actionable and never retries automatically", a
     return route.fulfill({ status: 503, json: { error: "unavailable" } });
   });
   await openSessions(page);
-  await page.getByLabel("选择 rollout JSONL 文件").setInputFiles({
+  await page.getByLabel("选择会话 JSONL 文件").setInputFiles({
     name: "retry.jsonl",
     mimeType: "application/x-ndjson",
     buffer: Buffer.from("{}\n"),

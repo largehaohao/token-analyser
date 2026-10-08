@@ -336,7 +336,7 @@ export function ModelMix({ models }: { models: OverviewModel[] }) {
         <div>
           <h2 className="chart-title">按模型</h2>
           <p className="chart-desc">
-            按 turn_context 记录的模型拆分原始 token。费用跟随页顶单位。
+            按各来源日志记录的模型拆分已知 token。费用跟随页顶单位。
           </p>
         </div>
       </div>
@@ -373,6 +373,7 @@ export function ModelMix({ models }: { models: OverviewModel[] }) {
                 {unpricedNote(row.unpricedRaw)}
               </span>
             )}
+            {row.cost.unmeasured ? <span className="model-note">{row.cost.unmeasured} 次调用用量未记录</span> : null}
           </li>
         ))}
       </ul>

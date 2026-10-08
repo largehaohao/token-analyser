@@ -1,6 +1,6 @@
 # Token Analyser
 
-Local Codex dashboard for token, credit, and dollar estimates. The Node engine reads rollout JSONL; the Vite UI talks to it over HTTP and SSE. Nothing leaves the machine. Figures are local estimates from telemetry and the dated public rate card — not OpenAI's bill.
+Local dashboard for Codex, Claude Code, Cursor, and pi sessions. The Node engine reads local JSONL and Cursor's SQLite store; the Vite UI talks to it over HTTP and SSE. Session data stays on the machine. Figures come from recorded usage or dated public API rates; they are not subscription bills.
 
 ## Run
 
@@ -8,6 +8,8 @@ Local Codex dashboard for token, credit, and dollar estimates. The Node engine r
 pnpm install
 pnpm dev
 ```
+
+Requires Node.js 22.13 or newer (Cursor SQLite uses `node:sqlite`).
 
 `pnpm dev` waits until the engine is listening on `127.0.0.1:7789`, then starts the UI at [http://127.0.0.1:7788](http://127.0.0.1:7788).
 
@@ -23,7 +25,31 @@ Print a snapshot for one rollout file:
 pnpm analyse path/to/rollout.jsonl
 ```
 
-Default watch root: `~/.codex/sessions/**/rollout-*.jsonl`. Optional `~/.token-analyser/config.json`:
+Default sources are discovered recursively:
+
+| Source | Local records | Analysis |
+| --- | --- | --- |
+| Codex | `~/.codex/sessions/**/*.jsonl` (`CODEX_HOME` supported) | Tokens, credits, USD, tools, TTFT and tok/s when logged |
+| Claude Code | `~/.claude/projects/**/*.jsonl` (`CLAUDE_CONFIG_DIR` supported) | Input, cache read/write, output, API-equivalent USD, tools, subagents |
+| Cursor | `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` and Cursor User `globalStorage/state.vscdb` / `workspaceStorage/**/state.vscdb` | Conversation, tools, session metadata; usage only when recorded |
+| pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR` supported) | Input, cache read/write, output, recorded USD, tools, branch/fork context |
+
+Cursor's User directory is `~/Library/Application Support/Cursor/User` on macOS,
+`%APPDATA%/Cursor/User` on Windows, and `$XDG_CONFIG_HOME/Cursor/User` (or
+`~/.config/Cursor/User`) on Linux. Its databases are opened read-only; active WAL
+changes are watched. The database schema is internal to Cursor and may change.
+Zero-valued Cursor token placeholders are treated as missing telemetry, not
+measured zero. The UI shows `—` for missing usage and `≥` for partial totals.
+TTFT and tok/s stay unavailable for logs that do not record the required timings.
+
+Search the session list by source name, model, directory, or session ID.
+Claude streaming records sharing a message ID are combined using the latest
+reported usage fields. Claude subagent paths identify their parent session.
+pi forks exclude entry IDs copied from an available parent file; if that file is
+missing, only the child log can be analysed and inherited spend cannot be
+distinguished. Branch context follows entry `parentId` rather than file order.
+
+Optional `~/.token-analyser/config.json` replaces the default discovery paths:
 
 ```json
 {
@@ -32,10 +58,19 @@ Default watch root: `~/.codex/sessions/**/rollout-*.jsonl`. Optional `~/.token-a
 }
 ```
 
-Rate card: `config/rate-card.json`. Parse cache: `~/.token-analyser/cache/`.
+Codex rate card: `config/rate-card.json`. API-equivalent rates:
+`config/api-prices.json` (dated, sourced from official pricing pages). Recorded
+USD takes precedence. Credits apply only to Codex; Claude, Cursor, and pi costs
+are never converted to Codex credits. The price update button updates the Codex
+card; API rates can be maintained in the separate config file.
+Parse cache: `~/.token-analyser/cache/`.
 Imported `.jsonl` / `.ndjson` files are copied to
 `~/.token-analyser/imports/` and restored on the next launch. Existing imports
 are never overwritten by another file with the same name.
+The CLI also accepts a Cursor `state.vscdb`; `--json` returns an array for a
+database and one snapshot for JSONL. To import a database through the API, use
+`POST /import` with JSON `{ "path": "/absolute/path/to/state.vscdb" }`; database
+uploads are not supported because an active WAL belongs to the original store.
 
 The dashboard shows pricing coverage and ledger/parse health beside the headline
 figures. Daily trends use the browser's IANA timezone (with numeric-offset

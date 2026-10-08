@@ -6,6 +6,7 @@ import { computeWaste } from "./waste.ts";
 import { extractContextProfile } from "./context-profile.ts";
 import { loadRateCard } from "./rate-card.ts";
 import { collectTaskTimings, extractTaskTimings, summarizePerformance } from "./performance.ts";
+import { detectSource, parseNativeSession } from "./session-adapters.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
   type ParseError,
@@ -72,8 +73,12 @@ export function analyseSession(args: {
   const toggles = args.toggles ?? DEFAULT_WASTE_TOGGLES;
   const parse_errors = args.parse_errors ?? [];
 
+  const source = detectSource(args.events, args.path) ?? "codex";
+  const native = source === "codex" ? null : parseNativeSession(args.events, args.path, source);
   const { id, isSubagent } = extractSessionInfo(args.events, args.sessionId);
-  const { turns: ledgerTurns, ledger_warning, fastMode, meta } = args.ledgerBuilder
+  const { turns: ledgerTurns, ledger_warning, fastMode, meta } = native
+    ? { turns: native.turns, ledger_warning: false, fastMode: native.turns.at(-1)?.fastMode ?? false, meta: native.meta }
+    : args.ledgerBuilder
     ? args.ledgerBuilder.snapshot()
     : buildLedger(args.events, id, { isSubagent });
 
@@ -93,18 +98,21 @@ export function analyseSession(args: {
   const lastTurn = turns.length > 0 ? turns[turns.length - 1]! : null;
   const lastEvent =
     args.events.length > 0 ? args.events[args.events.length - 1]! : null;
-  const taskTimings = extractTaskTimings(args.events, { isSubagent });
+  const taskTimings = native?.taskTimings ?? extractTaskTimings(args.events, { isSubagent });
 
   return {
     id: meta.id,
+    source,
+    sourceId: native?.sourceId ?? meta.id,
+    ...(native ? { messageCount: native.messageCount, forkedFrom: native.forkedFrom } : {}),
     parentId: meta.parentId,
     nickname: meta.nickname,
     cwd: meta.cwd,
     live: args.live ?? false,
     path: args.path,
     startedAt: meta.startedAt ?? turns[0]?.startedAt ?? null,
-    lastEventAt: lastEvent?.timestamp ?? null,
-    model: lastTurn?.model ?? null,
+    lastEventAt: native?.lastEventAt ?? lastEvent?.timestamp ?? null,
+    model: lastTurn?.model ?? native?.model ?? null,
     effort: lastTurn?.effort ?? null,
     ledger_warning,
     parse_errors,

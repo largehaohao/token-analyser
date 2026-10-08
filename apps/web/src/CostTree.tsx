@@ -4,7 +4,7 @@ import { treeAppearance } from "./buckets";
 import { useUnit } from "./UnitContext";
 import {
   allocatePercents,
-  formatCompactTokens,
+  formatCostTokens,
   formatCost,
   formatCostTitle,
 } from "./format";
@@ -44,13 +44,15 @@ function TreeRow({
   const branch = depth === 0 ? "" : isLast ? "└─" : "├─";
   const isRootChild = depth === 1;
   const appearance = treeAppearance(node.label, node.kind, node.bucket);
-  const muted = node.cost.raw === 0 && depth > 0;
+  const muted = node.cost.raw === 0 && !node.cost.unmeasured && depth > 0;
   const selected =
     selectedNodeId === node.id || (selectedNodeId == null && depth === 0);
   const children = node.children.filter(
     (child) =>
       showEmpty ||
       child.cost.raw !== 0 ||
+      !!child.cost.unmeasured ||
+      child.turnIds.length > 0 ||
       (selectedNodeId != null && findNodeById(child, selectedNodeId) != null),
   );
   const childPercents = siblingDisplayPercents(children);
@@ -91,7 +93,7 @@ function TreeRow({
         </span>
         <span className="tree-cost" title={formatCostTitle(node.cost, unit)}>
           {unit === "tokens"
-            ? formatCompactTokens(node.cost.raw)
+            ? formatCostTokens(node.cost)
             : formatCost(node.cost, unit)}
         </span>
       </button>

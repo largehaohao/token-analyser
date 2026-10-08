@@ -76,7 +76,7 @@ export function computeWaste(args: {
   for (const id of turnIds) {
     waste = addKnownCost(waste, turnById.get(id)!.cost);
   }
-  if (waste.raw === 0) waste = emptyCost();
+  if (waste.raw === 0 && !waste.unmeasured && !waste.usd) waste = emptyCost();
 
   return { waste, turnIds };
 }

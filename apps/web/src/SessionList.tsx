@@ -4,6 +4,9 @@ import { MixBar } from "./MixBar";
 import {
   activityTimestamp,
   formatCompactTokens,
+  formatCostTokens,
+  sourceLabel,
+  usageNote,
   formatCost,
   formatCostTitle,
   formatRelativeTime,
@@ -30,7 +33,7 @@ import {
 import { Button, Icon, SearchField, StatePanel } from "./ui";
 
 const EMPTY_COPY =
-  "在本机运行 Codex 后，会话会自动出现在这里。也可以选择或拖入已有的 JSONL 记录。";
+  "在本机运行 Codex、Claude Code、Cursor 或 pi 后，会话会自动出现在这里。也可以选择或拖入已有的 JSONL 记录。";
 const EMPTY_RANGE_COPY = "该时间范围内没有会话";
 
 type ContextBucketId = "tools" | "skills";
@@ -95,7 +98,7 @@ export function SessionList({
     const q = query.trim().toLowerCase();
     if (!q) return sessions;
     return sessions.filter((s) =>
-      [s.id, s.nickname, s.cwd, s.model, s.effort]
+      [s.id, s.nickname, s.cwd, s.model, s.effort, sourceLabel(s.source)]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q)),
     );
@@ -253,7 +256,7 @@ export function SessionList({
           aria-invalid={!!visibleImportError}
           aria-describedby={visibleImportError ? "import-error" : undefined}
           accept=".jsonl,.ndjson,application/x-ndjson"
-          aria-label="选择 rollout JSONL 文件"
+          aria-label="选择会话 JSONL 文件"
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) void importFile(file);
@@ -362,6 +365,7 @@ export function SessionList({
                       onClick={() => onSelect(s.id)}
                     >
                       <div className="row-top">
+                        <span className="badge">{sourceLabel(s.source)}</span>
                         <span className="session-id" title={s.id}>
                           {s.nickname ?? s.id}
                         </span>
@@ -391,7 +395,7 @@ export function SessionList({
                       <div className="session-costs">
                         <span title={formatCostTitle(s.cost, unit)}>
                           {unit === "tokens"
-                            ? `${formatCompactTokens(s.cost.raw)} tokens`
+                            ? `${formatCostTokens(s.cost)} tokens`
                             : formatCost(s.cost, unit)}
                         </span>
                         {(s.waste.raw > 0 || selectedId === s.id) && (
@@ -409,6 +413,7 @@ export function SessionList({
                           </span>
                         )}
                       </div>
+                      {s.cost.unmeasured ? <span className="session-meta" title={usageNote(s.cost)}>用量未记录 · {s.cost.unmeasured} 次调用</span> : null}
                       {(s.unpricedRaw ?? 0) > 0 && (
                         <div className="session-meta">
                           {unpricedNote(s.unpricedRaw ?? 0)}

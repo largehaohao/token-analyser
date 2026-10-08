@@ -2,6 +2,7 @@
   "name": "token-analyser",
   "private": true,
   "packageManager": "pnpm@9.15.0",
+  "engines": { "node": ">=22.13.0" },
   "scripts": {
     "test": "pnpm --filter engine test && pnpm --filter web test && sh -c 'if [ \"$E2E\" = 1 ]; then pnpm --filter web test:e2e; fi'",
     "analyse": "pnpm --filter engine analyse",

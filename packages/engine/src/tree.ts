@@ -40,7 +40,7 @@ export function sumTurns(turns: Turn[]): Cost {
     (acc, t) => addKnownCost(acc, t.cost),
     emptyMaybeCost(),
   );
-  return summed.raw === 0 ? emptyCost() : summed;
+  return summed.raw === 0 && !summed.unmeasured && !summed.usd ? emptyCost() : summed;
 }
 
 function bucketRaw(turns: Turn[], bucket: Bucket): number {

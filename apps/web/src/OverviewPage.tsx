@@ -2,7 +2,8 @@ import type { Overview } from "./api";
 import {
   cacheHitRatio,
   disclaimer,
-  formatCompactTokens,
+  formatCostTokens,
+  usageNote,
   formatCost,
   formatCostTitle,
   formatExactTokens,
@@ -95,7 +96,7 @@ export function OverviewPage({
   const { unit } = useUnit();
   const hit = cacheHitRatio(overview.cost);
   const wastePct = wasteShare(overview.waste, overview.cost, unit);
-  const moneyUnit = companionMoneyUnit(unit);
+  const moneyUnit = unit === "tokens" && overview.cost.credits == null && overview.cost.usd != null ? "usd" : companionMoneyUnit(unit);
   const unpriced = unpricedNote(overview.unpricedRaw ?? 0);
   const identity = tokenIdentity(overview.cost);
   const models = overview.models ?? [];
@@ -122,7 +123,7 @@ export function OverviewPage({
           <p>从总量到每轮调用，看清用量花在哪里。</p>
           {overview.fastMultiplier != null && (
             <p className="pricing-mode-note">
-              按每轮记录的模式计价：Standard / Fast ×{overview.fastMultiplier}（购入 credits）
+              Codex 按每轮模式计价：Standard / Fast ×{overview.fastMultiplier}（购入 credits）。其他来源使用 USD；无遥测的调用显示用量未记录。
             </p>
           )}
         </div>
@@ -157,7 +158,7 @@ export function OverviewPage({
             title={formatCostTitle(overview.cost, unit)}
           >
             {unit === "tokens"
-              ? formatCompactTokens(overview.cost.raw)
+              ? formatCostTokens(overview.cost)
               : formatCost(overview.cost, unit)}{" "}
             <small>{formatUnitSuffix(unit)}</small>
           </div>
@@ -181,7 +182,7 @@ export function OverviewPage({
           >
             {unit === "tokens"
               ? formatCost(overview.cost, moneyUnit)
-              : formatCompactTokens(overview.cost.raw)}
+              : formatCostTokens(overview.cost)}
             {unit === "tokens" && <small> {formatUnitSuffix(moneyUnit)}</small>}
           </div>
           <div className="kpi-sub">
@@ -200,7 +201,7 @@ export function OverviewPage({
             title={formatCostTitle(overview.waste, unit)}
           >
             {unit === "tokens"
-              ? formatCompactTokens(overview.waste.raw)
+              ? formatCostTokens(overview.waste)
               : formatCost(overview.waste, unit)}{" "}
             <small>{formatUnitSuffix(unit)}</small>
           </div>
@@ -228,6 +229,7 @@ export function OverviewPage({
 
       <PerformanceMetrics performance={overview.performance} />
       <p className="disclaimer">{disclaimer(overview.rateCardAsOf)}</p>
+      {overview.cost.unmeasured ? <p className="data-notice" role="status">{usageNote(overview.cost)}</p> : null}
       {(unpriced || issueCount > 0 || !identity.ok) && (
         <p className="data-notice" role="status">
           {[
@@ -245,7 +247,7 @@ export function OverviewPage({
         <div className="empty-overview">
           <div>
             <strong>该时间范围内没有会话</strong>
-            <p>切换时间范围，或导入已有的 Codex 记录。</p>
+            <p>切换时间范围，或导入已有的会话记录。</p>
           </div>
           <Button onClick={onOpenSessions}>
             <Icon name="upload" />
@@ -351,7 +353,7 @@ export function OverviewPage({
               <small>
                 {quality.unpricedRaw > 0
                   ? `${formatExactTokens(quality.unpricedRaw)} tokens 未定价`
-                  : "所有模型均已匹配费率"}
+                  : overview.cost.unmeasured ? "已记录用量已计价；另有调用用量缺失" : "已记录用量已计价"}
               </small>
             </div>
             <div
