@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SessionStore } from "../src/store.ts";
 import { loadImportedSessions, startServer } from "../src/server.ts";
+import { loadRateCard } from "../src/rate-card.ts";
 
 const fixtures = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -394,7 +395,7 @@ describe("startServer", () => {
       expect(emptyRes.status).toBe(200);
       const emptyBody = (await emptyRes.json()) as { sessionCount: number };
       expect(emptyBody.sessionCount).toBe(0);
-      expect(body.rateCardAsOf).toBe("2026-08-29");
+      expect(body.rateCardAsOf).toBe(loadRateCard().as_of);
     } finally {
       await server.close();
     }

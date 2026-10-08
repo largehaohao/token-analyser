@@ -5,9 +5,11 @@ import {
   type Cost,
   type SessionSnapshot,
   type Turn,
+  type PerformanceSummary,
 } from "./types.ts";
 import { computeWaste } from "./waste.ts";
 import { loadRateCard } from "./rate-card.ts";
+import { collectTaskTimings, summarizePerformance } from "./performance.ts";
 
 export const OVERVIEW_SLICE_KEYS = [
   "planning",
@@ -55,6 +57,7 @@ export type Overview = {
   waste: Cost;
   unpricedRaw: number;
   rateCardAsOf: string;
+  fastMultiplier: number;
   quality: {
     pricedRaw: number;
     unpricedRaw: number;
@@ -64,6 +67,7 @@ export type Overview = {
   days: OverviewDay[];
   slices: OverviewSlice[];
   models: OverviewModel[];
+  performance: PerformanceSummary;
 };
 
 export type OverviewOptions = {
@@ -388,6 +392,7 @@ export function buildOverview(
     chartDays.push(makeDay(OVERVIEW_LATER_DATE, later, laterFlagged, laterUnpriced));
   }
 
+  const card = loadRateCard();
   return {
     sessionCount: included.length,
     turnCount,
@@ -397,7 +402,8 @@ export function buildOverview(
     cost: normalizeCost(cost),
     waste: normalizeCost(waste),
     unpricedRaw,
-    rateCardAsOf: loadRateCard().as_of,
+    rateCardAsOf: card.as_of,
+    fastMultiplier: card.fast_multiplier,
     quality: {
       pricedRaw: Math.max(0, cost.raw - unpricedRaw),
       unpricedRaw,
@@ -419,5 +425,10 @@ export function buildOverview(
         unpricedRaw: entry.unpricedRaw,
       }))
       .sort((a, b) => b.cost.raw - a.cost.raw || a.model.localeCompare(b.model)),
+    performance: summarizePerformance(
+      included.flatMap(collectTaskTimings).filter((sample) =>
+        opts.sinceMs == null || Date.parse(sample.endedAt) >= opts.sinceMs,
+      ),
+    ),
   };
 }

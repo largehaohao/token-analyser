@@ -28,6 +28,7 @@ import { TurnTable } from "./TurnTable";
 import { RelativeTime } from "./RelativeTime";
 import { treeAppearance } from "./buckets";
 import { DetailSection } from "./DetailSection";
+import { PerformanceMetrics } from "./PerformanceMetrics";
 
 type Props = {
   snapshot: SessionSnapshot;
@@ -134,7 +135,7 @@ export function SessionView({
         {snapshot.fastMode && (
           <span
             className="badge fast"
-            title="最新 turn_context 使用 Fast；费用倍率按该轮模型的费率计算"
+            title="最新日志记录使用 Fast；展开轮次可查看该轮倍率与 token 单价"
           >
             Fast
           </span>
@@ -227,6 +228,7 @@ export function SessionView({
           </div>
         </div>
       </header>
+      <PerformanceMetrics performance={snapshot.performance} />
       <p className="disclaimer">{disclaimer(snapshot.rateCardAsOf)}</p>
 
       <div className="session-body">

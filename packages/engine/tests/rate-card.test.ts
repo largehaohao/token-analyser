@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { effectiveRateCard, loadRateCard, priceUsage } from "../src/rate-card.ts";
+import { effectiveRateCard, loadRateCard, priceUsage, tokenPricingForModel } from "../src/rate-card.ts";
 import { addCost } from "../src/types.ts";
 
 const cardPath = path.resolve(
@@ -113,10 +113,25 @@ describe("rate card", () => {
     const slow = priceUsage(usage, "gpt-5.6-sol", card, false);
     const fast = priceUsage(usage, "gpt-5.6-sol", card, true);
     expect(slow.credits).toBeCloseTo(100, 5);
-    expect(fast.credits).toBeCloseTo(250, 5);
+    expect(fast.credits).toBeCloseTo(200, 5);
   });
 
-  it("uses the documented lower Fast multiplier for GPT-5.4", () => {
+  it("doubles input, cached input, and output prices for GPT-6.1 Sol Fast", () => {
+    const card = loadRateCard(cardPath);
+    const usage = {
+      input_tokens: 1_000_000, cached_input_tokens: 500_000,
+      cache_write_input_tokens: 0, output_tokens: 100_000,
+      reasoning_output_tokens: 10, total_tokens: 1_100_000,
+    };
+    const standard = priceUsage(usage, "gpt-6.1-sol", card, false);
+    const fast = priceUsage(usage, "gpt-6.1-sol", card, true);
+    expect(standard.credits).toBe(51.25);
+    expect(fast.credits).toBe(102.5);
+    expect(fast.usd).toBe(4.1);
+    expect(fast.raw).toBe(standard.raw);
+  });
+
+  it("uses the model-specific Fast multiplier for GPT-5.4", () => {
     const card = loadRateCard(cardPath);
     const cost = priceUsage(
       {
@@ -132,6 +147,15 @@ describe("rate card", () => {
       true,
     );
     expect(cost.credits).toBeCloseTo(125, 5);
+  });
+
+  it("uses the same effective rates for displayed prices and billed costs", () => {
+    const card = loadRateCard(cardPath);
+    card.models["gpt-6.1-sol"]!.fast_multiplier = 3;
+    expect(tokenPricingForModel("gpt-6.1-sol", card, true)).toEqual({
+      mode: "fast", multiplier: 3, input: 150, cached: 7.5, output: 750,
+    });
+    expect(tokenPricingForModel("unknown-model", card, true)).toBeNull();
   });
 
   it("prices historical GPT-5.5 and GPT-5.4 mini sessions", () => {

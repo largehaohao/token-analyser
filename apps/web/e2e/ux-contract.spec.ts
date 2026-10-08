@@ -16,6 +16,93 @@ function gate() {
   return { promise, release };
 }
 
+test("Fast pricing follows desktop tier changes and shows effective token rates", async ({ page }, testInfo) => {
+  const id = "fast-pricing-e2e";
+  const now = Date.now() - 10_000;
+  const usage = (multiple = 1) => ({
+    input_tokens: 1_000_000 * multiple, cached_input_tokens: 500_000 * multiple,
+    cache_write_input_tokens: 0, output_tokens: 100_000 * multiple,
+    reasoning_output_tokens: 0, total_tokens: 1_100_000 * multiple,
+  });
+  const rows = [
+    { type: "session_meta", payload: { id, cwd: "/fast-pricing-test" } },
+    { type: "turn_context", payload: { model: "gpt-6.1-sol" } },
+    { type: "event_msg", payload: { type: "token_count", info: { last_token_usage: usage(), total_token_usage: usage() } } },
+    { type: "event_msg", payload: { type: "thread_settings_applied", thread_id: id, thread_settings: { model: "gpt-6.1-sol", service_tier: "priority" } } },
+    { type: "turn_context", payload: { model: "gpt-6.1-sol" } },
+    { type: "event_msg", payload: { type: "token_count", info: { last_token_usage: usage(), total_token_usage: usage(2) } } },
+  ].map((row, index) => JSON.stringify({ timestamp: new Date(now + index * 1000).toISOString(), ...row })).join("\n") + "\n";
+  const imported = await page.request.post("/import", {
+    headers: { "Content-Type": "application/x-ndjson", "X-Filename": "fast-pricing.jsonl" },
+    data: rows,
+  });
+  expect(imported.ok()).toBe(true);
+  const snapshot = await imported.json();
+  expect(snapshot.turns.map((turn: { cost: { credits: number } }) => turn.cost.credits)).toEqual([51.25, 102.5]);
+  expect(snapshot.cost.credits).toBe(153.75);
+  await page.goto("/");
+  await expect(page.locator(".pricing-mode-note")).toContainText("Fast ×2（购入 credits）");
+  await page.goto("/#sessions");
+  await page.getByRole("button", { name: "全部", exact: true }).click();
+  await page.getByRole("searchbox", { name: "筛选会话" }).fill(id);
+  await page.locator(".session-main").first().click();
+  await expect(page.locator(".turn-fast")).toHaveText("Fast ×2");
+  await page.locator(".turn-expand").first().click();
+  await expect(page.getByLabel("Token 与费用明细")).toContainText("Fast ×2");
+  await expect(page.getByLabel("Token 单价")).toHaveText("每百万 token（credits）：未缓存输入 100 · 缓存输入 5 · 输出 500");
+  await page.locator(".turn-detail").screenshot({ path: testInfo.outputPath("fast-pricing-desktop.png") });
+  await page.locator(".turn-expand").nth(1).click();
+  await expect(page.getByLabel("Token 与费用明细")).toContainText("Standard ×1");
+  await expect(page.getByLabel("Token 单价")).toContainText("未缓存输入 50 · 缓存输入 2.5 · 输出 250");
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.locator(".turn-expand").first().click();
+  await expect(page.getByLabel("Token 单价")).toContainText("输出 500");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator(".turn-detail").screenshot({ path: testInfo.outputPath("fast-pricing-mobile.png") });
+});
+
+test("TTFT and tok/s render on overview and session details", async ({ page }, testInfo) => {
+  const data = await (await page.request.get("/overview?days=8")).json();
+  let measured = true;
+  await page.route("**/overview?**", async (route) => {
+    await route.fulfill({ json: {
+      ...data,
+      performance: measured ? {
+        taskCount: 2, ttftSampleCount: 2, speedSampleCount: 2,
+        avgTtftMs: 1250, outputTokensPerSecond: 42.5,
+      } : { taskCount: 0, ttftSampleCount: 0, speedSampleCount: 0, avgTtftMs: null, outputTokensPerSecond: null },
+    } });
+  });
+  await page.goto("/");
+  await expect(page.getByTestId("ttft-value")).toHaveText("1.25 s");
+  await expect(page.getByTestId("token-speed-value")).toHaveText("42.50 tok/s");
+  await expect(page.getByLabel("响应性能")).toContainText("包含思考、工具执行与等待");
+  await page.getByLabel("响应性能").screenshot({ path: testInfo.outputPath("performance-desktop.png") });
+  await page.setViewportSize({ width: 375, height: 812 });
+  const panel = await page.getByLabel("响应性能").boundingBox();
+  expect(panel?.width).toBeLessThanOrEqual(375);
+  await page.getByLabel("响应性能").screenshot({ path: testInfo.outputPath("performance-mobile.png") });
+  measured = false;
+  await page.reload();
+  await expect(page.getByTestId("ttft-value")).toHaveText("— s");
+  await expect(page.getByTestId("token-speed-value")).toHaveText("— tok/s");
+  await expect(page.getByText("日志未记录首 token 时间")).toBeVisible();
+
+  await page.route("**/sessions/s-poll", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ json: {
+      ...await response.json(),
+      performance: {
+        taskCount: 1, ttftSampleCount: 1, speedSampleCount: 1,
+        avgTtftMs: 0, outputTokensPerSecond: 0,
+      },
+    } });
+  });
+  await openSessions(page);
+  await expect(page.getByTestId("ttft-value")).toHaveText("0.00 s");
+  await expect(page.getByTestId("token-speed-value")).toHaveText("0.00 tok/s");
+});
+
 test("overview updates model pricing with visible loading and success states", async ({
   page,
 }) => {

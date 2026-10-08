@@ -1,5 +1,5 @@
 import { preview, sha256 } from "./hash.ts";
-import { effectiveRateCard, priceUsage } from "./rate-card.ts";
+import { effectiveRateCard, priceUsage, tokenPricingForModel } from "./rate-card.ts";
 import { formatArgv } from "./exec-command.ts";
 import type {
   RolloutLine,
@@ -194,7 +194,20 @@ function normalizeToolOutput(output: string): string {
   return output;
 }
 
-function extractTurnContext(payload: Record<string, unknown>): TurnContext {
+function recordedFastMode(payload: Record<string, unknown>): boolean | null {
+  const tier = asString(payload.service_tier).trim().toLowerCase();
+  if (tier) return tier === "fast" || tier === "priority";
+  if (typeof payload.fast_mode === "boolean") return payload.fast_mode;
+  if (typeof payload.speed === "string") {
+    return payload.speed.toLowerCase() === "fast";
+  }
+  return null;
+}
+
+function extractTurnContext(
+  payload: Record<string, unknown>,
+  settingsFastMode = false,
+): TurnContext {
   const collaboration = asRecord(payload.collaboration_mode);
   const settings = collaboration ? asRecord(collaboration.settings) : null;
   const effort =
@@ -204,9 +217,9 @@ function extractTurnContext(payload: Record<string, unknown>): TurnContext {
     (typeof payload.effort === "string" ? payload.effort : undefined) ??
     null;
   const fastMode =
-    payload.fast_mode === true ||
-    payload.speed === "fast" ||
-    asString(payload.service_tier).toLowerCase() === "fast";
+    recordedFastMode(payload) ??
+    (settings ? recordedFastMode(settings) : null) ??
+    settingsFastMode;
   const model =
     (typeof payload.model === "string" ? payload.model : undefined) ??
     (typeof settings?.model === "string" ? settings.model : undefined) ??
@@ -399,6 +412,7 @@ export class LedgerBuilder {
     collaborationMode: null,
   };
   private armed: boolean;
+  private settingsFastMode = false;
   private window = newWindow();
   private outstanding: PendingOwner[] = [];
   private lastPrompt = "";
@@ -448,7 +462,30 @@ export class LedgerBuilder {
       }
 
       if (event.type === "turn_context") {
-        this.turnContext = extractTurnContext(payload);
+        this.turnContext = extractTurnContext(payload, this.settingsFastMode);
+        continue;
+      }
+
+      if (
+        event.type === "event_msg" &&
+        payload.type === "thread_settings_applied"
+      ) {
+        // Desktop logs record the tier here; turn_context often omits it.
+        const threadId = asString(payload.thread_id);
+        const settings = asRecord(payload.thread_settings);
+        if (settings && (!threadId || threadId === this.sessionId)) {
+          const mode = recordedFastMode(settings);
+          if (mode != null) {
+            this.settingsFastMode = mode;
+            this.turnContext.fastMode = mode;
+          }
+          if (typeof settings.model === "string") {
+            this.turnContext.model = settings.model;
+          }
+          if (typeof settings.reasoning_effort === "string") {
+            this.turnContext.effort = settings.reasoning_effort;
+          }
+        }
         continue;
       }
 
@@ -499,6 +536,11 @@ export class LedgerBuilder {
           model: this.turnContext.model,
           effort: this.turnContext.effort,
           fastMode: this.turnContext.fastMode,
+          pricing: tokenPricingForModel(
+            this.turnContext.model,
+            this.card,
+            this.turnContext.fastMode,
+          ),
           prompt,
           tools: this.window.tools,
           usage: lastUsage,

@@ -43,6 +43,10 @@ function formatTools(turn: Turn): string {
   return turn.tools.map((t) => `${t.name}(${t.input})`).join(", ");
 }
 
+function formatTokenRate(value: number): string {
+  return value.toLocaleString("en-US", { maximumFractionDigits: 6 });
+}
+
 export function TurnTable({
   turns,
   turnIds,
@@ -200,9 +204,15 @@ export function TurnTable({
                           {t.fastMode && (
                             <span
                               className="badge fast turn-fast"
-                              title="该轮使用 Fast；费用倍率按模型费率计算"
+                              title={
+                                t.pricing
+                                  ? `该轮使用 Fast；购入 credits 费用 ×${t.pricing.multiplier}`
+                                  : t.cost.credits == null
+                                    ? "该轮使用 Fast；模型尚未定价"
+                                    : "该轮使用 Fast；费用倍率按模型费率计算"
+                              }
                             >
-                              Fast
+                              Fast{t.pricing ? ` ×${t.pricing.multiplier}` : ""}
                             </span>
                           )}
                         </td>
@@ -262,6 +272,15 @@ export function TurnTable({
                               aria-label="Token 与费用明细"
                             >
                               <div>
+                                <dt>计价模式</dt>
+                                <dd>
+                                  {t.fastMode ? "Fast" : "Standard"}
+                                  {t.pricing
+                                    ? ` ×${t.pricing.multiplier}`
+                                    : t.cost.credits == null ? " · 未定价" : ""}
+                                </dd>
+                              </div>
+                              <div>
                                 <dt>总 Token</dt>
                                 <dd>{formatExactTokens(t.cost.raw)}</dd>
                               </div>
@@ -294,6 +313,17 @@ export function TurnTable({
                                 </dd>
                               </div>
                             </dl>
+                            {t.pricing && (
+                              <p
+                                className="turn-evidence-meta"
+                                aria-label="Token 单价"
+                              >
+                                每百万 token（credits）：未缓存输入{" "}
+                                {formatTokenRate(t.pricing.input)} · 缓存输入{" "}
+                                {formatTokenRate(t.pricing.cached)} · 输出{" "}
+                                {formatTokenRate(t.pricing.output)}
+                              </p>
+                            )}
                             <div className="turn-detail-grid">
                               <div>
                                 <h4>提示</h4>

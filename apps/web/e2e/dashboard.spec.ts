@@ -17,12 +17,14 @@ test("overview keeps secondary analysis collapsed and accessible by keyboard", a
   await expect(viewNavigation.getByRole("link")).toHaveCount(2);
   await expect(page.getByRole("group", { name: "时间范围" })).toBeVisible();
   await expect(page.getByRole("button", { name: "全部" })).toBeVisible();
+  await page.getByRole("button", { name: "全部", exact: true }).click();
   await expect(page.locator(".kpi-label", { hasText: "总用量" })).toBeVisible();
   await expect(
     page.locator(".kpi-label", { hasText: "预估总费用" }),
   ).toBeVisible();
   await expect(page.locator(".disclaimer")).toContainText(/不代表 OpenAI 账单/);
-  await expect(page.locator(".disclaimer")).toContainText("2026-08-29");
+  const pricing = await (await page.request.get("/overview")).json();
+  await expect(page.locator(".disclaimer")).toContainText(pricing.rateCardAsOf);
   await expect(page.getByTestId("trend-chart")).toBeVisible();
   await expect(page.getByTestId("donut-chart")).toBeHidden();
   await expect(page.getByTestId("model-mix")).toBeHidden();

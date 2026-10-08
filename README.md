@@ -47,6 +47,11 @@ explicit entry in the dated rate card.
 Fast mode is accounted per turn, so switching `/fast` on or off during a
 conversation changes only the affected turns. Each Fast turn is marked in the
 detail table, and model-specific multipliers come from the dated rate card.
+Desktop `thread_settings_applied` tiers and per-turn `fast` / `priority` tiers
+are recognized. Expanded turns show the effective input, cached-input, and
+output prices per million tokens. Updating model prices also synchronizes the
+official purchased-credit Fast multiplier (currently 2× Standard). Included
+subscription allowance uses a different multiplier and is not estimated here.
 
 The behavior breakdown uses mutually exclusive categories: planning and
 thinking, source reading and search, tests/builds/checks, code changes and

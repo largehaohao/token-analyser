@@ -24,6 +24,32 @@ export type Cost = {
   usd: number | null;
 };
 
+/** Effective purchased-credit rates per million tokens for one call. */
+export type TokenPricing = {
+  mode: "standard" | "fast";
+  multiplier: number;
+  input: number;
+  cached: number;
+  output: number;
+};
+
+export type TaskTiming = {
+  id: string;
+  startedAt: string | null;
+  endedAt: string;
+  durationMs: number | null;
+  ttftMs: number | null;
+  outputTokens: number | null;
+};
+
+export type PerformanceSummary = {
+  taskCount: number;
+  ttftSampleCount: number;
+  speedSampleCount: number;
+  avgTtftMs: number | null;
+  outputTokensPerSecond: number | null;
+};
+
 export type Bucket =
   | "planning"
   | "reading"
@@ -55,6 +81,7 @@ export type Turn = {
   effort: string | null;
   /** Fast service tier recorded for this turn. */
   fastMode: boolean;
+  pricing?: TokenPricing | null;
   prompt: string;
   tools: ToolCall[];
   usage: TokenUsage;
@@ -113,6 +140,7 @@ export type RateCard = {
   source: string;
   usd_per_credit: number;
   usd_per_credit_source: string;
+  /** Purchased-credit multiplier, separate from included subscription usage. */
   fast_multiplier: number;
   models: Record<
     string,
@@ -149,6 +177,8 @@ export type SessionSnapshot = {
   children: SessionSnapshot[];
   suggestions: Suggestion[];
   context?: ContextProfile;
+  taskTimings?: TaskTiming[];
+  performance?: PerformanceSummary;
 };
 
 export type SessionListItem = {

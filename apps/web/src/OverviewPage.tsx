@@ -18,6 +18,7 @@ import { DonutChart, ModelMix, TrendChart } from "./OverviewCharts";
 import { useUnit } from "./UnitContext";
 import { DetailSection } from "./DetailSection";
 import { Button, Icon, Notice } from "./ui";
+import { PerformanceMetrics } from "./PerformanceMetrics";
 
 type Props = {
   overview: Overview;
@@ -119,6 +120,11 @@ export function OverviewPage({
           <span className="page-eyebrow">本地账本 · 总览</span>
           <h1 tabIndex={-1}>成本总览</h1>
           <p>从总量到每轮调用，看清用量花在哪里。</p>
+          {overview.fastMultiplier != null && (
+            <p className="pricing-mode-note">
+              按每轮记录的模式计价：Standard / Fast ×{overview.fastMultiplier}（购入 credits）
+            </p>
+          )}
         </div>
         <div className="page-heading-actions">
           <Button onClick={onUpdateModelPrices} busy={updatingModelPrices}>
@@ -220,6 +226,7 @@ export function OverviewPage({
         </button>
       </div>
 
+      <PerformanceMetrics performance={overview.performance} />
       <p className="disclaimer">{disclaimer(overview.rateCardAsOf)}</p>
       {(unpriced || issueCount > 0 || !identity.ok) && (
         <p className="data-notice" role="status">

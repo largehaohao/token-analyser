@@ -5,6 +5,7 @@ import { buildTree } from "./tree.ts";
 import { computeWaste } from "./waste.ts";
 import { extractContextProfile } from "./context-profile.ts";
 import { loadRateCard } from "./rate-card.ts";
+import { collectTaskTimings, extractTaskTimings, summarizePerformance } from "./performance.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
   type ParseError,
@@ -92,6 +93,7 @@ export function analyseSession(args: {
   const lastTurn = turns.length > 0 ? turns[turns.length - 1]! : null;
   const lastEvent =
     args.events.length > 0 ? args.events[args.events.length - 1]! : null;
+  const taskTimings = extractTaskTimings(args.events, { isSubagent });
 
   return {
     id: meta.id,
@@ -117,5 +119,10 @@ export function analyseSession(args: {
     children,
     suggestions,
     context: extractContextProfile(args.events),
+    taskTimings,
+    performance: summarizePerformance([
+      ...taskTimings,
+      ...children.flatMap(collectTaskTimings),
+    ]),
   };
 }

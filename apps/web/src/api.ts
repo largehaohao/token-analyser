@@ -9,6 +9,14 @@ export type Cost = {
   usd: number | null;
 };
 
+export type PerformanceSummary = {
+  taskCount: number;
+  ttftSampleCount: number;
+  speedSampleCount: number;
+  avgTtftMs: number | null;
+  outputTokensPerSecond: number | null;
+};
+
 export type WasteToggleId =
   | "poll"
   | "reread"
@@ -39,6 +47,13 @@ export type Turn = {
   model: string | null;
   effort: string | null;
   fastMode?: boolean;
+  pricing?: {
+    mode: "standard" | "fast";
+    multiplier: number;
+    input: number;
+    cached: number;
+    output: number;
+  } | null;
   prompt: string;
   tools: {
     name: string;
@@ -109,6 +124,7 @@ export type SessionSnapshot = {
   children: SessionSnapshot[];
   suggestions: Suggestion[];
   context?: ContextProfile;
+  performance?: PerformanceSummary;
 };
 
 export type OverviewSlice = {
@@ -145,6 +161,7 @@ export type Overview = {
   waste: Cost;
   unpricedRaw: number;
   rateCardAsOf: string;
+  fastMultiplier?: number;
   quality?: {
     pricedRaw: number;
     unpricedRaw: number;
@@ -154,6 +171,7 @@ export type Overview = {
   days: OverviewDay[];
   slices: OverviewSlice[];
   models?: OverviewModel[];
+  performance?: PerformanceSummary;
 };
 
 export type OverviewModel = {

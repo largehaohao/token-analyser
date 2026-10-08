@@ -168,17 +168,17 @@ describe("buildLedger", () => {
     const { turns, fastMode } = buildLedger(events, "fast-s", { isSubagent: false });
     expect(fastMode).toBe(false);
     expect(turns.map((turn) => turn.fastMode)).toEqual([true, false]);
-    expect(turns[0]!.cost.credits).toBeCloseTo(250, 5);
+    expect(turns[0]!.cost.credits).toBeCloseTo(200, 5);
     expect(turns[1]!.cost.credits).toBeCloseTo(100, 5);
   });
 
-  it("treats service_tier=fast as Fast mode", () => {
+  it.each(["fast", "priority"])("treats service_tier=%s as Fast mode", (serviceTier) => {
     const events: RolloutLine[] = [
       { timestamp: "t0", type: "session_meta", payload: { id: "tier" } },
       {
         timestamp: "t1",
         type: "turn_context",
-        payload: { model: "gpt-5.6-sol", service_tier: "fast" },
+        payload: { model: "gpt-5.6-sol", service_tier: serviceTier },
       },
       {
         timestamp: "t2",
@@ -209,7 +209,41 @@ describe("buildLedger", () => {
     const { turns, fastMode } = buildLedger(events, "tier", { isSubagent: false });
     expect(fastMode).toBe(true);
     expect(turns[0]!.fastMode).toBe(true);
-    expect(turns[0]!.cost.credits).toBeCloseTo(250, 5);
+    expect(turns[0]!.cost.credits).toBeCloseTo(200, 5);
+  });
+
+  it("uses desktop thread settings across turn contexts and incremental updates", () => {
+    const builder = new LedgerBuilder("desktop", { isSubagent: false });
+    const tokenCount = (ordinal: number): RolloutLine => {
+      const usage = (total: number) => ({
+        input_tokens: total, cached_input_tokens: 0, output_tokens: 0,
+        total_tokens: total,
+      });
+      return { timestamp: `t${ordinal}`, ordinal, type: "event_msg", payload: {
+        type: "token_count", info: {
+          last_token_usage: usage(1_000_000), total_token_usage: usage(ordinal * 1_000_000),
+        },
+      } };
+    };
+    const settings = (serviceTier: string, threadId = "desktop"): RolloutLine => ({
+      timestamp: "t0", type: "event_msg", payload: {
+        type: "thread_settings_applied", thread_id: threadId,
+        thread_settings: { model: "gpt-6.1-sol", service_tier: serviceTier },
+      },
+    });
+    const context: RolloutLine = {
+      timestamp: "t0", type: "turn_context", payload: { model: "gpt-6.1-sol" },
+    };
+    builder.consume([context, tokenCount(1), settings("priority"), context, tokenCount(2)]);
+    builder.consume([settings("default", "another-thread"), tokenCount(3)]);
+    builder.consume([settings("default"), context, tokenCount(4)]);
+    const result = builder.snapshot();
+    expect(result.fastMode).toBe(false);
+    expect(result.turns.map((turn) => turn.fastMode)).toEqual([false, true, true, false]);
+    expect(result.turns.map((turn) => turn.cost.credits)).toEqual([50, 100, 100, 50]);
+    expect(result.turns[1]!.pricing).toEqual({
+      mode: "fast", multiplier: 2, input: 100, cached: 5, output: 500,
+    });
   });
 
   it("sets ledger_warning when last_token_usage sums diverge from total", () => {

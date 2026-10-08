@@ -10,6 +10,7 @@ import {
 } from "./ingest.ts";
 import { isLive, pruneStaleCache } from "./cache.ts";
 import { effectiveRateCard } from "./rate-card.ts";
+import { collectTaskTimings, summarizePerformance } from "./performance.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
   type SessionListItem,
@@ -59,6 +60,7 @@ function rebuildDerived(snap: SessionSnapshot): SessionSnapshot {
     ...derived,
     live: snap.live || snap.children.some((child) => child.live),
     lastEventAt: latestActivityIso(derived),
+    performance: summarizePerformance(collectTaskTimings(derived)),
   };
 }
 

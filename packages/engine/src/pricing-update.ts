@@ -52,7 +52,7 @@ function modelIdsFor(displayName: string): string[] {
     .replace(/^gpt\s+/, "gpt-")
     .replace(/\s+/g, "-")
     .replace(/\((image|text)\)/g, "-$1")
-    .replace(/[^a-z0-9-]/g, "")
+    .replace(/[^a-z0-9.-]/g, "")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
   return id ? [id] : [];
@@ -71,6 +71,7 @@ function parseCredits(value: string): number | null {
 function parseOfficialRates(markdown: string): {
   rates: Map<string, ModelRate>;
   modelCount: number;
+  fastMultiplier: number;
 } {
   const sectionStart = markdown.indexOf("#### Token rates");
   const tableStart =
@@ -128,7 +129,31 @@ function parseOfficialRates(markdown: string): {
   if (models.size < 5 || rates.size < 5) {
     throw new Error("official_pricing_format_changed");
   }
-  return { rates, modelCount: models.size };
+  return {
+    rates,
+    modelCount: models.size,
+    fastMultiplier: parseFastMultiplier(markdown),
+  };
+}
+
+function parseFastMultiplier(markdown: string): number {
+  const rows = markdown
+    .split(/\r?\n/)
+    .filter((line) => line.trim().startsWith("|"))
+    .map((line) => line.trim().replace(/^\||\|$/g, "").split("|").map(cleanCell));
+  const header = rows.findIndex((row) => row[0]?.toLowerCase() === "speed mode");
+  const creditColumn = rows[header]?.findIndex((cell) =>
+    /purchased credits.*pay-as-you-go/i.test(cell),
+  ) ?? -1;
+  const fastRow = header < 0
+    ? undefined
+    : rows.slice(header + 1).find((row) => row[0]?.toLowerCase() === "fast");
+  const match = fastRow?.[creditColumn]?.match(/^(\d+(?:\.\d+)?)\s*[x×]$/i);
+  const multiplier = match ? Number(match[1]) : NaN;
+  if (!Number.isFinite(multiplier) || multiplier < 1) {
+    throw new Error("official_pricing_format_changed");
+  }
+  return multiplier;
 }
 
 function writeRateCardContent(rateCardPath: string, content: string): void {
@@ -209,7 +234,7 @@ export async function updateRateCardFromOfficial(
     clearTimeout(timeout);
   }
 
-  const { rates: officialRates, modelCount } = parseOfficialRates(markdown);
+  const { rates: officialRates, modelCount, fastMultiplier } = parseOfficialRates(markdown);
   let previousContent: string;
   let current: RateCard;
   try {
@@ -235,6 +260,7 @@ export async function updateRateCardFromOfficial(
     ...current,
     as_of: asOf,
     source: OFFICIAL_PRICING_PAGE_URL,
+    fast_multiplier: fastMultiplier,
     models,
   };
   writeRateCardContent(rateCardPath, `${JSON.stringify(nextCard, null, 2)}\n`);

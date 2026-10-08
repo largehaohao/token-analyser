@@ -13,8 +13,8 @@ import { sha256 } from "./hash.ts";
 import { tokenAnalyserHome } from "./config.ts";
 import type { SessionSnapshot } from "./types.ts";
 
-// v8 invalidates snapshots created before the fine-grained behavior buckets.
-export const CACHE_VERSION = 8;
+// v10 rebuilds snapshots with desktop Fast tiers and effective token prices.
+export const CACHE_VERSION = 10;
 
 export function cacheDir(home?: string): string {
   return path.join(home ?? tokenAnalyserHome(), "cache");

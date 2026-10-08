@@ -3236,6 +3236,56 @@ button:not(:disabled):active,
   grid-area: sessions;
 }
 
+.performance-metrics {
+  margin-bottom: 1rem;
+}
+
+.performance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--border);
+  background: var(--border);
+}
+
+.performance-card {
+  min-width: 0;
+  padding: 1.1rem 1.45rem;
+  background: var(--bg-raised);
+}
+
+.performance-card h2 {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.performance-value {
+  margin: 0.55rem 0;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: clamp(1.4rem, 2.8vw, 2rem);
+  font-variant-numeric: tabular-nums;
+}
+
+.performance-value small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.performance-card p,
+.performance-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.performance-note {
+  margin-top: 0.5rem;
+}
+
 .kpi-card.warn {
   border: 0;
   background: var(--warn-bg);
@@ -3718,6 +3768,10 @@ button:not(:disabled):active,
 }
 
 @media (max-width: 540px) {
+  .performance-card {
+    padding: 0.9rem;
+  }
+
   .app-header[data-layout="catalogue"] .header-primary {
     grid-template-columns: 1fr;
   }
