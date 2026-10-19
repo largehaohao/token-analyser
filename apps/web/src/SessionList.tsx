@@ -222,14 +222,14 @@ export function SessionList({
     >
       <div className="session-list-head">
         <div>
-          <span className="session-list-eyebrow">本地运行索引</span>
-          <h2>会话</h2>
+          <h2 tabIndex={-1}>会话列表</h2>
         </div>
         <span className="session-count" aria-label="会话数量">
           <strong>{filtered.length}</strong>
           {filtered.length !== totalCount ? ` / ${totalCount}` : ""}
         </span>
       </div>
+      <p className="session-list-guide">选择会话，追踪每一轮调用。</p>
       {totalCount > 0 && (
         <SearchField id="session-search" value={query} onChange={setQuery} />
       )}
@@ -293,7 +293,12 @@ export function SessionList({
       {query &&
         selectedId &&
         !filtered.some((session) => session.id === selectedId) && (
-          <p className="list-selection-note">当前打开的会话不在筛选结果中。</p>
+          <div className="list-selection-note">
+            <p>当前打开的会话不在筛选结果中。</p>
+            <Button className="mobile-open-selection" onClick={() => onSelect(selectedId)}>
+              查看当前会话 <Icon name="arrow" />
+            </Button>
+          </div>
         )}
       {!loaded ? (
         <StatePanel
@@ -404,7 +409,7 @@ export function SessionList({
                             className="waste-share"
                             title={formatCostTitle(s.waste, unit)}
                           >
-                            浪费 {unitWaste}
+                            可优化 {unitWaste}
                             {unit !== "tokens" && unitWaste !== tokenWaste && (
                               <span className="legend-note">
                                 {" "}

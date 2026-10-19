@@ -3,6 +3,9 @@ import AxeBuilder from "@axe-core/playwright";
 
 async function openSessions(page: Page) {
   await page.goto("/#sessions");
+  if ((page.viewportSize()?.width ?? 1280) <= 780) {
+    await page.getByRole("button", { name: "展开筛选", exact: true }).click();
+  }
   await page.getByRole("button", { name: "全部", exact: true }).click();
   await page.locator(".session-main").filter({ hasText: "s-poll" }).click();
   await expect(page.locator(".session-reference")).toHaveText("s-poll");
@@ -604,7 +607,9 @@ for (const width of [1280, 390]) {
       fullPage: true,
     });
     await page.getByRole("link", { name: "会话明细" }).click();
+    if (width <= 780) await page.getByRole("button", { name: "展开筛选", exact: true }).click();
     await page.getByRole("button", { name: "全部", exact: true }).click();
+    if (width <= 780) await page.locator(".session-main").first().click();
     await expect(page.locator(".session-view")).toBeVisible();
     await page.locator(".turn-expand").first().click();
     await expect(page.getByLabel("Token 与费用明细")).toBeVisible();
@@ -627,3 +632,32 @@ for (const width of [1280, 390]) {
     await expect(page.locator("html")).toHaveCSS("scrollbar-color", "auto");
   });
 }
+
+
+test("mobile detail returns to the selected session and search stays reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await openSessions(page);
+  await expect(page.getByRole("main", { name: "会话详情" })).toBeFocused();
+  await expect(page.getByRole("complementary", { name: "会话列表" })).toBeHidden();
+  await page.getByRole("button", { name: "返回会话列表", exact: true }).click();
+  const selected = page.locator('.session-main[aria-pressed="true"]');
+  await expect(selected).toBeFocused();
+  const search = page.getByRole("searchbox", { name: "筛选会话" });
+  await search.fill("no-session-matches-this-query");
+  await expect(page.getByRole("heading", { name: "没有匹配的会话" })).toBeVisible();
+  await page.getByRole("button", { name: "查看当前会话", exact: true }).click();
+  await expect(page.locator(".session-reference")).toHaveText("s-poll");
+  await page.getByRole("button", { name: "返回会话列表", exact: true }).press("Control+k");
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue("no-session-matches-this-query");
+  await page.getByRole("button", { name: "清除会话搜索", exact: true }).click();
+  await expect(search).toHaveValue("");
+  await expect(selected).toBeVisible();
+  await page.locator(".session-context-meta button").filter({ hasText: "技能" }).click();
+  const contextSummary = page.locator(".detail-anchor summary");
+  await expect(contextSummary).toBeFocused();
+  await expect(contextSummary).toBeInViewport();
+  await page.getByRole("button", { name: "返回会话列表", exact: true }).click();
+  await selected.click();
+  await expect(page.getByRole("main", { name: "会话详情" })).toBeFocused();
+});

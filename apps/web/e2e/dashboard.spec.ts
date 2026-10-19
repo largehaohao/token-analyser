@@ -2,7 +2,10 @@ import { test, expect, type Page } from "@playwright/test";
 
 async function openSessionDetail(page: Page) {
   await page.getByRole("link", { name: "会话明细" }).click();
+  const mobile = (page.viewportSize()?.width ?? 1280) <= 780;
+  if (mobile) await page.getByRole("button", { name: "展开筛选", exact: true }).click();
   await page.getByRole("button", { name: "全部", exact: true }).click();
+  if (mobile) await page.locator(".session-main").first().click();
 }
 
 test("overview keeps secondary analysis collapsed and accessible by keyboard", async ({

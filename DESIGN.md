@@ -65,9 +65,9 @@ The reference is an `htop` ledger: precise numeric columns, visible branches, qu
 
 ## Macrostructure family
 
-App pages use a **Catalogue-led index**: the session inventory is the first reading surface, and the selected session opens into an evidence split. Overview keeps the same inventory-to-evidence order by leading with one total and a compact metric register before trends and disclosures. The variant changes hierarchy and rhythm from the earlier workbench presentation without changing the underlying data model or route behavior.
+App pages use a **Catalogue-led index**: the session inventory is the first reading surface, and the selected session opens into an evidence split. Overview leads with four compact metrics, then a trend beside a Token allocation summary, followed by response performance and detailed disclosures. The variant changes hierarchy and rhythm from the earlier workbench presentation without changing the underlying data model or route behavior.
 
-- Navigation: edge-aligned links with a quiet active rule (N9-inspired)
+- Navigation: compact filled selection on desktop; equal-width links with an active rule on mobile. Source, time range and unit live in their own filter toolbar. Mobile starts with a collapsed filter summary; an explicit button expands all controls.
 - App footer: single inline rule with local-processing and read-only notes (Ft2-inspired)
 - Enrichment: none; data and evidence carry the page
 
@@ -75,7 +75,7 @@ The existing interface establishes Simplified Chinese (`zh-CN`); model IDs, Toke
 
 The signature is the token partition: the same colors and exact numerical semantics connect overview charts, session composition, the cost tree, and individual turns. Keep secondary analysis behind the established disclosures. Avoid marketing heroes, ornamental gradients, glowing badges, and treating expensive work as inherently wasteful.
 
-**Ownership:** model B. `apps/web/src/styles.css` is the canonical runtime token source; this document mirrors accepted values and rationale. `apps/web/src/buckets.ts` maps domain categories to CSS color tokens. There is no independent theme adapter. `scripts/verify-ui-tokens.mjs` checks the documented mapping.
+**Ownership:** model B. `apps/web/src/styles.css` is the canonical runtime token source; this document mirrors accepted values and rationale. `apps/web/src/buckets.ts` maps domain categories to CSS color tokens. The imported root `tokens.css` provides semantic aliases and shared type/motion scales; it does not redefine the palette or create an independent theme adapter. `scripts/verify-ui-tokens.mjs` checks the documented mapping.
 
 ## Colors
 
@@ -89,7 +89,9 @@ The body stack is local and Chinese-capable; no download or font swap changes la
 
 ## Layout
 
-The document owns page scrolling. Overview uses a 1440px maximum width; session analysis uses 1760px. The overview opens with a lead total plus a compact metric register, then a full-width trend and disclosures. The session page keeps a catalogue rail beside the evidence pane on wide screens and moves the rail above the detail on narrow screens. Four summary cards become two columns below 1100px. Below 780px the header reflows, stops sticking, and the session selector becomes a bounded region above the natural-height detail page. Controls stay usable at 360px. No page shell has a fixed height to accommodate a table.
+The document owns page scrolling. Overview uses a 1424px maximum width; session analysis uses 1760px. The overview starts with four equally sized, compact metrics. Below 960px they become two columns; the leading total keeps its mint tint. Trends and a compact Token allocation summary sit side by side on wide screens and stack below 960px. Response performance follows, with detailed analysis behind disclosures. Pricing limitations remain visible next to totals; the longer mode explanation lives inside data quality.
+
+The session page has a sticky catalogue rail beside its evidence pane on wide screens. Below 780px, it shows either the list or the detail. Selecting a session opens and focuses the detail; “返回会话列表” restores focus to the selected item. Search, selection and list scroll remain mounted. The list is bounded to 65dvh on mobile. Source switches return to the list; the keyboard search shortcut also reveals the list before focusing the input. Controls reflow down to 320px. No page shell has a fixed height to accommodate a table.
 
 Use the existing 24px panel spacing and 20px gaps. Only the session selector, turn table, and long evidence blocks own internal overflow; every scroll region inherits the global scrollbar baseline. Reserve loading surfaces and feedback lines. The header's controls, disclosure summaries, and busy buttons keep stable dimensions.
 

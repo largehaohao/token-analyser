@@ -23,6 +23,7 @@ import {
   filterSessionsBySource,
   sourceCounts,
   sourceEmptyCopy,
+  SESSION_SOURCES,
   type SessionSourceFilter,
 } from "./session-source";
 import { SessionView } from "./SessionView";
@@ -81,6 +82,8 @@ function AppShell() {
   const [contextOpen, setContextOpen] = useState<"tools" | "skills" | null>(
     null,
   );
+  const [mobileSessionPane, setMobileSessionPane] = useState<"list" | "detail">("list");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [range, setRange] = useState<SessionRangeId>(initialNavigation.range);
   const [source, setSource] = useState<SessionSourceFilter>(
     initialNavigation.source,
@@ -107,6 +110,8 @@ function AppShell() {
     promise: Promise<Overview>;
   } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLElement>(null);
+  const mobileContextTarget = useRef(false);
   const previousView = useRef(view);
   const selectedIdRef = useRef<string | null>(null);
   const preferredSessionIdRef = useRef<string | null>(
@@ -125,6 +130,18 @@ function AppShell() {
   }, [unit]);
 
   useEffect(() => {
+    if (view !== "sessions" || mobileSessionPane !== "detail" ||
+        !window.matchMedia("(max-width: 780px)").matches) return;
+    const frame = requestAnimationFrame(() => {
+      // Context shortcuts have their own scroll/focus target in SessionView.
+      if (mobileContextTarget.current) return;
+      detailRef.current?.focus({ preventScroll: true });
+      detailRef.current?.scrollIntoView({ block: "start" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [view, mobileSessionPane]);
+
+  useEffect(() => {
     writeSessionNavigation({ view, selectedId, range, source });
   }, [selectedId, view, range, source]);
 
@@ -133,14 +150,18 @@ function AppShell() {
     previousView.current = view;
     window.scrollTo(0, 0);
     const frame = requestAnimationFrame(() => {
-      const heading = contentRef.current?.querySelector<HTMLElement>("h1");
+      const selector = view === "sessions" && mobileSessionPane === "list" &&
+        window.matchMedia("(max-width: 780px)").matches
+        ? ".session-list h2" : "h1";
+      const heading = contentRef.current?.querySelector<HTMLElement>(selector);
       (heading ?? contentRef.current)?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [view]);
+  }, [view, mobileSessionPane]);
 
   useEffect(() => {
     function restoreNavigation() {
+      mobileContextTarget.current = false;
       const next = readSessionNavigation();
       preferredSessionIdRef.current = next.selectedId;
       setView(next.view);
@@ -173,7 +194,9 @@ function AppShell() {
       }
       if (viewRef.current !== "sessions") return;
       e.preventDefault();
-      document.getElementById("session-search")?.focus();
+      setContextOpen(null);
+      setMobileSessionPane("list");
+      requestAnimationFrame(() => document.getElementById("session-search")?.focus());
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -408,6 +431,7 @@ function AppShell() {
   }, [refreshList, refreshOverview, refreshSession]);
 
   function openImportedSession(snap: SessionSnapshot) {
+    mobileContextTarget.current = false;
     if (viewRef.current !== "sessions")
       pushSessionNavigation({
         view: "sessions",
@@ -423,6 +447,7 @@ function AppShell() {
     setRange("all");
     setSource(snap.source ?? "codex");
     setView("sessions");
+    setMobileSessionPane("detail");
     setSelectedId(snap.id);
     setSelectedNodeId(null);
     setSnapshot(snap);
@@ -468,10 +493,25 @@ function AppShell() {
   }
 
   function handleSelectSession(id: string) {
+    mobileContextTarget.current = false;
     preferredSessionIdRef.current = null;
     setSelectedId(id);
     setSelectedNodeId(null);
     setContextOpen(null);
+    setMobileSessionPane("detail");
+  }
+
+  function returnToSessionList() {
+    setContextOpen(null);
+    setMobileSessionPane("list");
+    requestAnimationFrame(() => {
+      const selected = contentRef.current?.querySelector<HTMLElement>(
+        '.session-main[aria-pressed="true"]',
+      );
+      const target = selected ?? contentRef.current?.querySelector<HTMLElement>(".session-list");
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: "nearest" });
+    });
   }
 
   function handleSourceChange(next: SessionSourceFilter) {
@@ -488,13 +528,16 @@ function AppShell() {
     setSelectedId(nextId);
     setSelectedNodeId(null);
     setContextOpen(null);
+    setMobileSessionPane("list");
   }
 
   function handleInspectContext(id: string, bucket: "tools" | "skills") {
+    mobileContextTarget.current = true;
     preferredSessionIdRef.current = null;
     setSelectedId(id);
     setSelectedNodeId(null);
     setContextOpen(bucket);
+    setMobileSessionPane("detail");
   }
 
   const overviewState = overviewDisplayState({
@@ -505,10 +548,13 @@ function AppShell() {
   });
 
   function openSessions() {
+    mobileContextTarget.current = false;
+    setContextOpen(null);
     const nextId = resolveSelectedSession(selectedId, visibleSessions);
     if (view !== "sessions")
       pushSessionNavigation({ view: "sessions", selectedId: nextId, range, source });
     setView("sessions");
+    setMobileSessionPane("list");
     setSelectedId(nextId);
   }
 
@@ -549,17 +595,15 @@ function AppShell() {
         >
           跳到主要内容
         </a>
-        <header className="app-header" data-layout="catalogue">
+        <header className="app-header" data-layout="workspace">
           <div className="header-primary">
             <div className="brand">
               <LedgerMark />
               <div>
-                <span className="brand-kicker">本地运行索引</span>
                 <p className="brand-name">Token Analyser</p>
-                <p className="crumb">AI 会话本地用量账本</p>
+                <p className="crumb">AI 用量工作台</p>
               </div>
             </div>
-            <span className="nav-caption">视图</span>
             <nav className="nav-pills primary-nav" aria-label="视图">
               <a
                 href="#overview"
@@ -590,12 +634,23 @@ function AppShell() {
                 {STREAM_LABEL[streamStatus]}
               </span>
             </div>
-            <div className="header-controls">
-              <RangeSwitcher range={range} onChange={setRange} />
-              <UnitSwitcher />
-            </div>
+            <span className="local-label"><Icon name="shield" /> 本地运行</span>
           </div>
         </header>
+        <Button
+          className="mobile-filter-toggle"
+          emphasis="ghost"
+          aria-label={filtersOpen ? "收起筛选" : "展开筛选"}
+          aria-expanded={filtersOpen}
+          aria-controls="workspace-filters"
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
+          <span className="mobile-filter-summary">
+            {SESSION_SOURCES.find((item) => item.id === source)?.label} · {rangeLabel} · {unit === "tokens" ? "Tokens" : unit === "credits" ? "Credits" : "USD"}
+          </span>
+          <span className="mobile-filter-action">筛选 <Icon name="chevron" /></span>
+        </Button>
+        <div id="workspace-filters" className="workspace-filters" data-expanded={filtersOpen}>
         <SourceSwitcher
           source={source}
           counts={counts}
@@ -605,6 +660,17 @@ function AppShell() {
           onChange={handleSourceChange}
           onShowAllTime={() => setRange("all")}
         />
+          <div className="scope-controls">
+            <div className="filter-field">
+              <span className="filter-label"><Icon name="clock" /> 时间范围</span>
+              <RangeSwitcher range={range} onChange={setRange} />
+            </div>
+            <div className="filter-field">
+              <span className="filter-label">显示单位</span>
+              <UnitSwitcher />
+            </div>
+          </div>
+        </div>
         {view === "overview" && importStatus && (
           <div className="app-notice">
             <Notice
@@ -695,7 +761,7 @@ function AppShell() {
               </main>
             )
           ) : (
-            <div className="layout">
+            <div className="layout" data-mobile-pane={mobileSessionPane}>
               <SessionList
                 key={source}
                 source={source}
@@ -711,7 +777,10 @@ function AppShell() {
                 error={sessionsError}
                 onRetry={() => void refreshList().catch(() => undefined)}
               />
-              <main className="main-panel">
+              <main className="main-panel" ref={detailRef} tabIndex={-1} aria-label="会话详情">
+                <Button className="mobile-session-return" onClick={returnToSessionList}>
+                  <Icon name="arrow" /> 返回会话列表
+                </Button>
                 {snapshot && selectedId === snapshot.id ? (
                   <>
                     {sessionLoad?.id === selectedId &&

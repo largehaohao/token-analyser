@@ -65,7 +65,11 @@ export function SessionView({
   }, [snapshot.id]);
 
   useEffect(() => {
-    if (contextOpen) contextRef.current?.scrollIntoView({ block: "start" });
+    if (!contextOpen) return;
+    if (window.matchMedia("(max-width: 780px)").matches) {
+      contextRef.current?.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
+    }
+    contextRef.current?.scrollIntoView({ block: "start" });
   }, [contextOpen, snapshot.id]);
 
   const turns = useMemo(() => flattenTurns(snapshot), [snapshot]);
@@ -122,7 +126,6 @@ export function SessionView({
 
       <header className="page-heading session-page-heading">
         <div className="page-heading-copy">
-          <span className="page-eyebrow">会话证据 · 当前选中</span>
           <h1 tabIndex={-1}>{snapshot.nickname ?? "会话明细"}</h1>
           <p className="source-path" title={snapshot.cwd ?? undefined}>
             {snapshot.cwd ?? "本地会话"}

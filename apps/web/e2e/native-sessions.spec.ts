@@ -125,15 +125,17 @@ test("changing sources rejects late overview data for the previous source", asyn
   await expect(page.getByRole("button", { name: /已分析会话/ })).not.toContainText("999");
 });
 
-test("source controls remain visible and accessible on mobile", async ({ page }, testInfo) => {
+test("source controls expand and remain accessible on mobile", async ({ page }, testInfo) => {
   await seedNative(page);
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/#sessions");
+  await page.getByRole("button", { name: "展开筛选", exact: true }).click();
   await page.getByRole("button", { name: "全部", exact: true }).click();
   for (const label of ["所有来源", "Codex", "Claude Code", "Cursor", "pi"]) {
     await expect(sources(page).getByRole("button", { name: label, exact: true })).toBeInViewport();
   }
   await sources(page).getByRole("button", { name: "Cursor", exact: true }).click();
+  await page.locator(".session-main").first().click();
   await expect(page.locator(".session-view")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();

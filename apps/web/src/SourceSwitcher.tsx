@@ -28,7 +28,7 @@ export function SourceSwitcher({
   return (
     <section className="source-toolbar" aria-label="会话来源筛选">
       <div className="source-toolbar-controls">
-        <span className="source-toolbar-label">会话来源</span>
+        <span className="source-toolbar-label">来源</span>
         <div
           className="segmented-control source-switch"
           role="group"
@@ -51,7 +51,7 @@ export function SourceSwitcher({
             </button>
           ))}
         </div>
-        <span className="source-count-caption">数量按全部时间统计</span>
+        <span className="source-count-caption">全部时间的会话数</span>
       </div>
       {loaded && source !== "all" && counts[source] === 0 && (
         <p className="source-range-notice" role="status">

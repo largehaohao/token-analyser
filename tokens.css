@@ -1,0 +1,34 @@
+/* Portable aliases for the canonical runtime tokens in apps/web/src/styles.css. */
+:root {
+  --color-paper: var(--bg);
+  --color-surface: var(--bg-raised);
+  --color-inset: var(--bg-inset);
+  --color-rule: var(--border);
+  --color-ink: var(--text);
+  --color-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--bg);
+  --color-focus: var(--accent);
+  --font-display: var(--display);
+  --font-body: var(--font);
+  --font-mono: var(--mono);
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: var(--space-panel);
+  --space-2xl: 32px;
+  --space-3xl: 40px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-display: clamp(26px, 2.5vw, 32px);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-short: var(--motion);
+  --radius-panel: var(--radius);
+  --radius-input: var(--radius-control);
+  --rule-width: 1px;
+}

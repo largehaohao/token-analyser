@@ -7,6 +7,7 @@ import {
   formatCost,
   formatCostTitle,
   formatExactTokens,
+  formatCompactTokens,
   formatPercent,
   formatUnitSuffix,
   companionMoneyUnit,
@@ -113,29 +114,30 @@ export function OverviewPage({
   const issueCount = quality.ledgerWarningSessions + quality.parseErrors;
   const timezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区";
+  const tokenParts = [
+    { key: "uncached", label: "未缓存输入", value: overview.cost.uncached_input },
+    { key: "cached", label: "缓存命中", value: overview.cost.cached_input },
+    { key: "output", label: "模型输出", value: overview.cost.output },
+  ];
 
   return (
     <main className="overview" data-testid="overview-page">
       <header className="page-heading">
         <div className="page-heading-copy">
-          <span className="page-eyebrow">本地账本 · 总览</span>
-          <h1 tabIndex={-1}>成本总览</h1>
+          <div className="heading-title-row">
+            <h1 tabIndex={-1}>成本总览</h1>
+            <span className="page-range"><Icon name="clock" />{rangeLabel}</span>
+          </div>
           <p>从总量到每轮调用，看清用量花在哪里。</p>
-          {overview.fastMultiplier != null && (
-            <p className="pricing-mode-note">
-              Codex 按每轮模式计价：Standard / Fast ×{overview.fastMultiplier}（购入 credits）。其他来源使用 USD；无遥测的调用显示用量未记录。
-            </p>
-          )}
         </div>
         <div className="page-heading-actions">
           <Button onClick={onUpdateModelPrices} busy={updatingModelPrices}>
             <Icon name="refresh" />
             更新模型价格
           </Button>
-          <span className="page-range">
-            <Icon name="clock" />
-            {rangeLabel}
-          </span>
+          <Button emphasis="solid" intent="brand" onClick={onOpenSessions}>
+            查看会话 <Icon name="arrow" />
+          </Button>
         </div>
       </header>
       {pricingUpdateNotice && (
@@ -227,7 +229,6 @@ export function OverviewPage({
         </button>
       </div>
 
-      <PerformanceMetrics performance={overview.performance} />
       <p className="disclaimer">{disclaimer(overview.rateCardAsOf)}</p>
       {overview.cost.unmeasured ? <p className="data-notice" role="status">{usageNote(overview.cost)}</p> : null}
       {(unpriced || issueCount > 0 || !identity.ok) && (
@@ -256,8 +257,37 @@ export function OverviewPage({
         </div>
       )}
 
-      <TrendChart days={overview.days} rangeLabel={rangeLabel} />
+      <div className="overview-analysis">
+        <TrendChart days={overview.days} rangeLabel={rangeLabel} />
+        <section className="chart-card allocation-card" aria-label="Token 分布">
+          <div className="chart-head">
+            <h2 className="chart-title">Token 分布</h2>
+            <span className="chart-unit">Tokens</span>
+          </div>
+          <p className="chart-desc">输入、缓存与输出的实际构成</p>
+          <MixBar
+            className="allocation-bar"
+            label="Token 分布"
+            segments={tokenParts.map((part) => ({ ...part, className: part.key }))}
+          />
+          <dl className="allocation-list">
+            {tokenParts.map((part) => (
+              <div key={part.key}>
+                <dt><i className={`swatch ${part.key}`} />{part.label}</dt>
+                <dd title={formatExactTokens(part.value)}>
+                  <strong>{formatCompactTokens(part.value)}</strong>
+                  <span>{overview.cost.raw > 0 ? formatPercent(100 * part.value / overview.cost.raw) : "—"}</span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <p className="allocation-note"><Icon name="check" />
+            {hit != null ? `输入缓存命中率 ${formatPercent(100 * hit)}` : "暂无可计算的输入缓存记录"}
+          </p>
+        </section>
+      </div>
 
+      <PerformanceMetrics performance={overview.performance} />
       <div className="detail-stack">
         <DetailSection
           title="Token 构成与行为分类"
@@ -340,6 +370,11 @@ export function OverviewPage({
           title="数据质量与统计口径"
           description={`定价覆盖 ${pricedCoverage} · ${issueCount > 0 ? `${issueCount} 项异常需核对` : "账本校验通过"}`}
         >
+          {overview.fastMultiplier != null && (
+            <p className="pricing-mode-note">
+              Codex 按每轮模式计价：Standard / Fast ×{overview.fastMultiplier}（购入 credits）。其他来源使用 USD；无遥测的调用显示用量未记录。
+            </p>
+          )}
           <div className="quality-strip" aria-label="数据质量">
             <div
               className={

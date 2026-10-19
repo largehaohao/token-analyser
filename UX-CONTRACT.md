@@ -36,6 +36,8 @@ No select/listbox, date picker, bulk table selection, toast, modal, authenticati
 - Session queries filter locally, commit after IME composition, and clear immediately. Empty input is distinct from no results. A clear action returns focus to the search input.
 - **Privacy override to URL defaults:** session IDs, search queries (which can contain local paths), list limit, and scroll position stay in tab-scoped sessionStorage. They never enter URLs or persistent localStorage. Range and active view are restored per tab; only `#overview` and `#sessions` appear in route URLs. Display unit uses the existing non-sensitive local preference.
 - Browser Back restores the route, selection, and range. Returning to sessions restores its query, batch limit, and scroll offset. Changing a query resets the batch; a selected session outside the query remains readable and is explicitly explained.
+- Below 780px, the filter toolbar starts collapsed with the current source, range and unit visible in its summary. The filter button exposes its expanded state and controls relationship.
+- Below 780px, list and detail are separate panes: selecting a session opens and focuses detail; returning restores the selected list item. The search shortcut reveals the list first. A selected item outside the search results remains accessible through “查看当前会话”. This presentation state stays local to the current mount.
 - Filters and new data cannot strand a batch beyond the dataset. Current visible/total count remains available. There are no sort or bulk-selection controls.
 
 ## Flow ledger
