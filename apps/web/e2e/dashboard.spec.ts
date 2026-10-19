@@ -29,6 +29,7 @@ test("overview keeps secondary analysis collapsed and accessible by keyboard", a
   await expect(page.locator(".disclaimer")).toContainText(/不代表 OpenAI 账单/);
   const pricing = await (await page.request.get("/overview")).json();
   await expect(page.locator(".disclaimer")).toContainText(pricing.rateCardAsOf);
+  await expect(page.locator(".disclaimer")).toContainText(pricing.apiPricesAsOf);
   await expect(page.getByTestId("trend-chart")).toBeVisible();
   await expect(page.getByTestId("donut-chart")).toBeHidden();
   await expect(page.getByTestId("model-mix")).toBeHidden();

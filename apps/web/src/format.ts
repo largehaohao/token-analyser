@@ -234,8 +234,11 @@ export function formatAbsoluteTime(iso: string | null): string {
   return new Date(t).toLocaleString("zh-CN", { hour12: false });
 }
 
-export function disclaimer(rateCardAsOf: string): string {
-  return `基于本地日志与公共费率的估算，不代表 OpenAI 账单或其他服务商账单。Codex credits 费率日期 ${rateCardAsOf}；其他来源的 USD 优先采用日志费用，Claude 无费用时按 API 费率估算。`;
+export function disclaimer(rateCardAsOf: string, apiPricesAsOf?: string): string {
+  const qwen = apiPricesAsOf
+    ? `千问按官方人民币价换算为 USD，费率日期 ${apiPricesAsOf}。`
+    : "";
+  return `基于本地日志与公共费率的估算，不代表 OpenAI 账单或其他服务商账单。Codex credits 费率日期 ${rateCardAsOf}；其他来源的 USD 优先采用日志费用，Claude 无费用时按 API 费率估算。${qwen}`;
 }
 
 export function sourceLabel(source: SessionSource = "codex"): string {

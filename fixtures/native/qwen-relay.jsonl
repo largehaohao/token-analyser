@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"native-qwen-relay","timestamp":"2026-10-19T00:00:00.000Z","cwd":"/workspace/relay"}
+{"type":"session_info","id":"info","parentId":null,"timestamp":"2026-10-19T00:00:00.000Z","name":"qwen relay demo"}
+{"type":"message","id":"u1","parentId":"info","timestamp":"2026-10-19T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Summarize the changelog"}]}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-10-19T00:00:02.000Z","message":{"role":"assistant","provider":"strata","model":"swift-1.5-iq3_xxs","content":[{"type":"text","text":"Changelog summarized."}],"usage":{"input":1000,"output":200,"cacheRead":5000,"cacheWrite":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}}}}

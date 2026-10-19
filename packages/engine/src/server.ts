@@ -16,6 +16,12 @@ import {
   updateRateCardFromOfficial,
   type PricingUpdateOptions,
 } from "./pricing-update.ts";
+import {
+  restoreApiPrices,
+  startQwenPriceAutoRefresh,
+  updateQwenPricesFromOfficial,
+  type QwenPricingUpdateOptions,
+} from "./qwen-pricing.ts";
 import { SessionStore, type SessionIngestOptions } from "./store.ts";
 import { watchSessions } from "./watch.ts";
 import { collectSessionFiles, isSessionFile } from "./session-files.ts";
@@ -407,12 +413,77 @@ function serveStatic(
   return true;
 }
 
+type PricingSourceResult = {
+  status: string;
+  asOf?: string;
+  modelCount?: number;
+};
+
+/**
+ * Refresh the Codex credit card and the Qwen API rates from their official
+ * sources. Each source is independent: one unreachable publisher must not
+ * discard the other's fresh rates, and a recalculation failure rolls both
+ * config files back.
+ */
+async function runPricingUpdate(
+  store: SessionStore,
+  pricingUpdate?: PricingUpdateOptions,
+  qwenPricingUpdate?: QwenPricingUpdateOptions,
+): Promise<{ error?: string; body?: Record<string, unknown> }> {
+  let codex: PricingSourceResult;
+  let codexPrevious: string | undefined;
+  try {
+    const result = await updateRateCardFromOfficial(pricingUpdate);
+    codex = { status: "ok", asOf: result.asOf, modelCount: result.modelCount };
+    codexPrevious = result.previousContent;
+  } catch (err) {
+    codex = {
+      status: err instanceof Error && err.message
+        ? err.message
+        : "official_pricing_unavailable",
+    };
+  }
+
+  let qwen: PricingSourceResult;
+  let qwenPrevious: string | undefined;
+  try {
+    const result = await updateQwenPricesFromOfficial(qwenPricingUpdate);
+    qwen = { status: "ok", asOf: result.asOf, modelCount: result.modelCount };
+    qwenPrevious = result.previousContent;
+  } catch (err) {
+    qwen = {
+      status: err instanceof Error && err.message
+        ? err.message
+        : "qwen_pricing_unavailable",
+    };
+  }
+
+  if (codex.status !== "ok" && qwen.status !== "ok") {
+    return { error: codex.status };
+  }
+
+  try {
+    store.refreshPricing();
+  } catch {
+    try {
+      if (codexPrevious) restoreRateCard(codexPrevious, pricingUpdate?.rateCardPath);
+      if (qwenPrevious) restoreApiPrices(qwenPrevious, qwenPricingUpdate?.apiPricesPath);
+    } catch {
+      return { error: "pricing_recalculation_rollback_failed" };
+    }
+    return { error: "pricing_recalculation_failed" };
+  }
+
+  return { body: { asOf: codex.asOf, modelCount: codex.modelCount, codex, qwen } };
+}
+
 export async function startServer(opts?: {
   port?: number;
   store?: SessionStore;
   staticDir?: string;
   maxImportBytes?: number;
   pricingUpdate?: PricingUpdateOptions;
+  qwenPricingUpdate?: QwenPricingUpdateOptions;
 }): Promise<{
   url: string;
   close: () => Promise<void>;
@@ -486,36 +557,19 @@ export async function startServer(opts?: {
         return;
       }
 
-      let update: Awaited<ReturnType<typeof updateRateCardFromOfficial>>;
-      try {
-        update = await updateRateCardFromOfficial(opts?.pricingUpdate);
-      } catch (err) {
-        const code = err instanceof Error ? err.message : "pricing_update_failed";
-        const status = code === "official_pricing_unavailable" ? 502 : 500;
-        sendJson(res, status, { error: code });
+      const update = await runPricingUpdate(
+        store,
+        opts?.pricingUpdate,
+        opts?.qwenPricingUpdate,
+      );
+
+      if (update.error) {
+        const unavailable = update.error.endsWith("_unavailable");
+        sendJson(res, unavailable ? 502 : 500, { error: update.error });
         return;
       }
 
-      try {
-        store.refreshPricing();
-      } catch {
-        try {
-          restoreRateCard(
-            update.previousContent,
-            opts?.pricingUpdate?.rateCardPath,
-          );
-        } catch {
-          sendJson(res, 500, { error: "pricing_recalculation_rollback_failed" });
-          return;
-        }
-        sendJson(res, 500, { error: "pricing_recalculation_failed" });
-        return;
-      }
-
-      sendJson(res, 200, {
-        asOf: update.asOf,
-        modelCount: update.modelCount,
-      });
+      sendJson(res, 200, update.body);
       return;
     }
 
@@ -744,6 +798,14 @@ async function main(): Promise<void> {
   console.log(`token-analyser engine listening on ${url}`);
 
   if (!fixtureDir) {
+    // Qwen publishes new rates without warning the local ledger, so refresh
+    // them automatically and keep every estimate on the dated official card.
+    startQwenPriceAutoRefresh(store, {
+      onUpdate: ({ asOf, modelCount }) =>
+        console.log(`qwen prices refreshed: ${modelCount} models (${asOf})`),
+      onError: (reason) => console.error(`qwen price refresh failed: ${reason}`),
+    });
+
     // Codex writes append-only JSONL files below dated directories. On macOS,
     // the recursive watcher can miss content changes in that tree, so use the
     // per-directory watcher plus its stat-based scan for reliable ingestion.

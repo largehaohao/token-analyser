@@ -66,15 +66,29 @@ Optional `~/.token-analyser/config.json` replaces the default discovery paths:
 ```json
 {
   "watch_paths": ["/absolute/path/to/sessions"],
-  "usd_per_credit": 0.05
+  "usd_per_credit": 0.05,
+  "usd_per_cny": 0.15
 }
 ```
 
 Codex rate card: `config/rate-card.json`. API-equivalent rates:
 `config/api-prices.json` (dated, sourced from official pricing pages). Recorded
-USD takes precedence. Credits apply only to Codex; Claude, Cursor, and pi costs
-are never converted to Codex credits. The price update button updates the Codex
-card; API rates can be maintained in the separate config file.
+USD takes precedence; a turn whose log records 0 spend counts as unbilled and is
+estimated from the official rate. Credits apply only to Codex; Claude, Cursor, and
+pi costs are never converted to Codex credits. The price update button refreshes the Codex
+card and the Qwen rates in `config/api-prices.json`; a publisher that cannot be
+reached leaves its own local rates untouched and the UI says which source
+failed. The `qwen` block owns Qwen updates: each entry names the official model
+ID, the pricing-page section and region tab to read, the CNY rates last
+accepted, the `cache_hit_ratio` / `cache_write_ratio` read from the page's
+cache note, and the `usd_per_cny` conversion (override it with `usd_per_cny` in
+`config.json`). Model IDs listed under `qwen.models[*].aliases` price as their
+canonical model for any provider, so a relay that reports its own name —
+`swift-1.5-iq3_xxs` serving `qwen3.8-flash-next` — never falls back to `—`. Only the public pricing
+document is fetched; session data never leaves the machine. The engine refreshes
+Qwen rates on startup and hourly whenever the card's Qwen date is not today's
+date, then re-prices local sessions; set `QWEN_PRICING_AUTO_UPDATE=0` to pin
+them.
 Parse cache: `~/.token-analyser/cache/`.
 Imported `.jsonl` / `.ndjson` files are copied to
 `~/.token-analyser/imports/` and restored on the next launch. Existing imports

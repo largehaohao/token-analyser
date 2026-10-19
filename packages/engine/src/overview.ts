@@ -10,6 +10,7 @@ import {
 } from "./types.ts";
 import { computeWaste } from "./waste.ts";
 import { loadRateCard } from "./rate-card.ts";
+import { loadApiPrices } from "./native-pricing.ts";
 import { collectTaskTimings, summarizePerformance } from "./performance.ts";
 
 export const OVERVIEW_SLICE_KEYS = [
@@ -58,6 +59,8 @@ export type Overview = {
   waste: Cost;
   unpricedRaw: number;
   rateCardAsOf: string;
+  /** Date of the Qwen rates in `config/api-prices.json`; empty when absent. */
+  apiPricesAsOf: string;
   fastMultiplier: number;
   quality: {
     pricedRaw: number;
@@ -407,6 +410,7 @@ export function buildOverview(
     waste: normalizeCost(waste),
     unpricedRaw,
     rateCardAsOf: card.as_of,
+    apiPricesAsOf: loadApiPrices().qwen?.as_of ?? "",
     fastMultiplier: card.fast_multiplier,
     quality: {
       pricedRaw: Math.max(0, cost.raw - unpricedRaw),

@@ -82,6 +82,19 @@ function mockedFetch(markdown = OFFICIAL_PRICING): typeof fetch {
     });
 }
 
+const QWEN_PRICING_MARKDOWN = readFileSync(
+  path.join(import.meta.dirname, "fixtures/qwen-pricing.md"),
+  "utf8",
+);
+
+function mockedQwenFetch(): typeof fetch {
+  return async () =>
+    new Response(QWEN_PRICING_MARKDOWN, {
+      status: 200,
+      headers: { "content-type": "text/markdown" },
+    });
+}
+
 afterEach(() => {
   delete process.env.TOKEN_ANALYSER_HOME;
   for (const directory of tempDirs.splice(0)) {
@@ -211,6 +224,35 @@ describe("updateRateCardFromOfficial", () => {
     process.env.TOKEN_ANALYSER_HOME = directory;
     const rateCardPath = path.join(directory, "rate-card.json");
     writeRateCard(rateCardPath, baseRateCard());
+    const apiPricesPath = path.join(directory, "api-prices.json");
+    writeFileSync(
+      apiPricesPath,
+      JSON.stringify(
+        {
+          as_of: "2026-01-01",
+          models: { "qwen3.8-flash-next": { input: 9, cached: 0.9, output: 9 } },
+          qwen: {
+            as_of: "2026-01-01",
+            source: "https://help.aliyun.com/zh/model-studio/model-pricing",
+            cache_rule_source: "https://help.aliyun.com/zh/model-studio/model-pricing",
+            cache_hit_ratio: 0.2,
+            cache_write_ratio: 1.25,
+            usd_per_cny: 0.1,
+            usd_per_cny_source: "test conversion rate",
+            models: {
+              "qwen3.8-flash-next": {
+                display: "qwen3.8-flash",
+                section: "千问Flash",
+                region: "华北2（北京）",
+                aliases: ["swift-1.5-iq3_xxs"],
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
     const store = new SessionStore({ cacheDir: path.join(directory, "cache") });
     const server = await startServer({
       port: 0,
@@ -218,6 +260,11 @@ describe("updateRateCardFromOfficial", () => {
       pricingUpdate: {
         rateCardPath,
         fetcher: mockedFetch(),
+        now: new Date(2026, 8, 23, 12),
+      },
+      qwenPricingUpdate: {
+        apiPricesPath,
+        fetcher: mockedQwenFetch(),
         now: new Date(2026, 8, 23, 12),
       },
     });
@@ -232,6 +279,8 @@ describe("updateRateCardFromOfficial", () => {
       expect(await response.json()).toEqual({
         asOf: "2026-09-23",
         modelCount: 6,
+        codex: { status: "ok", asOf: "2026-09-23", modelCount: 6 },
+        qwen: { status: "ok", asOf: "2026-09-23", modelCount: 1 },
       });
       const updated = JSON.parse(readFileSync(rateCardPath, "utf8")) as RateCard;
       expect(updated.models["gpt-6-sol"]).toEqual({
@@ -239,6 +288,85 @@ describe("updateRateCardFromOfficial", () => {
         cached: 5,
         output: 250,
       });
+      const apiPrices = JSON.parse(readFileSync(apiPricesPath, "utf8")) as {
+        models: Record<string, { input: number; cached: number; output: number }>;
+      };
+      expect(apiPrices.models["qwen3.8-flash-next"]).toMatchObject({
+        input: 0.08,
+        cached: 0.008,
+        output: 0.27,
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("reports the Codex failure but keeps the Qwen rates it fetched", async () => {
+    const directory = makeTempDir();
+    process.env.TOKEN_ANALYSER_HOME = directory;
+    const rateCardPath = path.join(directory, "rate-card.json");
+    const previousRateCard = writeRateCard(rateCardPath, baseRateCard());
+    const apiPricesPath = path.join(directory, "api-prices.json");
+    writeFileSync(
+      apiPricesPath,
+      JSON.stringify(
+        {
+          as_of: "2026-01-01",
+          models: {},
+          qwen: {
+            as_of: "2026-01-01",
+            source: "https://help.aliyun.com/zh/model-studio/model-pricing",
+            cache_rule_source: "https://help.aliyun.com/zh/model-studio/model-pricing",
+            cache_hit_ratio: 0.2,
+            cache_write_ratio: 1.25,
+            usd_per_cny: 0.1,
+            usd_per_cny_source: "test conversion rate",
+            models: {
+              "qwen3.8-flash-next": {
+                display: "qwen3.8-flash",
+                section: "千问Flash",
+                region: "华北2（北京）",
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    const store = new SessionStore({ cacheDir: path.join(directory, "cache") });
+    const server = await startServer({
+      port: 0,
+      store,
+      pricingUpdate: {
+        rateCardPath,
+        fetcher: async () => new Response("down", { status: 503 }),
+      },
+      qwenPricingUpdate: {
+        apiPricesPath,
+        fetcher: mockedQwenFetch(),
+        now: new Date(2026, 8, 23, 12),
+      },
+    });
+
+    try {
+      const response = await fetch(`${server.url}/pricing/update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.codex).toEqual({ status: "official_pricing_unavailable" });
+      expect(body.qwen).toEqual({
+        status: "ok",
+        asOf: "2026-09-23",
+        modelCount: 1,
+      });
+      expect(readFileSync(rateCardPath, "utf8")).toBe(previousRateCard);
+      expect(
+        JSON.parse(readFileSync(apiPricesPath, "utf8")).qwen.as_of,
+      ).toBe("2026-09-23");
     } finally {
       await server.close();
     }

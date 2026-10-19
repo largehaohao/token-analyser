@@ -229,7 +229,7 @@ export function OverviewPage({
         </button>
       </div>
 
-      <p className="disclaimer">{disclaimer(overview.rateCardAsOf)}</p>
+      <p className="disclaimer">{disclaimer(overview.rateCardAsOf, overview.apiPricesAsOf)}</p>
       {overview.cost.unmeasured ? <p className="data-notice" role="status">{usageNote(overview.cost)}</p> : null}
       {(unpriced || issueCount > 0 || !identity.ok) && (
         <p className="data-notice" role="status">

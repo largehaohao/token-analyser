@@ -4,6 +4,7 @@ import { DEFAULT_WASTE_TOGGLES } from "../src/types.ts";
 import { buildTree } from "../src/tree.ts";
 import { buildOverview } from "../src/overview.ts";
 import { loadRateCard } from "../src/rate-card.ts";
+import { loadApiPrices } from "../src/native-pricing.ts";
 
 function cost(raw: number): Cost {
   return {
@@ -132,6 +133,7 @@ describe("buildOverview", () => {
     expect(overview.slices.find((s) => s.key === "code")?.raw).toBe(1000);
     expect(overview.slices.find((s) => s.key === "planning")?.raw).toBe(500);
     expect(overview.rateCardAsOf).toBe(loadRateCard().as_of);
+    expect(overview.apiPricesAsOf).toBe(loadApiPrices().qwen?.as_of);
     expect(overview.fastMultiplier).toBe(loadRateCard().fast_multiplier);
     expect(overview.quality).toEqual({
       pricedRaw: 1600,

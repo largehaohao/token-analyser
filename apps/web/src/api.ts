@@ -181,6 +181,7 @@ export type Overview = {
   waste: Cost;
   unpricedRaw: number;
   rateCardAsOf: string;
+  apiPricesAsOf?: string;
   fastMultiplier?: number;
   quality?: {
     pricedRaw: number;
@@ -289,9 +290,18 @@ export async function getOverview(
   return requestJson<Overview>(`/overview?${params.toString()}`);
 }
 
+export type PricingSourceResult = {
+  /** `ok`, or the engine error code for that price source. */
+  status: string;
+  asOf?: string;
+  modelCount?: number;
+};
+
 export type ModelPricingUpdate = {
   asOf: string;
   modelCount: number;
+  codex?: PricingSourceResult;
+  qwen?: PricingSourceResult;
 };
 
 export async function updateModelPrices(): Promise<ModelPricingUpdate> {
@@ -310,13 +320,25 @@ export async function updateModelPrices(): Promise<ModelPricingUpdate> {
     if (message.includes("official_pricing_unavailable")) {
       throw new Error("无法连接 OpenAI Codex 官网价格页，请检查网络后重试。");
     }
+    if (message.includes("qwen_pricing_unavailable")) {
+      throw new Error("无法连接千问官方价格页，请检查网络后重试。");
+    }
     if (message.includes("official_pricing_format_changed")) {
       throw new Error("官网价格表格式发生变化，未修改本地价格配置。");
     }
-    if (message.includes("rate_card_read_failed")) {
+    if (message.includes("qwen_pricing_format_changed")) {
+      throw new Error("千问官方价格表格式发生变化，未修改本地价格配置。");
+    }
+    if (
+      message.includes("rate_card_read_failed") ||
+      message.includes("api_prices_read_failed")
+    ) {
       throw new Error("无法读取本地模型价格配置文件。");
     }
-    if (message.includes("rate_card_write_failed")) {
+    if (
+      message.includes("rate_card_write_failed") ||
+      message.includes("api_prices_write_failed")
+    ) {
       throw new Error("本地价格配置写入失败，请检查文件权限。");
     }
     if (message.includes("pricing_recalculation_failed")) {

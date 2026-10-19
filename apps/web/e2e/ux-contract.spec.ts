@@ -153,7 +153,12 @@ test("overview updates model pricing with visible loading and success states", a
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ asOf: "2026-09-23", modelCount: 13 }),
+      body: JSON.stringify({
+        asOf: "2026-09-23",
+        modelCount: 13,
+        codex: { status: "ok", asOf: "2026-09-23", modelCount: 13 },
+        qwen: { status: "ok", asOf: "2026-09-23", modelCount: 1 },
+      }),
     });
   });
 
@@ -166,16 +171,44 @@ test("overview updates model pricing with visible loading and success states", a
   await button.click();
   await expect(button).toBeDisabled();
   await expect(
-    page.getByText("正在从 OpenAI 官网读取模型价格…"),
+    page.getByText("正在从 OpenAI Codex 与千问官方价格页读取模型价格…"),
   ).toBeVisible();
 
   update.release();
   await expect(
     page.getByText(
-      "已同步 13 种模型价格（2026-09-23），并重新计算本地成本。",
+      "已同步 Codex 13 种与千问 1 种模型价格（2026-09-23），并重新计算本地成本。",
     ),
   ).toBeVisible();
   await expect(button).toBeEnabled();
+});
+
+test("overview explains the price source that failed to respond", async ({
+  page,
+}) => {
+  await page.route("**/pricing/update", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        asOf: "",
+        modelCount: 0,
+        codex: { status: "official_pricing_unavailable" },
+        qwen: { status: "ok", asOf: "2026-10-19", modelCount: 1 },
+      }),
+    }),
+  );
+
+  await page.goto("/");
+  await expect(page.getByTestId("overview-page")).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.getByRole("button", { name: "更新模型价格" }).click();
+  await expect(
+    page.getByText(
+      "已同步 千问 1 种模型价格（2026-10-19），Codex价格未更新（OpenAI 官网价格页无法访问），价格保持不变，并重新计算本地成本。",
+    ),
+  ).toBeVisible();
 });
 
 test("Back and reload retain private filters, selection, and range", async ({

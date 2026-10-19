@@ -57,6 +57,26 @@ test("Claude, pi and Cursor imports show source, response, pricing basis and mis
   await expect(page.locator(".session-kicker .badge", { hasText: "Cursor" })).toBeVisible();
 });
 
+test("a relay model ID prices as its canonical Qwen model", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "会话明细" }).click();
+  await page.getByRole("button", { name: "全部", exact: true }).click();
+  const body = readFileSync(path.join(fixtureDir, "qwen-relay.jsonl"), "utf8");
+  await page.getByLabel("选择会话 JSONL 文件").setInputFiles({
+    name: "qwen-relay.jsonl",
+    mimeType: "application/x-ndjson",
+    buffer: Buffer.from(body),
+  });
+  await expect(page.locator("#import-feedback")).toContainText("已导入 qwen-relay.jsonl");
+  await expect(page.locator(".session-main").first()).toContainText("swift-1.5-iq3_xxs");
+  await page.locator(".turn-expand").first().click();
+  await expect(page.locator(".turn-detail").first()).toContainText("swift-1.5-iq3_xxs");
+  await expect(page.getByLabel("Token 单价").first()).toContainText("USD");
+  await expect(page.getByLabel("Token 单价").first()).toContainText("0.4034");
+  const headline = await page.locator(".headline-main .headline-value").first().innerText();
+  expect(headline.trim()).not.toBe("—");
+});
+
 test("every source filters the list and overview, and survives reload and browser back", async ({ page }) => {
   await seedNative(page);
   await page.goto("/#sessions");

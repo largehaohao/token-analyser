@@ -6,6 +6,8 @@ import { defaultSessionPaths } from "./session-files.ts";
 export type UserConfig = {
   watch_paths: string[];
   usd_per_credit?: number;
+  /** Overrides the CNY→USD rate used when refreshing Qwen prices. */
+  usd_per_cny?: number;
 };
 
 function defaultWatchPaths(): string[] {
@@ -32,9 +34,16 @@ export function loadUserConfig(): UserConfig {
       parsed.usd_per_credit >= 0
         ? parsed.usd_per_credit
         : undefined;
+    const usdPerCny =
+      typeof parsed.usd_per_cny === "number" &&
+      Number.isFinite(parsed.usd_per_cny) &&
+      parsed.usd_per_cny > 0
+        ? parsed.usd_per_cny
+        : undefined;
     return {
       watch_paths: watchPaths.length > 0 ? watchPaths : defaultWatchPaths(),
       usd_per_credit: usdPerCredit,
+      usd_per_cny: usdPerCny,
     };
   } catch {
     return { watch_paths: defaultWatchPaths() };

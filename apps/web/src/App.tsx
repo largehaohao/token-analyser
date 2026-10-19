@@ -32,6 +32,7 @@ import { NowProvider, useNow } from "./useNow";
 import { readUnitPref, writeUnitPref } from "./unit-pref";
 import { SESSION_PAGE_SIZE, resolveSelectedSession } from "./session-page";
 import { readDroppedFile, type ImportStatus } from "./import-file";
+import { pricingUpdateNotice as buildPricingUpdateNotice } from "./pricing-notice";
 import { overviewDisplayState } from "./overview-state";
 import { Button, Icon, LedgerMark, Notice, StatePanel } from "./ui";
 import {
@@ -343,7 +344,7 @@ function AppShell() {
     setUpdatingModelPrices(true);
     setPricingUpdateNotice({
       tone: "info",
-      message: "正在从 OpenAI 官网读取模型价格…",
+      message: "正在从 OpenAI Codex 与千问官方价格页读取模型价格…",
     });
     try {
       const result = await requestModelPriceUpdate();
@@ -357,15 +358,16 @@ function AppShell() {
           () => false,
         ),
       ]);
-      const allRefreshed = overviewRefreshed && sessionsRefreshed;
-      setPricingUpdateNotice({
-        tone: allRefreshed ? "success" : "warning",
-        message: allRefreshed
-          ? `已同步 ${result.modelCount} 种模型价格（${result.asOf}），并重新计算本地成本。`
-          : overviewRefreshed
-            ? `已同步 ${result.modelCount} 种模型价格（${result.asOf}），成本总览已更新，但会话列表刷新失败。`
-            : `已同步 ${result.modelCount} 种模型价格（${result.asOf}），但成本总览刷新失败，请重试。`,
-      });
+      setPricingUpdateNotice(
+        buildPricingUpdateNotice(
+          result,
+          overviewRefreshed && sessionsRefreshed
+            ? "all"
+            : overviewRefreshed
+              ? "overview"
+              : "none",
+        ),
+      );
     } catch (error) {
       setPricingUpdateNotice({
         tone: "error",

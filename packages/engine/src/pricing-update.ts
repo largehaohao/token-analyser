@@ -1,11 +1,5 @@
-import { randomUUID } from "node:crypto";
-import {
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import path from "node:path";
+import { readFileSync } from "node:fs";
+import { writeFileAtomically } from "./atomic-write.ts";
 import { RATE_CARD_PATH } from "./rate-card.ts";
 import type { RateCard } from "./types.ts";
 
@@ -157,20 +151,9 @@ function parseFastMultiplier(markdown: string): number {
 }
 
 function writeRateCardContent(rateCardPath: string, content: string): void {
-  const directory = path.dirname(rateCardPath);
-  const temporaryPath = path.join(
-    directory,
-    `.${path.basename(rateCardPath)}.${process.pid}.${randomUUID()}.tmp`,
-  );
   try {
-    writeFileSync(temporaryPath, content, "utf8");
-    renameSync(temporaryPath, rateCardPath);
+    writeFileAtomically(rateCardPath, content);
   } catch {
-    try {
-      unlinkSync(temporaryPath);
-    } catch {
-      // The temporary file may already have been renamed or removed.
-    }
     throw new Error("rate_card_write_failed");
   }
 }

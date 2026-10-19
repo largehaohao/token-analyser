@@ -74,6 +74,13 @@ describe("wasteShare", () => {
   it("includes the rate-card date in the billing disclaimer", () => {
     expect(disclaimer("2026-08-27")).toContain("不代表 OpenAI 账单");
     expect(disclaimer("2026-08-27")).toContain("2026-08-27");
+    expect(disclaimer("2026-08-27")).not.toContain("千问");
+  });
+
+  it("dates the Qwen conversion rate when the overview carries it", () => {
+    expect(disclaimer("2026-08-27", "2026-10-19")).toContain(
+      "千问按官方人民币价换算为 USD，费率日期 2026-10-19",
+    );
   });
 
   it("names unpriced leftover tokens instead of hiding them", () => {
