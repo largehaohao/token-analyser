@@ -29,10 +29,10 @@ Default sources are discovered recursively:
 
 | Source | Local records | Analysis |
 | --- | --- | --- |
-| Codex | `~/.codex/sessions/**/*.jsonl` (`CODEX_HOME` supported) | Tokens, credits, USD, tools, TTFT and tok/s when logged |
+| Codex | `~/.codex/sessions/**/*.jsonl` (`CODEX_HOME` supported) | Tokens, credits, USD, tools; agent-task TTFT and tok/s when logged |
 | Claude Code | `~/.claude/projects/**/*.jsonl` (`CLAUDE_CONFIG_DIR` supported) | Input, cache read/write, output, API-equivalent USD, tools, subagents |
-| Cursor | `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` and Cursor User `globalStorage/state.vscdb` / `workspaceStorage/**/state.vscdb` | Conversation, tools, session metadata; usage only when recorded |
-| pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR` supported) | Input, cache read/write, output, recorded USD, tools, branch/fork context |
+| Cursor | `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` and Cursor User `globalStorage/state.vscdb` / `workspaceStorage/**/state.vscdb` | Conversation, tools, session metadata, Cursor's own context-token meter; request usage, TTFT and tok/s are not recorded |
+| pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR` supported) | Input, cache read/write, output, recorded USD, tools, branch/fork context, per-request duration (tok/s) |
 
 Cursor's User directory is `~/Library/Application Support/Cursor/User` on macOS,
 `%APPDATA%/Cursor/User` on Windows, and `$XDG_CONFIG_HOME/Cursor/User` (or
@@ -41,13 +41,27 @@ changes are watched. The database schema is internal to Cursor and may change.
 Zero-valued Cursor token placeholders are treated as missing telemetry, not
 measured zero. The UI shows `—` for missing usage and `≥` for partial totals.
 TTFT and tok/s stay unavailable for logs that do not record the required timings.
+The performance panel states which unit it measured: **整次 agent 任务** (Codex
+`task_started` / `task_complete` windows) or **单次模型请求** (sources that only
+record request timing, such as pi's `durationMs`). The two are never mixed, and
+neither is derived from gaps between log timestamps. A source that records
+neither request duration nor output tokens — including Cursor, whose local store
+keeps both at zero — reports `—` with the reason stated.
 The request detail table and its expanded rows show TTFT (seconds) and tok/s
 for each LLM call. Request-level `time_to_first_token_ms` / `ttft_ms`,
 `duration_ms`, and `output_tokens_per_second` fields are read from the call's
-metadata (including `metrics`, `timing`, or `request_performance`). Recorded
+metadata (including `metrics`, `timing`, `request_performance`, and pi's
+`durationMs`). Recorded
 speed takes precedence; otherwise tok/s is output tokens divided by the
 recorded request duration, including first-token wait. Task-level measurements
 are kept in the summary and are not copied into individual request rows.
+
+Cursor records how much context a conversation held
+(`promptTokenBreakdown`, `contextTokensUsed`, `contextTokenLimit`,
+`contextUsagePercent`). The session's **上下文与会话信息** section shows that
+meter as a context size with its category breakdown. It is a context
+measurement, not billable token usage, so it never enters the token ledger, cost
+or cache-hit figures.
 
 Use the visible **会话来源** buttons below the header to select all sources,
 Codex, Claude Code, Cursor, or pi in both the overview and session detail views.

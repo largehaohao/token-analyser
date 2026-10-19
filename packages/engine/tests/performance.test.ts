@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { extractTaskTimings, requestPerformance, summarizePerformance } from "../src/performance.ts";
+import {
+  extractTaskTimings,
+  requestPerformance,
+  summarizePerformance,
+  summarizeSessions,
+} from "../src/performance.ts";
 import { analyseSession } from "../src/snapshot.ts";
 import { buildOverview } from "../src/overview.ts";
-import type { RolloutLine } from "../src/types.ts";
+import { emptyCost, type RolloutLine, type SessionSnapshot, type Turn } from "../src/types.ts";
 
 const base = Date.parse("2026-10-08T00:00:00Z");
 function event(seconds: number, type: string, payload: Record<string, unknown>): RolloutLine {
@@ -45,7 +50,7 @@ describe("task performance", () => {
     });
     expect(summarizePerformance(samples)).toEqual({
       taskCount: 1, ttftSampleCount: 1, speedSampleCount: 1,
-      avgTtftMs: 1200, outputTokensPerSecond: 50,
+      avgTtftMs: 1200, outputTokensPerSecond: 50, basis: "task",
     });
   });
 
@@ -99,7 +104,53 @@ describe("task performance", () => {
     const overview = buildOverview([root], { watchPath: "/tmp", sinceMs: base + 15_000, now: "2026-10-08T00:01:00Z" });
     expect(overview.performance).toEqual({
       taskCount: 1, ttftSampleCount: 1, speedSampleCount: 1,
-      avgTtftMs: 2000, outputTokensPerSecond: 20,
+      avgTtftMs: 2000, outputTokensPerSecond: 20, basis: "task",
+    });
+  });
+});
+
+describe("session performance basis", () => {
+  function snapshot(id: string, overrides: Partial<SessionSnapshot>): SessionSnapshot {
+    return {
+      id, source: "codex", sourceId: id, parentId: null, nickname: null, cwd: null,
+      live: false, path: `/tmp/${id}.jsonl`, startedAt: null, lastEventAt: null, model: null,
+      effort: null, ledger_warning: false, parse_errors: [], fastMode: false,
+      cost: emptyCost(), waste: emptyCost(), toggles: {}, tree: {} as never, turns: [],
+      suggestions: [], children: [], taskTimings: [], ...overrides,
+    } as SessionSnapshot;
+  }
+  function requestTurn(id: string, output: number, durationMs: number, ttftMs: number | null): Turn {
+    return {
+      id, sessionId: id, startedAt: "2026-10-08T00:00:00.000Z", endedAt: "2026-10-08T00:00:02.000Z",
+      model: null, effort: null, fastMode: false, pricing: null, usageRecorded: true,
+      requestPerformance: { ttftMs, durationMs, outputTokensPerSecond: output * 1000 / durationMs, speedSource: "duration" },
+      prompt: "", response: "", tools: [], usage: usage(output),
+      cost: emptyCost(), bucket: "other", labels: [], hasPatchApply: false, collaborationMode: null,
+    };
+  }
+
+  it("falls back to per-request timing when a session records no agent tasks", () => {
+    const pi = snapshot("pi:1", {
+      source: "pi",
+      turns: [requestTurn("pi:1:r1", 10, 2000, null)],
+      taskTimings: [],
+    });
+    expect(summarizeSessions([pi])).toEqual({
+      taskCount: 1, ttftSampleCount: 0, speedSampleCount: 1,
+      avgTtftMs: null, outputTokensPerSecond: 5, basis: "request",
+    });
+  });
+
+  it("prefers agent-task timing and reports nothing when no timing exists", () => {
+    const codex = snapshot("codex:1", {
+      taskTimings: [{ id: "t1", startedAt: null, endedAt: "2026-10-08T00:00:10.000Z", durationMs: 10_000, ttftMs: 1000, outputTokens: 500 }],
+      turns: [requestTurn("codex:1:r1", 10, 1000, 100)],
+    });
+    const cursor = snapshot("cursor:1", { source: "cursor", turns: [requestTurn("cursor:1:r1", 10, 2000, null)], taskTimings: [] });
+    expect(summarizeSessions([codex, cursor]).basis).toBe("task");
+    expect(summarizeSessions([codex]).outputTokensPerSecond).toBe(50);
+    expect(summarizeSessions([snapshot("pi:empty", { source: "pi", taskTimings: [] })])).toMatchObject({
+      taskCount: 0, avgTtftMs: null, outputTokensPerSecond: null, basis: null,
     });
   });
 });

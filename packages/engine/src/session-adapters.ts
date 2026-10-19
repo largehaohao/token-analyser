@@ -3,7 +3,7 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { preview, sha256 } from "./hash.ts";
 import { nativeCost } from "./native-pricing.ts";
 import { requestPerformance } from "./performance.ts";
-import type { RolloutLine, SessionMeta, SessionSource, TaskTiming, TokenUsage, ToolCall, Turn } from "./types.ts";
+import type { ContextMeasurement, RolloutLine, SessionMeta, SessionSource, TaskTiming, TokenUsage, ToolCall, Turn } from "./types.ts";
 
 export function record(value: unknown): Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value)
@@ -37,6 +37,7 @@ export type NativeSession = {
   messageCount: number;
   lastEventAt: string | null;
   taskTimings: TaskTiming[];
+  contextMeasurement?: ContextMeasurement | null;
   forkedFrom?: string;
   model?: string | null;
 };
@@ -121,12 +122,28 @@ export function parseNativeSession(events: RolloutLine[], filePath: string, sour
     ? path.basename(path.dirname(path.dirname(filePath))) : nativeId;
   const ownId = source === "claude" && agentId ? `${claudeParent}:agent:${text(agentId)}` : nativeId;
   const id = `${source}:${ownId}`;
+  const measurement = record(header?.contextMeasurement);
   const meta: SessionMeta = {
     id, parentId: source === "claude" && agentId ? `claude:${claudeParent}`
       : source === "cursor" && header?.parentSessionId ? `cursor:${text(header.parentSessionId)}` : null,
     nickname: source === "pi" ? text([...events].reverse().find((event) => event.type === "session_info")?.name) || null : agentId ? text(agentId) : text(header?.name) || null,
     cwd: text(events.find((event) => event.cwd)?.cwd) || null,
     startedAt: iso(header?.timestamp) || null,
+    contextMeasurement: source === "cursor" && Object.keys(measurement).length > 0
+      ? {
+        usedTokens: number(measurement.usedTokens),
+        limitTokens: number(measurement.limitTokens),
+        usagePercent: number(measurement.usagePercent),
+        source: text(measurement.source) || "cursor",
+        categories: (Array.isArray(measurement.categories) ? measurement.categories : [])
+          .map((item) => {
+            const category = record(item);
+            const tokens = number(category.tokens);
+            return tokens == null ? null : { id: text(category.id), label: text(category.label), tokens };
+          })
+          .filter((item): item is { id: string; label: string; tokens: number } => item != null),
+      }
+      : null,
   };
   const lastEventAt = iso(events.at(-1)?.timestamp) || fallbackTimestamp(filePath) || null;
   const outputs = new Map<string, string>();

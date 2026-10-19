@@ -14,7 +14,7 @@ import { tokenAnalyserHome } from "./config.ts";
 import type { SessionSnapshot } from "./types.ts";
 
 // v12 includes request-level timing alongside the existing task metrics.
-export const CACHE_VERSION = 12;
+export const CACHE_VERSION = 13;
 
 export function cacheDir(home?: string): string {
   return path.join(home ?? tokenAnalyserHome(), "cache");

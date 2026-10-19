@@ -321,7 +321,9 @@ function AppShell() {
         setSessionLoad({ id, status: "error" });
         // Keep the last known detail visible while a live/periodic refresh is
         // temporarily unavailable. Clearing it makes a transient network or
-        // backend error look like the user lost their selection.
+        // backend error look like the user lost their selection. Still reject
+        // so callers that await success (price update) can warn honestly.
+        throw err;
       }
     })();
     sessionInFlight.current = { id, requestId, promise };
@@ -348,24 +350,36 @@ function AppShell() {
     });
     try {
       const result = await requestModelPriceUpdate();
-      const [overviewRefreshed, sessionsRefreshed] = await Promise.all([
-        refreshOverview(true).then(
-          () => true,
-          () => false,
-        ),
-        refreshList(true).then(
-          () => true,
-          () => false,
-        ),
-      ]);
+      const openSessionId = selectedIdRef.current;
+      const detailRefresh =
+        openSessionId && viewRef.current === "sessions"
+          ? refreshSession(openSessionId).then(
+              () => true,
+              () => false,
+            )
+          : Promise.resolve(true);
+      const [overviewRefreshed, sessionsRefreshed, detailRefreshed] =
+        await Promise.all([
+          refreshOverview(true).then(
+            () => true,
+            () => false,
+          ),
+          refreshList(true).then(
+            () => true,
+            () => false,
+          ),
+          detailRefresh,
+        ]);
       setPricingUpdateNotice(
         buildPricingUpdateNotice(
           result,
-          overviewRefreshed && sessionsRefreshed
-            ? "all"
-            : overviewRefreshed
+          !overviewRefreshed
+            ? "none"
+            : !sessionsRefreshed
               ? "overview"
-              : "none",
+              : !detailRefreshed
+                ? "detail"
+                : "all",
         ),
       );
     } catch (error) {
@@ -377,7 +391,7 @@ function AppShell() {
     } finally {
       setUpdatingModelPrices(false);
     }
-  }, [refreshList, refreshOverview]);
+  }, [refreshList, refreshOverview, refreshSession]);
 
   useEffect(() => {
     void refreshOverview().catch(() => undefined);
@@ -791,7 +805,11 @@ function AppShell() {
                           tone="error"
                           action={
                             <Button
-                              onClick={() => void refreshSession(selectedId)}
+                              onClick={() =>
+                                void refreshSession(selectedId).catch(
+                                  () => undefined,
+                                )
+                              }
                             >
                               重试
                             </Button>
@@ -836,7 +854,11 @@ function AppShell() {
                     title="会话加载失败"
                     description="请确认本地引擎正在运行，然后重试。"
                   >
-                    <Button onClick={() => void refreshSession(selectedId)}>
+                    <Button
+                      onClick={() =>
+                        void refreshSession(selectedId).catch(() => undefined)
+                      }
+                    >
                       重试
                     </Button>
                   </StatePanel>

@@ -404,6 +404,7 @@ export function startQwenPriceAutoRefresh(
   if (process.env.QWEN_PRICING_AUTO_UPDATE === "0") return () => {};
   const refresh = opts.update ?? updateQwenPricesFromOfficial;
   let stopped = false;
+  let running = false;
 
   async function tick(): Promise<void> {
     if (stopped) return;
@@ -414,7 +415,17 @@ export function startQwenPriceAutoRefresh(
         restoreApiPrices(update.previousContent, opts.apiPricesPath);
         return;
       }
-      store.refreshPricing();
+      try {
+        store.refreshPricing();
+      } catch (error) {
+        try {
+          restoreApiPrices(update.previousContent, opts.apiPricesPath);
+        } catch {
+          opts.onError?.("pricing_recalculation_rollback_failed");
+          return;
+        }
+        throw error;
+      }
       opts.onUpdate?.({ asOf: update.asOf, modelCount: update.modelCount });
     } catch (error) {
       // A stale card stays auditable; the next tick retries.
@@ -422,8 +433,16 @@ export function startQwenPriceAutoRefresh(
     }
   }
 
-  const timer = setInterval(() => void tick(), opts.intervalMs ?? QWEN_AUTO_REFRESH_MS);
-  void tick();
+  function runTick(): void {
+    if (stopped || running) return;
+    running = true;
+    void tick().finally(() => {
+      running = false;
+    });
+  }
+
+  const timer = setInterval(runTick, opts.intervalMs ?? QWEN_AUTO_REFRESH_MS);
+  runTick();
   return () => {
     stopped = true;
     clearInterval(timer);

@@ -5,7 +5,7 @@ import { buildTree } from "./tree.ts";
 import { computeWaste } from "./waste.ts";
 import { extractContextProfile } from "./context-profile.ts";
 import { loadRateCard } from "./rate-card.ts";
-import { collectTaskTimings, extractTaskTimings, summarizePerformance } from "./performance.ts";
+import { collectTaskTimings, extractTaskTimings, summarizeSessions } from "./performance.ts";
 import { detectSource, parseNativeSession } from "./session-adapters.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
@@ -100,7 +100,7 @@ export function analyseSession(args: {
     args.events.length > 0 ? args.events[args.events.length - 1]! : null;
   const taskTimings = native?.taskTimings ?? extractTaskTimings(args.events, { isSubagent });
 
-  return {
+  const base: SessionSnapshot = {
     id: meta.id,
     source,
     sourceId: native?.sourceId ?? meta.id,
@@ -127,10 +127,9 @@ export function analyseSession(args: {
     children,
     suggestions,
     context: extractContextProfile(args.events),
+    contextMeasurement: native?.meta.contextMeasurement ?? null,
     taskTimings,
-    performance: summarizePerformance([
-      ...taskTimings,
-      ...children.flatMap(collectTaskTimings),
-    ]),
   };
+
+  return { ...base, performance: summarizeSessions([base]) };
 }

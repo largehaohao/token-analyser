@@ -58,6 +58,8 @@ describe("native session adapters", () => {
     expect(snap.cost.raw).toBe(723); expect(snap.cost.usd).toBeCloseTo(0.121395, 10);
     expect(snap.cost.credits).toBeNull(); expect(snap.turns[0].pricing).toBeNull();
     expect(snap.turns[0].tools[0].outputPreview).toBe("Demo README");
+    expect(snap.turns[0].requestPerformance?.durationMs).toBe(2000);
+    expect(snap.performance).toMatchObject({ basis: "request", avgTtftMs: null, ttftSampleCount: 0, outputTokensPerSecond: 5 });
   });
 
   it("excludes inherited pi fork entries from total spend", () => {
@@ -78,6 +80,11 @@ describe("native session adapters", () => {
     expect(snap.turns[0].usageRecorded).toBe(false);
     expect(snap.turns[0].prompt).toBe("Read the README"); expect(snap.turns[0].tools).toHaveLength(1);
     expect(snap.performance?.outputTokensPerSecond).toBeNull();
+    expect(snap.contextMeasurement).toMatchObject({
+      usedTokens: 24_556, limitTokens: 200_000, usagePercent: 12, source: "cursor",
+      categories: [{ id: "conversation", label: "会话", tokens: 6_057 }, { id: "tools", label: "工具定义", tokens: 7_424 }],
+    });
+    expect(snap.cost.raw).toBe(0);
     const store = new SessionStore({ cacheDir: path.join(dir, "cache") }); store.refresh([snap.path]);
     expect(store.overview({ watchPath: dir }).cost).toMatchObject({ unmeasured: 1, usd: null, credits: null });
   });
@@ -96,7 +103,7 @@ function cursorDb(dir: string) {
   db.exec("PRAGMA journal_mode=WAL; CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB)");
   const put = db.prepare("INSERT OR REPLACE INTO cursorDiskKV VALUES (?, ?)");
   function session(id: string, parent = "", measured = false) {
-    put.run(`composerData:${id}`, JSON.stringify({ composerId: id, name: `Cursor ${id}`, createdAt: Date.now() - 86400000, lastUpdatedAt: Date.now() - 86400000, subagentInfo: { parentComposerId: parent }, modelConfig: { selectedModels: [{ modelId: "selected-model" }] }, fullConversationHeadersOnly: [{ bubbleId: "user" }, { bubbleId: "assistant" }] }));
+    put.run(`composerData:${id}`, JSON.stringify({ composerId: id, name: `Cursor ${id}`, createdAt: Date.now() - 86400000, lastUpdatedAt: Date.now() - 86400000, subagentInfo: { parentComposerId: parent }, modelConfig: { selectedModels: [{ modelId: "selected-model" }] }, contextTokensUsed: measured ? 24_000 : null, contextTokenLimit: measured ? 200_000 : null, contextUsagePercent: measured ? 12 : null, promptTokenBreakdown: measured ? { totalUsedTokens: 24_556, maxTokens: 200_000, categories: [{ id: "conversation", label: "Conversation", estimatedTokens: 6_057 }] } : undefined, fullConversationHeadersOnly: [{ bubbleId: "user" }, { bubbleId: "assistant" }] }));
     put.run(`bubbleId:${id}:user`, JSON.stringify({ bubbleId: "user", type: 1, text: "Read README", createdAt: Date.now() - 86400000 }));
     put.run(`bubbleId:${id}:assistant`, JSON.stringify({ bubbleId: "assistant", type: 2, text: "Reviewed", createdAt: Date.now() - 86400000, tokenCount: { inputTokens: measured ? 100 : 0, outputTokens: measured ? 20 : 0 }, toolFormerData: { name: "read_file", toolCallId: "tool", params: '{"target_file":"README.md"}', result: "Demo README" } }));
   }
@@ -138,6 +145,24 @@ describe("Cursor database and multi-source integration", () => {
       expect(store.list()[0].cost.raw).toBe(120);
       expect(store.get("cursor:parent")?.turns[0].requestPerformance).toMatchObject({ ttftMs: 120, outputTokensPerSecond: 15 });
     } finally { first.db.close(); second.db.close(); }
+  });
+
+  it("reports Cursor's own context meter as a measurement, never as billable tokens", () => {
+    const dir = home();
+    const { file, db } = cursorDb(dir);
+    try {
+      const snapshots = ingestSessions(file);
+      const child = snapshots.find((snap) => snap.id === "cursor:child")!;
+      expect(child.contextMeasurement).toMatchObject({
+        usedTokens: 24_000, limitTokens: 200_000, usagePercent: 12, source: "cursor",
+        categories: [{ id: "conversation", label: "Conversation", tokens: 6_057 }],
+      });
+      expect(child.cost.raw).toBe(120);
+      const parent = snapshots.find((snap) => snap.id === "cursor:parent")!;
+      expect(parent.contextMeasurement).toBeNull();
+      const store = new SessionStore({ cacheDir: path.join(dir, "cache") }); store.refresh([file]);
+      expect(store.overview({ watchPath: dir }).cost.raw).toBe(120);
+    } finally { db.close(); }
   });
 
   it("discovers JSONL and DB file roots and updates Cursor sessions when only WAL changes", async () => {

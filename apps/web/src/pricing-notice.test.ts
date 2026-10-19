@@ -17,6 +17,14 @@ describe("pricing update notice", () => {
       message:
         "已同步 13 种模型价格（2026-09-23），成本总览已更新，但会话列表刷新失败。",
     });
+
+    expect(
+      pricingUpdateNotice({ asOf: "2026-09-23", modelCount: 13 }, "detail"),
+    ).toEqual({
+      tone: "warning",
+      message:
+        "已同步 13 种模型价格（2026-09-23），成本总览与会话列表已更新，但当前会话明细刷新失败。",
+    });
   });
 
   it("names both sources when both refresh", () => {
@@ -51,6 +59,24 @@ describe("pricing update notice", () => {
     expect(partial.message).toBe(
       "已同步 千问 1 种模型价格（2026-10-19），Codex价格未更新（OpenAI 官网价格页无法访问），价格保持不变，并重新计算本地成本。",
     );
+  });
+
+  it("warns when only the open session detail failed to refresh", () => {
+    expect(
+      pricingUpdateNotice(
+        {
+          asOf: "2026-10-19",
+          modelCount: 13,
+          codex: { status: "ok", asOf: "2026-10-19", modelCount: 13 },
+          qwen: { status: "ok", asOf: "2026-10-19", modelCount: 1 },
+        },
+        "detail",
+      ),
+    ).toEqual({
+      tone: "warning",
+      message:
+        "已同步 Codex 13 种与千问 1 种模型价格（2026-10-19），成本总览与会话列表已更新，但当前会话明细刷新失败。",
+    });
   });
 
   it("reports that nothing was synchronized when both sources failed", () => {

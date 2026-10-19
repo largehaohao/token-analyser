@@ -13,12 +13,16 @@ export type Cost = {
 
 export type SessionSource = "codex" | "claude" | "cursor" | "pi";
 
+export type PerformanceBasis = "task" | "request";
+
 export type PerformanceSummary = {
   taskCount: number;
   ttftSampleCount: number;
   speedSampleCount: number;
   avgTtftMs: number | null;
   outputTokensPerSecond: number | null;
+  /** "task": whole agent tasks; "request": single model requests; null: no samples. */
+  basis: PerformanceBasis | null;
 };
 
 export type RequestPerformance = {
@@ -116,6 +120,15 @@ export type ContextProfile = {
   skills: ContextBucket;
 };
 
+/** Token counts the source itself measured, such as Cursor's context meter. */
+export type ContextMeasurement = {
+  usedTokens: number | null;
+  limitTokens: number | null;
+  usagePercent: number | null;
+  source: string;
+  categories: { id: string; label: string; tokens: number }[];
+};
+
 export type SessionSnapshot = {
   id: string;
   source?: SessionSource;
@@ -144,6 +157,7 @@ export type SessionSnapshot = {
   children: SessionSnapshot[];
   suggestions: Suggestion[];
   context?: ContextProfile;
+  contextMeasurement?: ContextMeasurement | null;
   performance?: PerformanceSummary;
 };
 

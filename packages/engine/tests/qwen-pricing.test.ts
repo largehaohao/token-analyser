@@ -278,6 +278,74 @@ describe("Qwen official price updates", () => {
     stop();
   });
 
+  it("skips a tick that would overlap one still in flight", async () => {
+    const dir = tempDir();
+    const cardPath = writeCard(dir, baseCard());
+    let calls = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stop = startQwenPriceAutoRefresh(
+      { refreshPricing: () => undefined } as never,
+      {
+        intervalMs: 15,
+        apiPricesPath: cardPath,
+        update: async () => {
+          calls += 1;
+          await gate;
+          return {
+            asOf: localToday(),
+            modelCount: 1,
+            usdPerCny: 0.1,
+            previousContent: readFileSync(cardPath, "utf8"),
+          };
+        },
+      },
+    );
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(calls).toBe(1);
+    } finally {
+      release();
+      stop();
+    }
+  });
+
+  it("restores the price file when re-pricing sessions fails", async () => {
+    const dir = tempDir();
+    const cardPath = writeCard(dir, baseCard());
+    const before = readFileSync(cardPath, "utf8");
+    const errors: string[] = [];
+    const stop = startQwenPriceAutoRefresh(
+      {
+        refreshPricing: () => {
+          throw new Error("reprice_failed");
+        },
+      } as never,
+      {
+        apiPricesPath: cardPath,
+        onError: (reason) => errors.push(reason),
+        update: async () => {
+          writeFileSync(cardPath, '{"models":{}}\n');
+          return {
+            asOf: localToday(),
+            modelCount: 1,
+            usdPerCny: 0.1,
+            previousContent: before,
+          };
+        },
+      },
+    );
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(readFileSync(cardPath, "utf8")).toBe(before);
+      expect(errors).toEqual(["reprice_failed"]);
+    } finally {
+      stop();
+    }
+  });
+
   it("disables automatic refresh when QWEN_PRICING_AUTO_UPDATE is 0", () => {
     process.env.QWEN_PRICING_AUTO_UPDATE = "0";
     try {

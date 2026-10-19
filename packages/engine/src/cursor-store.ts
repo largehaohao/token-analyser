@@ -3,11 +3,40 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { iso, record, text } from "./session-adapters.ts";
-import type { RolloutLine } from "./types.ts";
+import type { ContextMeasurement, RolloutLine } from "./types.ts";
 
 function json(value: unknown): Record<string, unknown> {
   try { return record(JSON.parse(typeof value === "string" ? value : Buffer.from(value as Uint8Array).toString("utf8"))); }
   catch { return {}; }
+}
+
+function count(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/**
+ * Cursor's own context meter. It records how many tokens the composer had in
+ * context, never the tokens a request billed, so it is reported as a measured
+ * context size and never enters the token ledger.
+ */
+function contextMeasurement(composer: Record<string, unknown>): ContextMeasurement | null {
+  const breakdown = record(composer.promptTokenBreakdown);
+  const usedTokens = count(composer.contextTokensUsed) ?? count(breakdown.totalUsedTokens);
+  const limitTokens = count(composer.contextTokenLimit) ?? count(breakdown.maxTokens);
+  const usagePercent = count(composer.contextUsagePercent);
+  const categories = (Array.isArray(breakdown.categories) ? breakdown.categories : [])
+    .map((item) => {
+      const category = record(item);
+      const tokens = count(category.estimatedTokens);
+      return tokens == null ? null : {
+        id: text(category.id) || text(category.label) || "context",
+        label: text(category.label) || text(category.id) || "上下文",
+        tokens,
+      };
+    })
+    .filter((item): item is { id: string; label: string; tokens: number } => item != null);
+  if (usedTokens == null && limitTokens == null && usagePercent == null && categories.length === 0) return null;
+  return { usedTokens, limitTokens, usagePercent, source: "cursor", categories };
 }
 
 function workspacePaths(databasePath: string): Map<string, string> {
@@ -85,6 +114,7 @@ export function readCursorSessions(databasePath: string): RolloutLine[][] {
         timestamp: iso(composer.createdAt), name: text(composer.name),
         cwd: cwdByWorkspace.get(text(composer.workspaceId)) ?? text(composer.cwd),
         parentSessionId: text(parent.parentComposerId), selectedModel: chosenModel,
+        contextMeasurement: contextMeasurement(composer),
         forkedFrom: text(composer.forkedFromComposerId) }];
       const seen = new Set<string>();
       for (const [index, bubble] of bubbles.entries()) {

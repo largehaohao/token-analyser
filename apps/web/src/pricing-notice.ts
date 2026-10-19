@@ -3,9 +3,16 @@ import type { ModelPricingUpdate, PricingSourceResult } from "./api";
 export type PricingUpdateTone = "success" | "warning";
 
 /** Which surfaces picked up the refreshed prices. */
-export type PricingRefreshState = "all" | "overview" | "none";
+export type PricingRefreshState = "all" | "detail" | "overview" | "none";
 
 const SOURCE_LABEL = { codex: "Codex", qwen: "千问" } as const;
+
+const RECALCULATION_COPY: Record<PricingRefreshState, string> = {
+  all: "，并重新计算本地成本。",
+  detail: "，成本总览与会话列表已更新，但当前会话明细刷新失败。",
+  overview: "，成本总览已更新，但会话列表刷新失败。",
+  none: "，但成本总览刷新失败，请重试。",
+};
 
 const FAILURE_COPY: Record<string, string> = {
   official_pricing_unavailable: "OpenAI 官网价格页无法访问",
@@ -34,12 +41,7 @@ export function pricingUpdateNotice(
   result: ModelPricingUpdate,
   refreshed: PricingRefreshState,
 ): { tone: PricingUpdateTone; message: string } {
-  const recalculation =
-    refreshed === "all"
-      ? "，并重新计算本地成本。"
-      : refreshed === "overview"
-        ? "，成本总览已更新，但会话列表刷新失败。"
-        : "，但成本总览刷新失败，请重试。";
+  const recalculation = RECALCULATION_COPY[refreshed];
 
   const sources = [result.codex, result.qwen].filter(Boolean) as PricingSourceResult[];
   if (sources.length === 0) {

@@ -48,12 +48,16 @@ export type TaskTiming = {
   outputTokens: number | null;
 };
 
+export type PerformanceBasis = "task" | "request";
+
 export type PerformanceSummary = {
   taskCount: number;
   ttftSampleCount: number;
   speedSampleCount: number;
   avgTtftMs: number | null;
   outputTokensPerSecond: number | null;
+  /** "task": whole agent tasks; "request": single model requests; null: no samples. */
+  basis: PerformanceBasis | null;
 };
 
 /** Timing recorded for one model request, independent of task-level timing. */
@@ -198,6 +202,7 @@ export type SessionSnapshot = {
   children: SessionSnapshot[];
   suggestions: Suggestion[];
   context?: ContextProfile;
+  contextMeasurement?: ContextMeasurement | null;
   taskTimings?: TaskTiming[];
   performance?: PerformanceSummary;
 };
@@ -234,6 +239,20 @@ export type SessionMeta = {
   nickname: string | null;
   cwd: string | null;
   startedAt: string | null;
+  /** Token counts the source itself measured, such as Cursor's context meter. */
+  contextMeasurement?: ContextMeasurement | null;
+};
+
+/**
+ * Token counts recorded by the source as a context measurement. Not billable
+ * ledger tokens: they measure what the source had in context at its last update.
+ */
+export type ContextMeasurement = {
+  usedTokens: number | null;
+  limitTokens: number | null;
+  usagePercent: number | null;
+  source: string;
+  categories: { id: string; label: string; tokens: number }[];
 };
 
 export type RolloutLine = {

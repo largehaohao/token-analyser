@@ -1,9 +1,11 @@
 import type {
+  PerformanceBasis,
   PerformanceSummary,
   RequestPerformance,
   RolloutLine,
   SessionSnapshot,
   TaskTiming,
+  Turn,
 } from "./types.ts";
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -157,7 +159,55 @@ export function collectTaskTimings(session: SessionSnapshot): TaskTiming[] {
   ];
 }
 
-export function summarizePerformance(samples: TaskTiming[]): PerformanceSummary {
+/**
+ * One sample per recorded model request, from the timing the log recorded for
+ * that request. Sources without task windows (pi, Cursor, Claude) report here.
+ */
+export function requestTimings(turns: Turn[]): TaskTiming[] {
+  return turns.flatMap((turn) => {
+    const performance = turn.requestPerformance;
+    if (!performance) return [];
+    return [{
+      id: turn.id,
+      startedAt: turn.startedAt ?? null,
+      endedAt: turn.endedAt ?? null,
+      durationMs: performance.durationMs,
+      ttftMs: performance.ttftMs,
+      outputTokens: turn.usageRecorded ? turn.usage.output_tokens : null,
+    }];
+  });
+}
+
+/**
+ * Timing samples for a set of sessions. Agent-task windows are the primary
+ * record; sessions that never record them fall back to per-request timing, so
+ * the summary always states what it measured.
+ */
+export function performanceSamples(
+  sessions: SessionSnapshot[],
+): { basis: PerformanceBasis | null; samples: TimedSample[] } {
+  const samples: TimedSample[] = [];
+  for (const session of sessions) {
+    const own = session.taskTimings ?? [];
+    if (own.length > 0) samples.push(...own.map((sample) => ({ ...sample, basis: "task" as const })),
+      ...session.children.flatMap(collectTaskTimings));
+    else samples.push(
+      ...requestTimings(session.turns).map((sample) => ({ ...sample, basis: "request" as const })),
+      ...session.children.flatMap((child) => requestTimings(child.turns).map((sample) => ({ ...sample, basis: "request" as const }))),
+    );
+  }
+  return { basis: summarizePerformance(samples).basis, samples };
+}
+
+export function summarizeSessions(sessions: SessionSnapshot[]): PerformanceSummary {
+  const { basis, samples } = performanceSamples(sessions);
+  return { ...summarizePerformance(samples), basis };
+}
+
+/** A timing sample plus the unit it measured: an agent task or one request. */
+export type TimedSample = TaskTiming & { basis?: PerformanceBasis };
+
+export function summarizePerformance(samples: TimedSample[]): PerformanceSummary {
   let ttftSum = 0;
   let ttftSampleCount = 0;
   let durationSum = 0;
@@ -180,5 +230,7 @@ export function summarizePerformance(samples: TaskTiming[]): PerformanceSummary 
     speedSampleCount,
     avgTtftMs: ttftSampleCount > 0 ? ttftSum / ttftSampleCount : null,
     outputTokensPerSecond: speedSampleCount > 0 ? outputSum * 1000 / durationSum : null,
+    basis: samples.length === 0 ? null
+      : samples.some((sample) => sample.basis == null || sample.basis === "task") ? "task" : "request",
   };
 }

@@ -27,8 +27,24 @@ The older brief's classification list is refined by the maintained README and cu
 | Choice controls | `ui.tsx:SegmentedControl`                                            | This contract                   | Time range / display unit                            | Pressed state and keyboard tests                       |
 | Read/detail     | `CostTree.tsx`, `TurnTable.tsx`, `DetailSection.tsx`                 | Product brief and this contract | Session / category / turn evidence                   | Disclosure, paging, keyboard tests                     |
 | Analysis update | `WasteToggles.tsx`                                                   | Waste PATCH API                 | Serialized preference updates                        | Success, rollback, recovery tests                      |
+| Performance     | `PerformanceMetrics.tsx`, `ContextMeter.tsx`, `performance.ts`        | This contract; session API      | Agent-task basis / per-request basis / not recorded  | Basis label, unavailable-reason, context-meter tests   |
 
 No select/listbox, date picker, bulk table selection, toast, modal, authentication, or delete capability is present. Segmented buttons are not listboxes; disclosure and inline feedback do not need a modal or toast system.
+
+## Measurement basis
+
+- The performance panel names its unit: `统计口径：整次 agent 任务` when the
+  summary uses Codex agent-task windows, `统计口径：单次模型请求` when it uses
+  per-request timing. Request-level and task-level samples are never mixed, and
+  the tok/s heading follows the basis (`任务平均 tok/s` / `请求平均 tok/s`).
+- Timing is only ever read from recorded fields. Gaps between log timestamps are
+  never presented as duration, TTFT, or speed.
+- A missing measurement keeps its `—` value and states why
+  (`日志未记录首 token 时间`, `该来源未记录请求时长或输出 Token 数`).
+  `0.00` is shown only for a recorded zero.
+- Cursor's context meter renders in **上下文与会话信息** as a context size with
+  its category breakdown, labelled as a source-recorded measurement. It never
+  enters token totals, cost, cache-hit rates, or the performance panel.
 
 ## Dataset navigation
 

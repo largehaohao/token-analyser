@@ -11,7 +11,7 @@ import {
 import { computeWaste } from "./waste.ts";
 import { loadRateCard } from "./rate-card.ts";
 import { loadApiPrices } from "./native-pricing.ts";
-import { collectTaskTimings, summarizePerformance } from "./performance.ts";
+import { collectTaskTimings, requestTimings, summarizePerformance } from "./performance.ts";
 
 export const OVERVIEW_SLICE_KEYS = [
   "planning",
@@ -434,9 +434,15 @@ export function buildOverview(
       }))
       .sort((a, b) => b.cost.raw - a.cost.raw || a.model.localeCompare(b.model)),
     performance: summarizePerformance(
-      included.flatMap(collectTaskTimings).filter((sample) =>
-        opts.sinceMs == null || Date.parse(sample.endedAt) >= opts.sinceMs,
-      ),
+      included.flatMap((session) => {
+        const hasTasks = collectTaskTimings(session).length > 0;
+        // Sources without agent-task windows time a single model request.
+        return (hasTasks ? collectTaskTimings(session) : requestTimings(session.turns))
+          .map((sample) => ({ ...sample, basis: hasTasks ? ("task" as const) : ("request" as const) }))
+          .filter((sample) =>
+            opts.sinceMs == null || (sample.endedAt != null && Date.parse(sample.endedAt) >= opts.sinceMs),
+          );
+      }),
     ),
   };
 }

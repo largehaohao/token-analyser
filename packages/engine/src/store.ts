@@ -12,7 +12,7 @@ import {
 } from "./ingest.ts";
 import { isLive, pruneStaleCache } from "./cache.ts";
 import { isSessionFile } from "./session-files.ts";
-import { collectTaskTimings, summarizePerformance } from "./performance.ts";
+import { summarizeSessions } from "./performance.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
   type SessionListItem,
@@ -62,7 +62,8 @@ function rebuildDerived(snap: SessionSnapshot): SessionSnapshot {
     ...derived,
     live: snap.live || snap.children.some((child) => child.live),
     lastEventAt: latestActivityIso(derived),
-    performance: summarizePerformance(collectTaskTimings(derived)),
+    // Task windows when the source records them, per-request timing otherwise.
+    performance: summarizeSessions([derived]),
   };
 }
 

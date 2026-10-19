@@ -1,3 +1,4 @@
+{"type": "cursor_session", "source": "cursor", "sessionId": "native-cursor", "timestamp": "2026-10-19T00:00:00.000Z", "name": "cursor demo", "contextMeasurement": {"usedTokens": 24556, "limitTokens": 200000, "usagePercent": 12, "source": "cursor", "categories": [{"id": "conversation", "label": "会话", "tokens": 6057}, {"id": "tools", "label": "工具定义", "tokens": 7424}]}}
 {"role":"user","message":{"content":[{"type":"text","text":"Read the README"}]}}
 {"role":"assistant","message":{"content":[{"type":"tool_use","id":"tool1","name":"read_file","input":{"target_file":"README.md"}},{"type":"text","text":"README reviewed."}]}}
 {"type":"turn_ended","status":"completed"}

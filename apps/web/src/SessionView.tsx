@@ -24,6 +24,7 @@ import {
   suggestionTarget,
 } from "./CostTree";
 import { MixBar } from "./MixBar";
+import { ContextMeter } from "./ContextMeter";
 import { RateLimits } from "./RateLimits";
 import { WasteToggles } from "./WasteToggles";
 import { TurnTable } from "./TurnTable";
@@ -306,6 +307,9 @@ export function SessionView({
               />
               {snapshot.rate_limits != null && (
                 <RateLimits raw={snapshot.rate_limits} />
+              )}
+              {snapshot.contextMeasurement != null && (
+                <ContextMeter measurement={snapshot.contextMeasurement} />
               )}
             </div>
             <div className="session-audit" aria-label="当前会话数据口径">

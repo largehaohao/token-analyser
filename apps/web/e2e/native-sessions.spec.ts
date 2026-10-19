@@ -77,6 +77,32 @@ test("a relay model ID prices as its canonical Qwen model", async ({ page }) => 
   expect(headline.trim()).not.toBe("—");
 });
 
+test("pi times model requests and Cursor shows the context meter it records", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "会话明细" }).click();
+  await page.getByRole("button", { name: "全部", exact: true }).click();
+
+  await page.getByLabel("选择会话 JSONL 文件").setInputFiles({
+    name: "pi.jsonl", mimeType: "application/x-ndjson",
+    buffer: Buffer.from(readFileSync(path.join(fixtureDir, "pi.jsonl"), "utf8")),
+  });
+  await expect(page.locator("#import-feedback")).toContainText("已导入 pi.jsonl");
+  await expect(page.getByTestId("token-speed-value")).toHaveText("5.00 tok/s");
+  await expect(page.getByTestId("ttft-value")).toHaveText("— s");
+  await expect(page.getByTestId("performance-basis")).toContainText("统计口径：单次模型请求");
+
+  await page.getByLabel("选择会话 JSONL 文件").setInputFiles({
+    name: "cursor.jsonl", mimeType: "application/x-ndjson",
+    buffer: Buffer.from(readFileSync(path.join(fixtureDir, "cursor.jsonl"), "utf8")),
+  });
+  await expect(page.locator("#import-feedback")).toContainText("已导入 cursor.jsonl");
+  await page.locator("summary").filter({ hasText: "上下文与会话信息" }).click();
+  await expect(page.getByTestId("context-meter-value")).toContainText("24,556 / 200,000");
+  await expect(page.getByTestId("token-speed-value")).toHaveText("— tok/s");
+  const overview = await (await page.request.get("/overview?range=all")).json();
+  expect(overview.performance.basis).not.toBe("task");
+});
+
 test("every source filters the list and overview, and survives reload and browser back", async ({ page }) => {
   await seedNative(page);
   await page.goto("/#sessions");
