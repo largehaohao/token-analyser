@@ -36,7 +36,7 @@ test("Claude, pi and Cursor imports show source, response, pricing basis and mis
       buffer: Buffer.from(readFileSync(path.join(fixtureDir, `${source}.jsonl`), "utf8")),
     });
     await expect(page.locator("#import-feedback")).toContainText(`已导入 ${source}.jsonl`);
-    await expect(page.locator(".session-kicker .badge", { hasText: label })).toBeVisible();
+    await expect(page.locator(".sess-title .badge", { hasText: label })).toBeVisible();
     if (source === "cursor") {
       await expect(page.locator(".session-view .banner")).toContainText("token 用量未记录");
       await expect(page.locator(".headline-main .headline-value").first()).toHaveText("—");
@@ -54,7 +54,7 @@ test("Claude, pi and Cursor imports show source, response, pricing basis and mis
   await expect(page.locator(".session-main")).toHaveCount(1);
   await page.getByRole("group", { name: "会话来源", exact: true }).getByRole("button", { name: "Cursor", exact: true }).click();
   await page.reload();
-  await expect(page.locator(".session-kicker .badge", { hasText: "Cursor" })).toBeVisible();
+  await expect(page.locator(".sess-title .badge", { hasText: "Cursor" })).toBeVisible();
 });
 
 test("a relay model ID prices as its canonical Qwen model", async ({ page }) => {
@@ -112,7 +112,7 @@ test("every source filters the list and overview, and survives reload and browse
     await expect(page.locator(".session-main").first()).toBeVisible();
     const badges = page.locator(".session-main .row-top .badge").filter({ hasText: new RegExp(`^${label}$`) });
     await expect.poll(async () => await badges.count() === await page.locator(".session-main").count()).toBe(true);
-    await expect(page.locator(".session-kicker .badge", { hasText: new RegExp(`^${label}$`) })).toBeVisible();
+    await expect(page.locator(".sess-title .badge", { hasText: new RegExp(`^${label}$`) })).toBeVisible();
     await page.getByRole("link", { name: "成本总览", exact: true }).click();
     const overview = await (await page.request.get(`/overview?source=${id}`)).json();
     await expect(page.getByRole("button", { name: /已分析会话/ })).toContainText(String(overview.sessionCount));
@@ -123,12 +123,12 @@ test("every source filters the list and overview, and survives reload and browse
   await expect(page.getByRole("searchbox", { name: "筛选会话" })).toHaveValue("");
   await page.reload();
   await expect(sources(page).getByRole("button", { name: "Claude Code", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".session-kicker .badge", { hasText: "Claude Code" })).toBeVisible();
+  await expect(page.locator(".sess-title .badge", { hasText: "Claude Code" })).toBeVisible();
   await sources(page).getByRole("button", { name: "Cursor", exact: true }).click();
-  await expect(page.locator(".session-kicker .badge", { hasText: "Cursor" })).toBeVisible();
+  await expect(page.locator(".sess-title .badge", { hasText: "Cursor" })).toBeVisible();
   await page.goBack();
   await expect(sources(page).getByRole("button", { name: "Claude Code", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".session-kicker .badge", { hasText: "Claude Code" })).toBeVisible();
+  await expect(page.locator(".sess-title .badge", { hasText: "Claude Code" })).toBeVisible();
 });
 
 test("historical sessions stay discoverable and missing sources explain how to import", async ({ page }) => {

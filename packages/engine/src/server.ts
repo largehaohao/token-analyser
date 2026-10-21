@@ -577,6 +577,7 @@ export async function startServer(opts?: {
       const config = loadUserConfig();
       const url = new URL(req.url ?? "/", "http://localhost");
       const sinceRaw = url.searchParams.get("since");
+      const untilRaw = url.searchParams.get("until");
       const daysRaw = url.searchParams.get("days");
       const source = url.searchParams.get("source");
       if (source != null && source !== "all" && source !== "codex" && source !== "claude" && source !== "cursor" && source !== "pi") {
@@ -586,6 +587,7 @@ export async function startServer(opts?: {
       const timezoneRaw = url.searchParams.get("timezone_offset_minutes");
       const timezone = url.searchParams.get("timezone")?.trim();
       const sinceMs = sinceRaw ? Date.parse(sinceRaw) : Number.NaN;
+      const untilMs = untilRaw ? Date.parse(untilRaw) : Number.NaN;
       const dayCount = daysRaw ? Number(daysRaw) : Number.NaN;
       const timezoneOffsetMinutes = timezoneRaw
         ? Number(timezoneRaw)
@@ -598,6 +600,9 @@ export async function startServer(opts?: {
           watchPath: config.watch_paths.join("\n"),
           collecting: process.env.FIXTURE_DIR == null,
           ...(Number.isFinite(sinceMs) ? { sinceMs } : {}),
+          ...(Number.isFinite(untilMs) && Number.isFinite(sinceMs) && untilMs > sinceMs
+            ? { untilMs }
+            : {}),
           ...(Number.isFinite(dayCount) && dayCount > 0
             ? { dayCount: Math.min(60, Math.floor(dayCount)) }
             : {}),

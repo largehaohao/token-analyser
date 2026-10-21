@@ -6,6 +6,7 @@ import {
   formatCost,
   formatCostTitle,
   formatExactTokens,
+  formatPercent,
   formatUnitSuffix,
   formatPerformanceNumber,
 } from "./format";
@@ -102,14 +103,16 @@ export function TurnTable({
             <span className="swatch output" /> 输出
           </div>
         )}
+        <p className="chart-desc">
+          展开时间旁的箭头，查看完整用量、单价与调用证据。最新轮次在前。
+        </p>
       </div>
-      <p className="chart-desc">展开时间旁的箭头，查看完整用量与调用证据。</p>
       {filtered.length === 0 ? (
         <p className="empty-turns">该节点没有轮次。点选「本会话」查看全部。</p>
       ) : (
         <>
           <p className="table-overflow-hint">
-            左右滚动查看完整列 · 最新轮次在前
+            窄屏可左右滚动查看完整列
           </p>
           <div
             className="turn-table-scroll"
@@ -126,15 +129,19 @@ export function TurnTable({
                   <th scope="col" aria-sort="descending">
                     时间
                   </th>
+                  <th scope="col">本轮目的</th>
                   <th scope="col">分类</th>
                   <th scope="col">工具</th>
-                  <th scope="col">提示</th>
                   <th scope="col">构成</th>
-                  <th scope="col" className="turn-performance" title="本次请求到首 token 的等待时间">TTFT (s)</th>
-                  <th scope="col" className="turn-performance" title="本次请求的输出 token 速度">tok/s</th>
-                  <th scope="col">
+                  <th scope="col" className="turn-cache" title="已缓存输入 ÷ 输入">缓存</th>
+                  <th scope="col" className="num-col" title="该轮记录的原始 token 总量">
+                    Tokens
+                  </th>
+                  <th scope="col" className="num-col">
                     {unit === "tokens" ? "Token 用量" : formatUnitSuffix(unit)}
                   </th>
+                  <th scope="col" className="turn-performance num-col" title="本次请求到首 token 的等待时间">TTFT (s)</th>
+                  <th scope="col" className="turn-performance num-col" title="本次请求的输出 token 速度">tok/s</th>
                 </tr>
               </thead>
               <tbody>
@@ -144,6 +151,8 @@ export function TurnTable({
                     : null;
                   const expanded = expandedId === t.id;
                   const performance = t.requestPerformance;
+                  const inputTokens =
+                    t.cost.uncached_input + t.cost.cached_input;
                   const ttft = formatPerformanceNumber(performance?.ttftMs == null ? null : performance.ttftMs / 1000);
                   const speed = formatPerformanceNumber(performance?.outputTokensPerSecond);
                   const speedNote = performance?.speedSource === "duration"
@@ -194,6 +203,9 @@ export function TurnTable({
                             </time>
                           </button>
                         </td>
+                        <td className="prompt-col" title={t.prompt}>
+                          {excerpt(t.prompt, 80)}
+                        </td>
                         <td className="bucket-col">
                           {appearance ? (
                             <span className="bucket-chip">
@@ -229,9 +241,6 @@ export function TurnTable({
                         <td className="tools-col" title={formatTools(t)}>
                           {formatToolNames(t)}
                         </td>
-                        <td className="prompt-col" title={t.prompt}>
-                          {excerpt(t.prompt, 80)}
-                        </td>
                         <td className="mix-col">
                           <MixBar
                             className="turn-mix"
@@ -258,10 +267,26 @@ export function TurnTable({
                             ]}
                           />
                         </td>
-                        <td className="turn-performance" title={performance?.ttftMs == null ? "日志未记录本次请求的首 token 等待时间" : `${performance.ttftMs.toLocaleString("en-US")} ms`}>
-                          {ttft}
+                        <td
+                          className="turn-cache num-col"
+                          title={
+                            inputTokens > 0
+                              ? `已缓存 ${formatExactTokens(t.cost.cached_input)} / 输入 ${formatExactTokens(inputTokens)}`
+                              : "该轮没有输入用量记录"
+                          }
+                        >
+                          {inputTokens > 0
+                            ? formatPercent((100 * t.cost.cached_input) / inputTokens, 0)
+                            : "—"}
                         </td>
-                        <td className="turn-performance" title={speedNote}>{speed}</td>
+                        <td
+                          className="num-col"
+                          title={formatCostTitle(t.cost, "tokens")}
+                        >
+                          {t.usageRecorded === false
+                            ? "用量未记录"
+                            : formatExactTokens(t.cost.raw)}
+                        </td>
                         <td
                           className="turn-total"
                           title={formatCostTitle(t.cost, unit)}
@@ -270,10 +295,14 @@ export function TurnTable({
                             ? formatCostTokens(t.cost)
                             : formatCost(t.cost, unit)}
                         </td>
+                        <td className="turn-performance num-col" title={performance?.ttftMs == null ? "日志未记录本次请求的首 token 等待时间" : `${performance.ttftMs.toLocaleString("en-US")} ms`}>
+                          {ttft}
+                        </td>
+                        <td className="turn-performance num-col" title={speedNote}>{speed}</td>
                       </tr>
                       {expanded && (
                         <tr className="turn-detail" id={`turn-detail-${t.id}`}>
-                          <td colSpan={8}>
+                          <td colSpan={10}>
                             <p className="turn-evidence-meta">
                               {new Date(t.startedAt).toLocaleString("zh-CN", {
                                 hour12: false,
@@ -348,7 +377,7 @@ export function TurnTable({
                                 {t.pricing.cacheWrite != null ? ` · 缓存写入 ${formatTokenRate(t.pricing.cacheWrite)}（5 分钟）` : ""}
                               </p>
                             )}
-                            <div className="turn-detail-grid">
+                            <div className="turn-detail-grid ev-grid">
                               {t.response ? <div><h4>回复</h4><pre>{t.response}</pre></div> : null}
                               <div>
                                 <h4>提示</h4>

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   extractTaskTimings,
+  performanceDistribution,
   requestPerformance,
+  requestTimings,
   summarizePerformance,
   summarizeSessions,
 } from "../src/performance.ts";
@@ -156,6 +158,28 @@ describe("session performance basis", () => {
 });
 
 describe("per-request performance", () => {
+  it("uses inclusive histogram edges and retains requests without measurements", () => {
+    const turns = [1000, 2000, 3000, 5000].map((ttftMs, index) => ({
+      id: String(index), startedAt: "2026-10-08T00:00:00Z", endedAt: "2026-10-08T00:00:10Z",
+      requestPerformance: requestPerformance(null, { ttft_ms: ttftMs, tokens_per_second: [10, 25, 40, 60][index] }),
+    } as Turn));
+    turns.push({ id: "missing", startedAt: "2026-10-08T00:00:00Z", endedAt: "2026-10-08T00:00:10Z" } as Turn);
+    expect(performanceDistribution(requestTimings(turns))).toEqual({
+      ttft: [1, 1, 1, 1, 0], tps: [1, 1, 1, 1, 0], sampleCount: 5,
+    });
+  });
+
+  it("uses the source-recorded speed even when duration is missing or disagrees", () => {
+    const turns = [null, 2000].map((durationMs, index) => ({
+      id: String(index), startedAt: "2026-10-08T00:00:00Z", endedAt: "2026-10-08T00:00:02Z",
+      usageRecorded: true, usage: usage(10),
+      requestPerformance: requestPerformance(10, { tokens_per_second: 70, duration_ms: durationMs }),
+    } as Turn));
+    expect(performanceDistribution(requestTimings(turns))).toEqual({
+      ttft: [0, 0, 0, 0, 0], tps: [0, 0, 0, 0, 2], sampleCount: 2,
+    });
+  });
+
   it("uses explicit request metadata, prefers recorded speed, and supports nested metrics", () => {
     expect(requestPerformance(100, { request_performance: { time_to_first_token_ms: 250, duration_ms: 2000, tokens_per_second: 70 } })).toEqual({
       ttftMs: 250, durationMs: 2000, outputTokensPerSecond: 70, speedSource: "recorded",

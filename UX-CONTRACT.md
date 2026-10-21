@@ -27,6 +27,7 @@ The older brief's classification list is refined by the maintained README and cu
 | Choice controls | `ui.tsx:SegmentedControl`                                            | This contract                   | Time range / display unit                            | Pressed state and keyboard tests                       |
 | Read/detail     | `CostTree.tsx`, `TurnTable.tsx`, `DetailSection.tsx`                 | Product brief and this contract | Session / category / turn evidence                   | Disclosure, paging, keyboard tests                     |
 | Analysis update | `WasteToggles.tsx`                                                   | Waste PATCH API                 | Serialized preference updates                        | Success, rollback, recovery tests                      |
+| Analysis surface | `LedgerStrip.tsx`, `TrendPanel.tsx`, `OverviewPanels.tsx`, `Histogram.tsx`, `perf-buckets.ts`, `session-range.ts` | Engine overview payload; this contract | Ledger figures with comparison / trend / composition / ranked list / histograms / rail | Fixed-bucket tests, comparison-window tests, chart `srTable`, keyboard tooltip tests |
 | Performance     | `PerformanceMetrics.tsx`, `ContextMeter.tsx`, `performance.ts`        | This contract; session API      | Agent-task basis / per-request basis / not recorded  | Basis label, unavailable-reason, context-meter tests   |
 
 No select/listbox, date picker, bulk table selection, toast, modal, authentication, or delete capability is present. Segmented buttons are not listboxes; disclosure and inline feedback do not need a modal or toast system.
@@ -45,6 +46,43 @@ No select/listbox, date picker, bulk table selection, toast, modal, authenticati
 - Cursor's context meter renders in **上下文与会话信息** as a context size with
   its category breakdown, labelled as a source-recorded measurement. It never
   enters token totals, cost, cache-hit rates, or the performance panel.
+
+## Analysis surfaces
+
+- The ledger strip answers the five questions a cost review starts with: total
+  spend, its money companion when the unit is tokens, sessions and request turns,
+  cache hit, unpriced usage, and suspected waste. The money figure appears beside
+  the token figure; it is never a duplicate of the token number.
+  USD-only sources keep their USD companion when credits are unavailable. Cache
+  hit is displayed as a percentage of input. Unpriced usage is already part of
+  input/output totals and appears as an overlapping note, not a third component.
+- A figure carries a comparison only when an equal-length previous window exists.
+  `session-range.ts:previousWindow` derives it from the same range definition; for
+  `全部` there is no previous window, so no comparison is shown and none is
+  invented. A rolling window compares against the window that ended at its start.
+  Changing source or range clears the previous comparison until its matching
+  request succeeds; both windows derive their boundary from one request time.
+- Latency buckets are fixed and shared: the engine's `TTFT_EDGES_MS` and
+  `TPS_EDGES` and the UI's `TTFT_EDGES_S` / `TPS_EDGES` describe one scale, and the
+  overview aggregate and per-session turn histograms render with the same labels.
+  Bucket upper edges are inclusive, and explicitly recorded request speeds remain
+  eligible even when duration is unavailable. Overview coverage includes all
+  samples in scope, including those without measurements.
+  Turns without a recorded measurement stay out of the buckets and inside the
+  stated denominator; a histogram with no samples says so instead of drawing axes.
+- The ranked behaviour list replaces the donut because small categories were
+  unreadable there. Each attributed behaviour row exposes `查看会话` — the
+  overview cannot answer “which sessions”, so the question is handed to the session
+  list with an explicit notice, and no filter is silently applied to the list.
+- Chart surfaces are never the only reading: trend, composition, ranking,
+  models and histograms publish the same numbers as a screen-reader table, and the
+  trend column exposes a focusable tooltip dismissed by `Escape`.
+- The orange trend segment identifies ledger/parse anomalies (`flaggedCost`),
+  independently of waste rules. Dates align below bars, and the first touch opens
+  a tooltip kept within the viewport. Model tables scroll inside their disclosure
+  down to 320px and retain missing-usage notes and lower-bound token values.
+- The overview quota is the latest quota event captured inside its window. Its
+  capture time is retained in snapshots/cache and never replaced by session activity.
 
 ## Dataset navigation
 

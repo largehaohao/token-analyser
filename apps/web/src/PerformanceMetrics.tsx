@@ -1,14 +1,20 @@
-import type { PerformanceSummary } from "./api";
+import type { PerformanceSummary, Turn } from "./api";
 import { formatPerformanceNumber } from "./format";
 import { performanceCopy } from "./performance-copy";
+import { turnDistributions } from "./perf-buckets";
+import { HistogramPair } from "./Histogram";
 
-type Props = { performance?: PerformanceSummary };
+type Props = {
+  performance?: PerformanceSummary;
+  /** When the turn records are in scope, the fixed-bucket distributions are shown. */
+  turns?: Turn[];
+};
 
-export function PerformanceMetrics({ performance }: Props) {
+export function PerformanceMetrics({ performance, turns }: Props) {
   const ttft = performance?.avgTtftMs;
   const speed = performance?.outputTokensPerSecond;
-  const requestBasis = performance?.basis === "request";
   const text = performanceCopy(performance);
+  const distributions = turnDistributions(turns ?? []);
   return (
     <section className="performance-metrics" aria-label="响应性能">
       <div className="performance-grid">
@@ -27,6 +33,9 @@ export function PerformanceMetrics({ performance }: Props) {
           <p>{text.speedNote}</p>
         </article>
       </div>
+      {turns && turns.length > 0 && (
+        <HistogramPair ttft={distributions.ttft} speed={distributions.speed} />
+      )}
       <p className="performance-note" data-testid="performance-basis">
         {text.basisNote}
         {text.note}

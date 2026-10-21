@@ -20,31 +20,25 @@ test("overview keeps secondary analysis collapsed and accessible by keyboard", a
   await expect(viewNavigation).toBeVisible();
   await expect(viewNavigation.getByRole("link")).toHaveCount(2);
   await expect(page.getByRole("group", { name: "时间范围" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "全部", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "全部", exact: true }).click();
-  await expect(page.locator(".kpi-label", { hasText: "总用量" })).toBeVisible();
   await expect(
-    page.locator(".kpi-label", { hasText: "预估总费用" }),
+    page.locator(".ledger-label", { hasText: "总支出（tokens）" }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".ledger-label", { hasText: "预估费用" }),
   ).toBeVisible();
   await expect(page.locator(".disclaimer")).toContainText(/不代表 OpenAI 账单/);
   const pricing = await (await page.request.get("/overview")).json();
   await expect(page.locator(".disclaimer")).toContainText(pricing.rateCardAsOf);
   await expect(page.locator(".disclaimer")).toContainText(pricing.apiPricesAsOf);
   await expect(page.getByTestId("trend-chart")).toBeVisible();
-  await expect(page.getByTestId("donut-chart")).toBeHidden();
-  await expect(page.getByTestId("model-mix")).toBeHidden();
+  await expect(page.getByTestId("composition-panel")).toBeVisible();
+  await expect(page.getByTestId("behavior-rank")).toBeVisible();
+  await expect(page.getByTestId("model-table")).toBeHidden();
   await expect(page.getByLabel("数据质量", { exact: true })).toBeHidden();
-  const composition = page
-    .locator("summary")
-    .filter({ hasText: "Token 构成与行为分类" });
-  await composition.press("Enter");
-  await expect(page.getByTestId("donut-chart")).toBeVisible();
   await page.getByRole("button", { name: "Credits", exact: true }).click();
-  await expect(page.getByTestId("donut-chart")).toBeVisible();
-  await composition.press("Enter");
-  await expect(page.getByTestId("donut-chart")).toBeHidden();
+  await expect(page.getByTestId("trend-chart")).toBeVisible();
   await page.locator("summary").filter({ hasText: "模型用量" }).click();
-  await expect(page.getByTestId("model-mix")).toBeVisible();
+  await expect(page.getByTestId("model-table")).toBeVisible();
   await page
     .locator("summary")
     .filter({ hasText: "数据质量与统计口径" })
@@ -59,44 +53,36 @@ test("unit switcher keeps tokens paired with credits instead of duplicating toke
   await expect(page.getByTestId("overview-page")).toBeVisible({
     timeout: 10_000,
   });
-  await expect(page.getByRole("button", { name: "Tokens" })).toHaveClass(
-    /active/,
-  );
-  const tokenKpi = page.locator(".kpi-card").filter({
-    has: page.locator(".kpi-label", { hasText: "总用量" }),
-  });
-  const moneyKpi = page.locator(".kpi-card").filter({
-    has: page.locator(".kpi-label", { hasText: "预估总费用" }),
-  });
-  await expect(tokenKpi.locator(".kpi-value")).toContainText("tokens");
-  await expect(moneyKpi.locator(".kpi-value")).toContainText("credits");
-  const tokenText = await tokenKpi.locator(".kpi-value").innerText();
-  const moneyText = await moneyKpi.locator(".kpi-value").innerText();
+  const unitSwitch = page.getByRole("group", { name: "显示单位" });
+  await expect(
+    unitSwitch.getByRole("button", { name: "Tokens", exact: true }),
+  ).toHaveClass(/active/);
+  const tokenRow = page
+    .locator(".ledger-item")
+    .filter({ has: page.locator(".ledger-label", { hasText: "总支出" }) });
+  const moneyRow = page
+    .locator(".ledger-item")
+    .filter({ has: page.locator(".ledger-label", { hasText: "预估费用" }) });
+  await expect(tokenRow.locator(".ledger-value")).toContainText("tokens");
+  await expect(moneyRow.locator(".ledger-value")).toContainText("credits");
+  const tokenText = await tokenRow.locator(".ledger-value").innerText();
+  const moneyText = await moneyRow.locator(".ledger-value").innerText();
   expect(tokenText).not.toEqual(moneyText);
 
-  await page.getByRole("button", { name: "Credits" }).click();
+  await unitSwitch.getByRole("button", { name: "Credits" }).click();
   await expect(
-    page.locator(".kpi-label", { hasText: "总 Token 用量" }),
+    page.locator(".ledger-label", { hasText: "总支出（credits）" }),
   ).toBeVisible();
   await expect(
-    page
-      .locator(".kpi-card")
-      .filter({
-        has: page.locator(".kpi-label", { hasText: "预估总费用" }),
-      })
-      .locator(".kpi-value"),
-  ).toContainText("credits");
+    page.locator(".ledger-label", { hasText: "预估费用" }),
+  ).toHaveCount(0);
 
-  await page.getByRole("button", { name: "USD" }).click();
+  await unitSwitch.getByRole("button", { name: "USD" }).click();
   await expect(
-    page
-      .locator(".kpi-card")
-      .filter({
-        has: page.locator(".kpi-label", { hasText: "预估总费用" }),
-      })
-      .locator(".kpi-value"),
-  ).toContainText("USD");
-  await page.getByRole("button", { name: "Tokens" }).click();
+    page.locator(".ledger-label", { hasText: "总支出（usd）" }),
+  ).toBeVisible();
+  await expect(tokenRow.locator(".ledger-value")).toContainText("USD");
+  await unitSwitch.getByRole("button", { name: "Tokens" }).click();
 });
 
 test("tree percents sum to ~100 and waste moves when poll is unchecked", async ({
@@ -161,7 +147,7 @@ test("shows mix bars for headline, tree, sessions, and turns", async ({
   await expect(page.locator(".tree-row .tree-bar").first()).toBeVisible();
   await page.locator(".tree-row").first().click();
   await expect(page.locator(".turn-mix").first()).toBeVisible();
-  await expect(page.locator(".turn-table th")).toHaveCount(8);
+  await expect(page.locator(".turn-table th")).toHaveCount(10);
   await expect(page.getByRole("columnheader", { name: "TTFT (s)" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "tok/s", exact: true })).toBeVisible();
   const turnRow = page.locator(".turn-table tbody tr").first();
@@ -643,11 +629,8 @@ for (const width of [1920, 1701, 1600, 1440, 390]) {
     await page.goto("/");
     await expect(page.getByTestId("overview-page")).toBeVisible();
     await expectContained();
-    await page
-      .locator("summary")
-      .filter({ hasText: "Token 构成与行为分类" })
-      .click();
-    await expect(page.getByTestId("donut-chart")).toBeVisible();
+    await expect(page.getByTestId("composition-panel")).toBeVisible();
+    await expect(page.getByTestId("model-table")).toBeHidden();
     await expectContained();
     await openSessionDetail(page);
     await expect(page.getByTestId("headline-mix")).toBeVisible();

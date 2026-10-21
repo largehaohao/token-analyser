@@ -117,12 +117,12 @@ test("TTFT and tok/s render on overview and session details", async ({ page }, t
   await page.goto("/");
   await expect(page.getByTestId("ttft-value")).toHaveText("1.25 s");
   await expect(page.getByTestId("token-speed-value")).toHaveText("42.50 tok/s");
-  await expect(page.getByLabel("响应性能")).toContainText("包含思考、工具执行与等待");
-  await page.getByLabel("响应性能").screenshot({ path: testInfo.outputPath("performance-desktop.png") });
+  await expect(page.getByLabel("响应性能", { exact: true })).toContainText("包含思考、工具执行与等待");
+  await page.getByLabel("响应性能", { exact: true }).screenshot({ path: testInfo.outputPath("performance-desktop.png") });
   await page.setViewportSize({ width: 375, height: 812 });
-  const panel = await page.getByLabel("响应性能").boundingBox();
+  const panel = await page.getByLabel("响应性能", { exact: true }).boundingBox();
   expect(panel?.width).toBeLessThanOrEqual(375);
-  await page.getByLabel("响应性能").screenshot({ path: testInfo.outputPath("performance-mobile.png") });
+  await page.getByLabel("响应性能", { exact: true }).screenshot({ path: testInfo.outputPath("performance-mobile.png") });
   measured = false;
   await page.reload();
   await expect(page.getByTestId("ttft-value")).toHaveText("— s");
@@ -301,7 +301,7 @@ test("a failed background overview refresh preserves readable data", async ({
 }) => {
   await page.goto("/#overview");
   await expect(page.getByTestId("overview-page")).toBeVisible();
-  const total = await page.locator(".kpi-value").first().textContent();
+  const total = await page.locator(".ledger-value").first().textContent();
   await page.route("**/overview?**", (route) =>
     route.fulfill({ status: 503, json: { error: "test offline" } }),
   );
@@ -310,7 +310,7 @@ test("a failed background overview refresh preserves readable data", async ({
     data: snapshot.toggles,
   });
   await expect(page.getByRole("alert")).toContainText("总览更新失败");
-  await expect(page.locator(".kpi-value").first()).toHaveText(total!);
+  await expect(page.locator(".ledger-value").first()).toHaveText(total!);
   await page.unroute("**/overview?**");
   await page.getByRole("button", { name: "重试", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveCount(0);

@@ -46,17 +46,25 @@ export function extractSessionInfo(
   return { id: overrideSessionId ?? "unknown", isSubagent: false };
 }
 
-function extractRateLimits(events: RolloutLine[]): unknown | null {
+function extractRateLimits(events: RolloutLine[]): {
+  raw: unknown | null;
+  snapshots: NonNullable<SessionSnapshot["rateLimitSnapshots"]>;
+} {
   let last: unknown | null = null;
+  const snapshots: NonNullable<SessionSnapshot["rateLimitSnapshots"]> = [];
   for (const event of events) {
     if (event.type !== "event_msg") continue;
     const payload = event.payload ?? {};
     if (payload.type !== "token_count") continue;
     if (payload.rate_limits !== undefined) {
       last = payload.rate_limits;
+      const ms = Date.parse(event.timestamp);
+      if (last != null && Number.isFinite(ms)) {
+        snapshots.push({ capturedAt: new Date(ms).toISOString(), raw: last });
+      }
     }
   }
-  return last;
+  return { raw: last, snapshots };
 }
 
 export function analyseSession(args: {
@@ -99,6 +107,7 @@ export function analyseSession(args: {
   const lastEvent =
     args.events.length > 0 ? args.events[args.events.length - 1]! : null;
   const taskTimings = native?.taskTimings ?? extractTaskTimings(args.events, { isSubagent });
+  const rateLimits = extractRateLimits(args.events);
 
   const base: SessionSnapshot = {
     id: meta.id,
@@ -116,7 +125,8 @@ export function analyseSession(args: {
     effort: lastTurn?.effort ?? null,
     ledger_warning,
     parse_errors,
-    rate_limits: extractRateLimits(args.events),
+    rate_limits: rateLimits.raw,
+    rateLimitSnapshots: rateLimits.snapshots,
     rateCardAsOf: loadRateCard().as_of,
     fastMode,
     cost: tree.cost,

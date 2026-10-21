@@ -18,7 +18,12 @@ type IconName =
   | "warning"
   | "check"
   | "refresh"
-  | "chevron";
+  | "chevron"
+  | "info"
+  | "filter"
+  | "back"
+  | "layers"
+  | "gauge";
 
 const ICON_PATHS: Record<IconName, string> = {
   overview: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
@@ -34,6 +39,11 @@ const ICON_PATHS: Record<IconName, string> = {
   refresh:
     "M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1",
   chevron: "M9 5l7 7-7 7",
+  info: "M12 8h.01M11 12h1v5h1M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18",
+  filter: "M4 5h16l-6 7v6l-4 2v-8z",
+  back: "M20 12H4M10 6l-6 6 6 6",
+  layers: "M12 3 3 8l9 5 9-5zM3 13l9 5 9-5",
+  gauge: "M12 13l4-4M4 19a9 9 0 1 1 16 0",
 };
 
 export function Icon({
@@ -108,6 +118,40 @@ export function Button({
       <span className="button-label">{children}</span>
       {busy && <span className="button-spinner spinner" aria-hidden="true" />}
     </button>
+  );
+}
+
+/**
+ * Accessible tabular data for chart surfaces. The visual chart is decorative;
+ * the numbers stay readable by assistive tech and searchable.
+ */
+export function srTable(
+  caption: string,
+  headers: string[],
+  rows: (string | number)[][],
+) {
+  return (
+    <table className="visually-hidden">
+      <caption>{caption}</caption>
+      <thead>
+        <tr>
+          {headers.map((header) => (
+            <th key={header} scope="col">
+              {header}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={index}>
+            {row.map((cell, cellIndex) => (
+              <td key={cellIndex}>{cell}</td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
