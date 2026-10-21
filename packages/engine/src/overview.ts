@@ -11,7 +11,13 @@ import {
 import { computeWaste } from "./waste.ts";
 import { loadRateCard } from "./rate-card.ts";
 import { loadApiPrices } from "./native-pricing.ts";
-import { collectTaskTimings, requestTimings, summarizePerformance } from "./performance.ts";
+import {
+  collectTaskTimings,
+  performanceDistribution,
+  requestTimings,
+  summarizePerformance,
+  type PerformanceDistribution,
+} from "./performance.ts";
 
 export const OVERVIEW_SLICE_KEYS = [
   "planning",
@@ -49,6 +55,14 @@ export type OverviewModel = {
   unpricedRaw: number;
 };
 
+/** The most recent source-recorded usage-limit snapshot in the window. */
+export type OverviewRateLimits = {
+  sessionId: string;
+  source: SessionSource;
+  capturedAt: string | null;
+  raw: unknown;
+};
+
 export type Overview = {
   sessionCount: number;
   turnCount: number;
@@ -72,6 +86,8 @@ export type Overview = {
   slices: OverviewSlice[];
   models: OverviewModel[];
   performance: PerformanceSummary;
+  performanceDistribution: PerformanceDistribution;
+  rateLimits: OverviewRateLimits | null;
 };
 
 export type OverviewOptions = {
@@ -81,6 +97,8 @@ export type OverviewOptions = {
   now?: string;
   dayCount?: number;
   sinceMs?: number;
+  /** Exclusive upper bound, used for the equal-length previous window. */
+  untilMs?: number;
   /** IANA timezone from the browser, used for DST-correct trend buckets. */
   timezone?: string;
   /** Minutes east of UTC, matching `-Date#getTimezoneOffset()`. */
@@ -196,10 +214,60 @@ function sessionTimeMs(session: SessionSnapshot): number | null {
   return best;
 }
 
-function inRange(session: SessionSnapshot, sinceMs?: number): boolean {
-  if (sinceMs == null) return true;
+function latestRateLimits(
+  sessions: SessionSnapshot[],
+  sinceMs?: number,
+  untilMs?: number,
+): OverviewRateLimits | null {
+  let best: OverviewRateLimits | null = null;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  function visit(session: SessionSnapshot): void {
+    for (const snapshot of session.rateLimitSnapshots ?? []) {
+      const ms = parseTimeMs(snapshot.capturedAt);
+      if (ms == null || (sinceMs != null && ms < sinceMs) || (untilMs != null && ms >= untilMs)) continue;
+      if (ms >= bestMs) {
+        bestMs = ms;
+        best = {
+          sessionId: session.id,
+          source: session.source ?? "codex",
+          capturedAt: snapshot.capturedAt,
+          raw: snapshot.raw,
+        };
+      }
+    }
+    for (const child of session.children) visit(child);
+  }
+  for (const session of sessions) visit(session);
+  return best;
+}
+
+function hasTurnInRange(
+  session: SessionSnapshot,
+  sinceMs: number | undefined,
+  untilMs: number | undefined,
+): boolean {
+  for (const turn of session.turns)
+    if (turnInRange(turn, sinceMs, untilMs)) return true;
+  return session.children.some((child) =>
+    hasTurnInRange(child, sinceMs, untilMs),
+  );
+}
+
+function inRange(
+  session: SessionSnapshot,
+  sinceMs?: number,
+  untilMs?: number,
+): boolean {
   const t = sessionTimeMs(session);
-  return t != null && t >= sinceMs;
+  if (sinceMs != null && !(t != null && t >= sinceMs)) return false;
+  // A session that stayed active across the upper bound still belongs to the
+  // earlier window; its turns are filtered separately.
+  if (untilMs != null) {
+    const endedBefore = t != null && t < untilMs;
+    if (!endedBefore && !hasTurnInRange(session, undefined, untilMs))
+      return false;
+  }
+  return true;
 }
 
 function turnTimeMs(turn: Turn): number | null {
@@ -209,10 +277,15 @@ function turnTimeMs(turn: Turn): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
-function turnInRange(turn: Turn, sinceMs?: number): boolean {
-  if (sinceMs == null) return true;
+function turnInRange(turn: Turn, sinceMs?: number, untilMs?: number): boolean {
   const t = turnTimeMs(turn);
-  return t != null && t >= sinceMs;
+  if (sinceMs != null && !(t != null && t >= sinceMs)) return false;
+  if (untilMs != null && !(t != null && t < untilMs)) return false;
+  return true;
+}
+
+function inWindowRange(turn: Turn, sinceMs: number | undefined, untilMs: number | undefined): boolean {
+  return turnInRange(turn, sinceMs, untilMs);
 }
 
 function walkTurns(
@@ -235,21 +308,25 @@ function collectTurnsById(
   return map;
 }
 
-function windowTurnIds(session: SessionSnapshot, sinceMs?: number): Set<string> {
+function windowTurnIds(
+  session: SessionSnapshot,
+  sinceMs?: number,
+  untilMs?: number,
+): Set<string> {
   const ids = new Set<string>();
   walkTurns(session, (turn) => {
-    if (turnInRange(turn, sinceMs)) ids.add(turn.id);
+    if (inWindowRange(turn, sinceMs, untilMs)) ids.add(turn.id);
   });
   return ids;
 }
 
-function windowedWaste(session: SessionSnapshot, sinceMs?: number): Cost {
+function windowedWaste(session: SessionSnapshot, sinceMs?: number, untilMs?: number): Cost {
   const { turnIds } = computeWaste({
     turns: session.turns,
     children: session.children,
     toggles: session.toggles,
   });
-  const inWindow = windowTurnIds(session, sinceMs);
+  const inWindow = windowTurnIds(session, sinceMs, untilMs);
   const byId = collectTurnsById(session);
   let waste = emptyMaybeCost();
   for (const id of turnIds) {
@@ -262,13 +339,14 @@ function windowedWaste(session: SessionSnapshot, sinceMs?: number): Cost {
 function filterSessionTurns(
   session: SessionSnapshot,
   sinceMs?: number,
+  untilMs?: number,
 ): SessionSnapshot {
-  if (sinceMs == null) return session;
+  if (sinceMs == null && untilMs == null) return session;
   return {
     ...session,
-    turns: session.turns.filter((turn) => turnInRange(turn, sinceMs)),
+    turns: session.turns.filter((turn) => inWindowRange(turn, sinceMs, untilMs)),
     children: session.children.map((child) =>
-      filterSessionTurns(child, sinceMs),
+      filterSessionTurns(child, sinceMs, untilMs),
     ),
   };
 }
@@ -299,8 +377,11 @@ export function buildOverview(
   opts: OverviewOptions,
 ): Overview {
   const now = opts.now ?? new Date().toISOString();
-  const included = sessions.filter((session) =>
-    (!opts.source || (session.source ?? "codex") === opts.source) && inRange(session, opts.sinceMs),
+  const matchingSource = sessions.filter((session) =>
+    !opts.source || (session.source ?? "codex") === opts.source,
+  );
+  const included = matchingSource.filter((session) =>
+    inRange(session, opts.sinceMs, opts.untilMs),
   );
   const dayCount = opts.dayCount ?? 8;
   const timezoneFormatter = createTimezoneFormatter(opts.timezone);
@@ -338,8 +419,8 @@ export function buildOverview(
     const quality = collectQuality(session);
     ledgerWarningSessions += quality.ledgerWarningSessions;
     parseErrors += quality.parseErrors;
-    const ranged = filterSessionTurns(session, opts.sinceMs);
-    waste = addKnownCost(waste, windowedWaste(session, opts.sinceMs));
+    const ranged = filterSessionTurns(session, opts.sinceMs, opts.untilMs);
+    waste = addKnownCost(waste, windowedWaste(session, opts.sinceMs, opts.untilMs));
     turnCount += countTurns(ranged);
 
     walkTurns(ranged, (turn, flagged, nested) => {
@@ -399,6 +480,17 @@ export function buildOverview(
     chartDays.push(makeDay(OVERVIEW_LATER_DATE, later, laterFlagged, laterUnpriced));
   }
 
+  const timedSamples = included.flatMap((session) => {
+    const hasTasks = collectTaskTimings(session).length > 0;
+    // Sources without agent-task windows time a single model request.
+    return (hasTasks ? collectTaskTimings(session) : requestTimings(session.turns))
+      .map((sample) => ({ ...sample, basis: hasTasks ? ("task" as const) : ("request" as const) }))
+      .filter((sample) =>
+        (opts.sinceMs == null || (sample.endedAt != null && Date.parse(sample.endedAt) >= opts.sinceMs)) &&
+          (opts.untilMs == null || (sample.endedAt != null && Date.parse(sample.endedAt) < opts.untilMs)),
+      );
+  });
+
   const card = loadRateCard();
   return {
     sessionCount: included.length,
@@ -433,16 +525,8 @@ export function buildOverview(
         unpricedRaw: entry.unpricedRaw,
       }))
       .sort((a, b) => b.cost.raw - a.cost.raw || a.model.localeCompare(b.model)),
-    performance: summarizePerformance(
-      included.flatMap((session) => {
-        const hasTasks = collectTaskTimings(session).length > 0;
-        // Sources without agent-task windows time a single model request.
-        return (hasTasks ? collectTaskTimings(session) : requestTimings(session.turns))
-          .map((sample) => ({ ...sample, basis: hasTasks ? ("task" as const) : ("request" as const) }))
-          .filter((sample) =>
-            opts.sinceMs == null || (sample.endedAt != null && Date.parse(sample.endedAt) >= opts.sinceMs),
-          );
-      }),
-    ),
+    performance: summarizePerformance(timedSamples),
+    performanceDistribution: performanceDistribution(timedSamples),
+    rateLimits: latestRateLimits(matchingSource, opts.sinceMs, opts.untilMs),
   };
 }

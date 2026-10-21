@@ -59,3 +59,27 @@ export function filterSessionsByRange<T extends DatedSession>(
     return t != null && t >= cutoff;
   });
 }
+
+export type ComparisonWindow = {
+  sinceMs: number;
+  untilMs: number;
+  days: number;
+};
+
+/**
+ * The equal-length window right before the current one, so the ledger strip can
+ * state a comparison. `全部` has no previous window and nothing is guessed.
+ */
+export function previousWindow(
+  rangeId: SessionRangeId,
+  nowMs: number,
+): ComparisonWindow | null {
+  const range = SESSION_RANGES.find((item) => item.id === rangeId);
+  if (!range || range.ms == null) return null;
+  const untilMs = rangeCutoffMs(rangeId, nowMs) ?? nowMs;
+  return {
+    sinceMs: untilMs - range.ms,
+    untilMs,
+    days: range.days,
+  };
+}

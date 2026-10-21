@@ -192,6 +192,8 @@ export type SessionSnapshot = {
   ledger_warning: boolean;
   parse_errors: ParseError[];
   rate_limits: unknown | null;
+  /** Quota measurements with their own event timestamps, independent of activity. */
+  rateLimitSnapshots?: { capturedAt: string; raw: unknown }[];
   rateCardAsOf: string;
   fastMode: boolean;
   cost: Cost;

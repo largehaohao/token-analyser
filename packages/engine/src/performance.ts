@@ -163,18 +163,18 @@ export function collectTaskTimings(session: SessionSnapshot): TaskTiming[] {
  * One sample per recorded model request, from the timing the log recorded for
  * that request. Sources without task windows (pi, Cursor, Claude) report here.
  */
-export function requestTimings(turns: Turn[]): TaskTiming[] {
-  return turns.flatMap((turn) => {
+export function requestTimings(turns: Turn[]): TimedSample[] {
+  return turns.map((turn) => {
     const performance = turn.requestPerformance;
-    if (!performance) return [];
-    return [{
+    return {
       id: turn.id,
       startedAt: turn.startedAt ?? null,
       endedAt: turn.endedAt ?? null,
-      durationMs: performance.durationMs,
-      ttftMs: performance.ttftMs,
+      durationMs: performance?.durationMs ?? null,
+      ttftMs: performance?.ttftMs ?? null,
+      outputTokensPerSecond: performance?.outputTokensPerSecond ?? null,
       outputTokens: turn.usageRecorded ? turn.usage.output_tokens : null,
-    }];
+    };
   });
 }
 
@@ -205,7 +205,56 @@ export function summarizeSessions(sessions: SessionSnapshot[]): PerformanceSumma
 }
 
 /** A timing sample plus the unit it measured: an agent task or one request. */
-export type TimedSample = TaskTiming & { basis?: PerformanceBasis };
+export type TimedSample = TaskTiming & {
+  basis?: PerformanceBasis;
+  /** Request-level speed, including sources that do not record a duration. */
+  outputTokensPerSecond?: number | null;
+};
+
+/** Fixed display buckets for the response-performance histograms. The upper
+ * edge of each bucket is the axis label; the last bucket is open-ended. */
+export const TTFT_EDGES_MS = [1_000, 2_000, 3_000, 5_000] as const;
+export const TPS_EDGES = [10, 25, 40, 60] as const;
+
+export type PerformanceDistribution = {
+  /** Sample counts per TTFT bucket, in ms; length is `TTFT_EDGES_MS.length + 1`. */
+  ttft: number[];
+  /** Sample counts per output-speed bucket, in tok/s. */
+  tps: number[];
+  /** All samples in scope, including those with no recorded measurements. */
+  sampleCount: number;
+};
+
+function bucketCount(value: number, edges: readonly number[]): number {
+  for (let i = 0; i < edges.length; i++) if (value <= edges[i]) return i;
+  return edges.length;
+}
+
+/**
+ * Where the recorded timings concentrate, using the same samples as the
+ * summary. Only recorded measurements count: a missing measurement never
+ * lands in the first bucket.
+ */
+export function performanceDistribution(
+  samples: TimedSample[],
+): PerformanceDistribution {
+  const ttft = Array<number>(TTFT_EDGES_MS.length + 1).fill(0);
+  const tps = Array<number>(TPS_EDGES.length + 1).fill(0);
+  for (const sample of samples) {
+    if (sample.ttftMs != null) ttft[bucketCount(sample.ttftMs, TTFT_EDGES_MS)] += 1;
+    const speed = sampleSpeed(sample);
+    if (speed != null) tps[bucketCount(speed, TPS_EDGES)] += 1;
+  }
+  return { ttft, tps, sampleCount: samples.length };
+}
+
+function sampleSpeed(sample: TimedSample): number | null {
+  if (sample.outputTokensPerSecond != null) return nonnegative(sample.outputTokensPerSecond);
+  if (sample.durationMs == null || sample.durationMs <= 0) return null;
+  if (sample.outputTokens == null) return null;
+  const speed = (sample.outputTokens * 1000) / sample.durationMs;
+  return Number.isFinite(speed) ? speed : null;
+}
 
 export function summarizePerformance(samples: TimedSample[]): PerformanceSummary {
   let ttftSum = 0;

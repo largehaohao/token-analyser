@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { filterSessionsByRange, overviewQuery } from "./session-range";
+import {
+  filterSessionsByRange,
+  overviewQuery,
+  previousWindow,
+} from "./session-range";
 
 const NOW = Date.parse("2026-08-28T12:00:00.000Z");
 
@@ -86,5 +90,27 @@ describe("filterSessionsByRange", () => {
     const later = overviewQuery("7d", NOW + 60_000);
     expect(later.since).not.toBe(earlier.since);
     expect(Date.parse(later.since!)).toBe(Date.parse(earlier.since!) + 60_000);
+  });
+});
+
+const DAY = 24 * 60 * 60 * 1000;
+
+describe("previousWindow", () => {
+  it("returns the equal-length window right before a 7-day range", () => {
+    expect(previousWindow("7d", NOW)).toEqual({
+      sinceMs: NOW - 14 * DAY,
+      untilMs: NOW - 7 * DAY,
+      days: 8,
+    });
+  });
+
+  it("ends the comparison for a rolling 5-hour window at its start", () => {
+    const window = previousWindow("5h", NOW)!;
+    expect(window.untilMs).toBe(NOW - 5 * 60 * 60 * 1000);
+    expect(window.untilMs - window.sinceMs).toBe(5 * 60 * 60 * 1000);
+  });
+
+  it("does not invent a previous window for 全部", () => {
+    expect(previousWindow("all", NOW)).toBeNull();
   });
 });

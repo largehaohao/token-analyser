@@ -13,8 +13,14 @@ import {
   updateModelPrices as requestModelPriceUpdate,
 } from "./api";
 import { errorMessage, isNotFound, streamErrorBanner } from "./app-errors";
-import { UnitProvider } from "./UnitContext";
-import type { CostUnit } from "./format";
+import { UnitProvider, useUnit } from "./UnitContext";
+import {
+  formatCompactTokens,
+  formatCost,
+  formatCostTokens,
+  formatPercent,
+  type CostUnit,
+} from "./format";
 import { OverviewPage } from "./OverviewPage";
 import { RangeSwitcher } from "./RangeSwitcher";
 import { SessionList } from "./SessionList";
@@ -45,6 +51,7 @@ import {
 import {
   SESSION_RANGES,
   filterSessionsByRange,
+  previousWindow,
   type SessionRangeId,
 } from "./session-range";
 
@@ -66,6 +73,7 @@ function AppShell() {
   const [view, setView] = useState<View>(initialNavigation.view);
   const [unit, setUnit] = useState<CostUnit>(readUnitPref);
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [previousOverview, setPreviousOverview] = useState<Overview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [appliedScope, setAppliedScope] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
@@ -95,6 +103,7 @@ function AppShell() {
   const [pricingUpdateNotice, setPricingUpdateNotice] =
     useState<PricingUpdateNotice | null>(null);
   const [updatingModelPrices, setUpdatingModelPrices] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const importInFlight = useRef(false);
   const importedSnapshot = useRef<SessionSnapshot | null>(null);
   const listRequest = useRef(0);
@@ -223,13 +232,31 @@ function AppShell() {
     if (!force && active?.scope === requestedScope) return active.promise;
     const requestId = ++overviewRequest.current;
     setOverviewError(null);
+    const requestedAt = Date.now();
     const promise = (async () => {
       try {
-        const data = await getOverview(requestedRange, Date.now(), requestedSource);
+        const data = await getOverview(requestedRange, requestedAt, requestedSource);
         if (requestId !== overviewRequest.current) return data;
         setOverview(data);
         setAppliedScope(requestedScope);
+        setPreviousOverview(null);
         setOverviewError(null);
+        // The ledger strip compares the window with the equal-length window
+        // right before it. 全部 has no previous window, so nothing is guessed.
+        const comparison = previousWindow(requestedRange, requestedAt);
+        if (comparison)
+          void getOverview(
+            requestedRange,
+            requestedAt,
+            requestedSource,
+            comparison,
+          )
+            .then((data2) => {
+              if (requestId === overviewRequest.current) setPreviousOverview(data2);
+            })
+            .catch(() => {
+              if (requestId === overviewRequest.current) setPreviousOverview(null);
+            });
         return data;
       } catch (err) {
         if (requestId !== overviewRequest.current) throw err;
@@ -511,6 +538,10 @@ function AppShell() {
   function handleSelectSession(id: string) {
     mobileContextTarget.current = false;
     preferredSessionIdRef.current = null;
+    if (view !== "sessions") {
+      pushSessionNavigation({ view: "sessions", selectedId: id, range, source });
+      setView("sessions");
+    }
     setSelectedId(id);
     setSelectedNodeId(null);
     setContextOpen(null);
@@ -562,6 +593,25 @@ function AppShell() {
     hasOverview: overview != null,
     error: overviewError,
   });
+
+  function refreshAll() {
+    setRefreshing(true);
+    void Promise.all([
+      refreshOverview(true),
+      refreshList(true),
+      selectedId ? refreshSession(selectedId) : Promise.resolve(),
+    ])
+      .catch(() => undefined)
+      .finally(() => setRefreshing(false));
+  }
+
+  function inspectSlice(key: string, label: string) {
+    // The overview ranking answers "which sessions did this"; the session list
+    // is the only surface that can answer it, so hand the question over.
+    openSessions();
+    setAppError(`已切到会话明细：按「${label}」查看会话，可在列表里搜索关键词。`);
+    void key;
+  }
 
   function openSessions() {
     mobileContextTarget.current = false;
@@ -641,7 +691,7 @@ function AppShell() {
               </a>
             </nav>
           </div>
-          <div className="header-right">
+          <div className="header-right app-tools">
             <div className="status-pills" role="status" aria-live="polite">
               <span>
                 <i
@@ -650,6 +700,13 @@ function AppShell() {
                 {STREAM_LABEL[streamStatus]}
               </span>
             </div>
+            <Button
+              className="refresh-button"
+              busy={refreshing}
+              onClick={refreshAll}
+            >
+              <Icon name="refresh" /> 刷新
+            </Button>
             <span className="local-label"><Icon name="shield" /> 本地运行</span>
           </div>
         </header>
@@ -736,20 +793,38 @@ function AppShell() {
         >
           {view === "overview" ? (
             overviewState === "ready" && overview ? (
-              <OverviewPage
-                overview={overview}
-                onOpenSessions={openSessions}
-                onUpdateModelPrices={() => void updateModelPrices()}
-                updatingModelPrices={updatingModelPrices}
-                pricingUpdateNotice={pricingUpdateNotice}
-                refreshError={overviewError != null}
-                onRetry={() => void refreshOverview().catch(() => undefined)}
-                rangeLabel={
-                  range === "all"
-                    ? `${rangeLabel}（趋势为近 30 个本地日）`
-                    : rangeLabel
-                }
-              />
+              <div className="layout overview-layout">
+                <OverviewPage
+                  overview={overview}
+                  previous={previousOverview}
+                  previousLabel={
+                    range === "all"
+                      ? null
+                      : `上一 ${rangeLabel}`
+                  }
+                  onOpenSessions={openSessions}
+                  onUpdateModelPrices={() => void updateModelPrices()}
+                  updatingModelPrices={updatingModelPrices}
+                  pricingUpdateNotice={pricingUpdateNotice}
+                  refreshError={overviewError != null}
+                  onRetry={() => void refreshOverview().catch(() => undefined)}
+                  onInspectSlice={inspectSlice}
+                  rangeLabel={
+                    range === "all"
+                      ? `${rangeLabel}（趋势为近 30 个本地日）`
+                      : rangeLabel
+                  }
+                />
+                <OverviewRail
+                  overview={overview}
+                  topSessions={[...visibleSessions]
+                    .sort((a, b) => b.cost.raw - a.cost.raw)
+                    .slice(0, 5)}
+                  onSelectSession={handleSelectSession}
+                  onOpenSessions={openSessions}
+                  watchPath={overview.watchPath}
+                />
+              </div>
             ) : overviewState === "error" ? (
               <main className="overview">
                 <StatePanel
@@ -777,7 +852,7 @@ function AppShell() {
               </main>
             )
           ) : (
-            <div className="layout" data-mobile-pane={mobileSessionPane}>
+            <div className="layout sessions-layout" data-mobile-pane={mobileSessionPane}>
               <SessionList
                 key={source}
                 source={source}
@@ -903,6 +978,131 @@ function AppShell() {
         </footer>
       </div>
     </UnitProvider>
+  );
+}
+
+/**
+ * The overview rail answers "is this number trustworthy, and which sessions are
+ * biggest" without leaving the page. It is supporting context, so it collapses
+ * away on narrow screens.
+ */
+function OverviewRail({
+  overview,
+  topSessions,
+  onSelectSession,
+  onOpenSessions,
+  watchPath,
+}: {
+  overview: Overview;
+  topSessions: SessionListItem[];
+  onSelectSession: (id: string) => void;
+  onOpenSessions: () => void;
+  watchPath: string;
+}) {
+  const { unit } = useUnit();
+  const quality = overview.quality;
+  const issueCount =
+    (quality?.ledgerWarningSessions ?? 0) + (quality?.parseErrors ?? 0);
+  const coverage =
+    overview.cost.raw > 0 && quality
+      ? formatPercent((100 * quality.pricedRaw) / overview.cost.raw)
+      : null;
+  const max = Math.max(...topSessions.map((session) => session.cost.raw), 1);
+  return (
+    <aside className="rail overview-rail" aria-label="总览侧栏" tabIndex={-1}>
+      <div className="rail-panel">
+        <h2 className="rail-title">账本状态</h2>
+        <div className="dq-list">
+          <div className={`dq ${overview.unpricedRaw > 0 ? "warn" : "ok"}`}>
+            <span className="dot" aria-hidden="true" />
+            <div>
+              <b>
+                {overview.unpricedRaw > 0
+                  ? "部分用量未定价"
+                  : "定价覆盖完整"}
+              </b>
+              <span>
+                {overview.unpricedRaw > 0
+                  ? `${formatCompactTokens(overview.unpricedRaw)} tokens 未计入费用`
+                  : coverage == null
+                    ? "该范围没有用量"
+                    : `定价覆盖 ${coverage}`}
+              </span>
+            </div>
+          </div>
+          <div className={`dq ${issueCount > 0 ? "warn" : "ok"}`}>
+            <span className="dot" aria-hidden="true" />
+            <div>
+              <b>{issueCount > 0 ? `${issueCount} 项异常需核对` : "账本校验通过"}</b>
+              <span>
+                解析错误 {quality?.parseErrors ?? 0} · 账本警告{" "}
+                {quality?.ledgerWarningSessions ?? 0}
+              </span>
+            </div>
+          </div>
+          <div className="dq">
+            <span className="dot" aria-hidden="true" />
+            <div>
+              <b>{overview.live ? "有实时会话" : "静态账本"}</b>
+              <span>
+                {overview.collecting ? "正在采集本地会话" : "未开启自动采集"} ·{" "}
+                {overview.sessionCount.toLocaleString("en-US")} 个会话
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="rail-panel">
+        <h2 className="rail-title">范围 Top 会话</h2>
+        {topSessions.length === 0 ? (
+          <p className="empty-copy">该范围内没有会话。</p>
+        ) : (
+          <div className="rail-ranks">
+            {topSessions.map((session, index) => (
+              <button
+                type="button"
+                className="rail-rank"
+                key={session.id}
+                onClick={() => onSelectSession(session.id)}
+                title={`查看 ${session.nickname ?? session.id} 的费用明细`}
+              >
+                <span className="rk">{index + 1}</span>
+                <span className="rail-rank-main">
+                  <span className="rail-rank-top">
+                    <span className="rail-rank-name">
+                      {session.nickname ?? session.id}
+                    </span>
+                    <span className="num">
+                      {unit === "tokens"
+                        ? formatCostTokens(session.cost)
+                        : formatCost(session.cost, unit)}
+                    </span>
+                  </span>
+                  <span className="rail-rank-bar">
+                    <i
+                      style={{
+                        width: `${(100 * session.cost.raw) / max}%`,
+                      }}
+                    />
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        <Button className="rail-more" onClick={onOpenSessions}>
+          查看全部会话 <Icon name="arrow" />
+        </Button>
+      </div>
+      <div className="rail-panel">
+        <h2 className="rail-title">数据源</h2>
+        <p className="rail-meta">采集目录：{watchPath}</p>
+        <p className="rail-meta">
+          时区：{Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区"}
+        </p>
+        <p className="rail-meta">价格快照：{overview.rateCardAsOf}</p>
+      </div>
+    </aside>
   );
 }
 

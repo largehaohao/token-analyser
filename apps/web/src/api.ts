@@ -147,6 +147,7 @@ export type SessionSnapshot = {
   ledger_warning: boolean;
   parse_errors: { offset: number; message: string }[];
   rate_limits: unknown | null;
+  rateLimitSnapshots?: { capturedAt: string; raw: unknown }[];
   rateCardAsOf: string;
   fastMode: boolean;
   cost: Cost;
@@ -185,6 +186,22 @@ export type OverviewDay = {
   unpricedRaw: number;
 };
 
+export type PerformanceDistribution = {
+  /** Sample counts: ≤1s, (1,2]s, (2,3]s, (3,5]s, >5s. */
+  ttft: number[];
+  /** Sample counts: ≤10, (10,25], (25,40], (40,60], >60 tok/s. */
+  tps: number[];
+  sampleCount: number;
+};
+
+/** The newest source-recorded usage-limit snapshot in the overview window. */
+export type OverviewRateLimits = {
+  sessionId: string;
+  source: SessionSource;
+  capturedAt: string | null;
+  raw: unknown;
+};
+
 export type Overview = {
   sessionCount: number;
   turnCount: number;
@@ -207,6 +224,8 @@ export type Overview = {
   slices: OverviewSlice[];
   models?: OverviewModel[];
   performance?: PerformanceSummary;
+  performanceDistribution?: PerformanceDistribution;
+  rateLimits?: OverviewRateLimits | null;
 };
 
 export type OverviewModel = {
@@ -289,11 +308,19 @@ export async function getOverview(
   range: SessionRangeId = "7d",
   nowMs = Date.now(),
   source: SessionSourceFilter = "all",
+  window?: { sinceMs: number; untilMs: number; days: number },
 ): Promise<Overview> {
-  const query = overviewQuery(range, nowMs);
+  const query = window
+    ? {
+        since: new Date(window.sinceMs).toISOString(),
+        days: window.days,
+        until: new Date(window.untilMs).toISOString(),
+      }
+    : overviewQuery(range, nowMs);
   const params = new URLSearchParams();
   if (source !== "all") params.set("source", source);
   if (query.since) params.set("since", query.since);
+  if ("until" in query && query.until) params.set("until", query.until);
   params.set("days", String(query.days));
   params.set(
     "timezone_offset_minutes",

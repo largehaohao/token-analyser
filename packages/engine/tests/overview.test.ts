@@ -5,6 +5,7 @@ import { buildTree } from "../src/tree.ts";
 import { buildOverview } from "../src/overview.ts";
 import { loadRateCard } from "../src/rate-card.ts";
 import { loadApiPrices } from "../src/native-pricing.ts";
+import { analyseSession } from "../src/snapshot.ts";
 
 function cost(raw: number): Cost {
   return {
@@ -64,6 +65,9 @@ function session(partial: {
   ledger_warning?: boolean;
   live?: boolean;
   wasteRaw?: number;
+  rateLimits?: unknown;
+  rateLimitsCapturedAt?: string;
+  taskTimings?: SessionSnapshot["taskTimings"];
   toggles?: Partial<SessionSnapshot["toggles"]>;
 }): SessionSnapshot {
   const children = partial.children ?? [];
@@ -86,7 +90,11 @@ function session(partial: {
     effort: "max",
     ledger_warning: partial.ledger_warning ?? false,
     parse_errors: [],
-    rate_limits: null,
+    rate_limits: partial.rateLimits ?? null,
+    rateLimitSnapshots: partial.rateLimits == null ? [] : [{
+      capturedAt: partial.rateLimitsCapturedAt ?? partial.startedAt, raw: partial.rateLimits,
+    }],
+    taskTimings: partial.taskTimings,
     rateCardAsOf: "2026-08-27",
     fastMode: false,
     cost: tree.cost,
@@ -100,6 +108,27 @@ function session(partial: {
 }
 
 describe("buildOverview", () => {
+  it("selects quota by capture time, including historical snapshots in a bounded window", () => {
+    const quota = (hour: string, percent: number) => ({
+      timestamp: `2026-08-28T${hour}:00:00.000Z`, type: "event_msg",
+      payload: { type: "token_count", rate_limits: { primary: { used_percent: percent } } },
+    });
+    const a = analyseSession({ sessionId: "a", path: "/tmp/a.jsonl", events: [quota("08", 10), {
+      timestamp: "2026-08-28T11:00:00.000Z", type: "event_msg", payload: { type: "agent_message", message: "later activity" },
+    }] });
+    const b = analyseSession({ sessionId: "b", path: "/tmp/b.jsonl", events: [quota("09", 50), quota("10", 90)] });
+    const opts = { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z" };
+    expect(buildOverview([a, b], opts).rateLimits).toMatchObject({
+      sessionId: "b", capturedAt: "2026-08-28T10:00:00.000Z", raw: { primary: { used_percent: 90 } },
+    });
+    expect(buildOverview([a, b], { ...opts,
+      sinceMs: Date.parse("2026-08-28T08:30:00Z"), untilMs: Date.parse("2026-08-28T10:00:00Z"),
+    }).rateLimits).toMatchObject({
+      sessionId: "b", capturedAt: "2026-08-28T09:00:00.000Z", raw: { primary: { used_percent: 50 } },
+    });
+    expect(buildOverview([a, b], { ...opts, sinceMs: Date.parse("2026-08-28T10:30:00Z") }).rateLimits).toBeNull();
+  });
+
   it("sums root costs, turns, waste, and tree slices", () => {
     const overview = buildOverview(
       [
@@ -718,5 +747,101 @@ describe("buildOverview", () => {
     );
     expect(withPoll.cost.raw).toBe(80);
     expect(withPoll.waste.raw).toBe(80);
+  });
+
+  it("excludes turns at or after untilMs so a previous window stays comparable", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "a",
+          startedAt: "2026-08-26T10:00:00.000Z",
+          lastEventAt: "2026-08-28T10:00:00.000Z",
+          turns: [
+            turn({
+              id: "old",
+              bucket: "code",
+              raw: 400,
+              startedAt: "2026-08-26T10:00:00.000Z",
+              endedAt: "2026-08-26T10:00:01.000Z",
+            }),
+            turn({
+              id: "new",
+              bucket: "code",
+              raw: 900,
+              startedAt: "2026-08-28T10:00:00.000Z",
+              endedAt: "2026-08-28T10:00:01.000Z",
+            }),
+          ],
+        }),
+      ],
+      {
+        watchPath: "/tmp",
+        now: "2026-08-28T12:00:00.000Z",
+        sinceMs: Date.parse("2026-08-25T00:00:00.000Z"),
+        untilMs: Date.parse("2026-08-28T00:00:00.000Z"),
+      },
+    );
+
+    expect(overview.cost.raw).toBe(400);
+    expect(overview.turnCount).toBe(1);
+    expect(overview.days.at(-1)?.cost.raw ?? 0).toBeLessThan(900);
+  });
+
+  it("buckets recorded timings for the performance histograms", () => {
+    const overview = buildOverview(
+      [
+        session({
+          id: "a",
+          startedAt: "2026-08-27T10:00:00.000Z",
+          turns: [],
+          taskTimings: [
+            { id: "k1", startedAt: "2026-08-27T10:00:00.000Z", endedAt: "2026-08-27T10:00:02.000Z", durationMs: 2000, ttftMs: 400, outputTokens: 100 },
+            { id: "k2", startedAt: "2026-08-27T10:00:00.000Z", endedAt: "2026-08-27T10:00:06.000Z", durationMs: 4000, ttftMs: 1500, outputTokens: 40 },
+            { id: "k3", startedAt: "2026-08-27T10:00:00.000Z", endedAt: "2026-08-27T10:00:09.000Z", durationMs: 2000, ttftMs: 6000, outputTokens: null },
+          ],
+        }),
+      ],
+      { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z" },
+    );
+
+    expect(overview.performanceDistribution).toEqual({
+      ttft: [1, 1, 0, 0, 1],
+      tps: [1, 0, 0, 1, 0],
+      sampleCount: 3,
+    });
+  });
+
+  it("reports the newest source-recorded rate-limit snapshot in the window", () => {
+    const older = session({
+      id: "older",
+      startedAt: "2026-08-26T10:00:00.000Z",
+      turns: [],
+      rateLimits: { plan_type_used_percent: 10 },
+    });
+    const newest = session({
+      id: "newest",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      lastEventAt: "2026-08-28T09:00:00.000Z",
+      turns: [],
+      rateLimits: { plan_type_used_percent: 55 },
+      rateLimitsCapturedAt: "2026-08-28T09:00:00.000Z",
+    });
+    const overview = buildOverview([older, newest], {
+      watchPath: "/tmp",
+      now: "2026-08-28T12:00:00.000Z",
+    });
+
+    expect(overview.rateLimits).toEqual({
+      sessionId: "newest",
+      source: "codex",
+      capturedAt: "2026-08-28T09:00:00.000Z",
+      raw: { plan_type_used_percent: 55 },
+    });
+
+    const empty = buildOverview(
+      [session({ id: "none", startedAt: "2026-08-27T10:00:00.000Z", turns: [] })],
+      { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z" },
+    );
+    expect(empty.rateLimits).toBeNull();
   });
 });

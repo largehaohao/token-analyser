@@ -125,123 +125,140 @@ export function SessionView({
         </details>
       )}
 
-      <header className="page-heading session-page-heading">
+      <header className="page-heading session-page-heading sess-head">
         <div className="page-heading-copy">
-          <h1 tabIndex={-1}>{snapshot.nickname ?? "会话明细"}</h1>
-          <p className="source-path" title={snapshot.cwd ?? undefined}>
-            {snapshot.cwd ?? "本地会话"}
+          <div className="sess-title">
+            <span className="badge">{sourceLabel(snapshot.source)}</span>
+            <h1 tabIndex={-1}>{snapshot.nickname ?? "会话明细"}</h1>
+            {snapshot.live && <span className="badge live">LIVE</span>}
+            {snapshot.fastMode && (
+              <span
+                className="badge fast"
+                title="最新日志记录使用 Fast；展开轮次可查看该轮倍率与 token 单价"
+              >
+                Fast
+              </span>
+            )}
+            {snapshot.parentId && <span className="badge child">子会话</span>}
+          </div>
+          <p className="source-path sess-path" title={snapshot.cwd ?? undefined}>
+            {snapshot.cwd ?? "本地会话"} · {snapshot.model ?? "未知模型"}
+            {snapshot.effort ? ` · ${snapshot.effort}` : ""} · 最近活动{" "}
+            <RelativeTime iso={snapshot.lastEventAt ?? snapshot.startedAt} />
           </p>
         </div>
         <span className="session-reference" title={snapshot.id}>
           {snapshot.id.slice(0, 8)}
         </span>
-      </header>
-      <p className="session-kicker">
-        <span className="badge">{sourceLabel(snapshot.source)}</span>
-        {snapshot.live && <span className="badge live">LIVE</span>}
-        {snapshot.fastMode && (
-          <span
-            className="badge fast"
-            title="最新日志记录使用 Fast；展开轮次可查看该轮倍率与 token 单价"
-          >
-            Fast
-          </span>
-        )}
-        <span>{snapshot.model ?? "未知模型"}</span>
-        {snapshot.effort && <span>· {snapshot.effort}</span>}
-        <span>
-          · 最近活动{" "}
-          <RelativeTime iso={snapshot.lastEventAt ?? snapshot.startedAt} />
-        </span>
-      </p>
-      {snapshot.cost.unmeasured ? <p className="banner" role="status">{usageNote(snapshot.cost)}对话和工具调用仍可展开查看。</p> : null}
-      {snapshot.forkedFrom ? <p className="source-path">分叉自：{snapshot.forkedFrom} · 已识别的继承记录不重复计费。</p> : null}
+        {snapshot.cost.unmeasured ? (
+          <p className="banner" role="status">
+            {usageNote(snapshot.cost)}对话和工具调用仍可展开查看。
+          </p>
+        ) : null}
+        {snapshot.forkedFrom ? (
+          <p className="source-path">
+            分叉自：{snapshot.forkedFrom} · 已识别的继承记录不重复计费。
+          </p>
+        ) : null}
 
-      <header className="session-headline">
-        <div className="chart-card headline-main">
-          <div className="session-metrics">
-            <div className="headline-row">
-              <span className="headline-label">
-                {unit === "tokens" ? "总用量" : "预估总费用"}
-              </span>
-              <span
-                className="headline-value"
-                title={formatCostTitle(snapshot.cost, unit)}
-              >
-                {unit === "tokens"
-                  ? formatCostTokens(snapshot.cost)
-                  : formatCost(snapshot.cost, unit)}
-              </span>
-              <small>
-                {formatUnitSuffix(unit)} ·{" "}
-                {turns.length.toLocaleString("en-US")} 轮调用
-              </small>
-            </div>
-            <div className="headline-row">
-              <span className="headline-label">疑似可优化</span>
-              <span
-                className="headline-value waste"
-                data-testid="waste-headline"
-                title={formatCostTitle(snapshot.waste, unit)}
-              >
-                {unit === "tokens"
-                  ? formatCostTokens(snapshot.waste)
-                  : formatCost(snapshot.waste, unit)}
-              </span>
-              <small>
-                {formatUnitSuffix(unit)} · 占比 {unitWaste}
-              </small>
-            </div>
-            <div className="headline-row">
-              <span className="headline-label">缓存命中</span>
-              <span className="headline-value">
-                {hit != null ? formatPercent(100 * hit) : "—"}
-              </span>
-              <small>按输入 token 计算</small>
-            </div>
+        <div className="session-metrics stat-row headline-main">
+          <div className="headline-row stat">
+            <span className="headline-label">
+              {unit === "tokens" ? "总用量" : "预估总费用"}
+            </span>
+            <span
+              className="headline-value"
+              title={formatCostTitle(snapshot.cost, unit)}
+            >
+              {unit === "tokens"
+                ? formatCostTokens(snapshot.cost)
+                : formatCost(snapshot.cost, unit)}
+            </span>
+            <small>
+              {formatUnitSuffix(unit)} · {turns.length.toLocaleString("en-US")} 轮调用
+            </small>
           </div>
-          {unpriced ? (
-            <p className="headline-note identity-warn">{unpriced}</p>
-          ) : null}
-          {!identity.ok && (
-            <p className="headline-note identity-warn">
-              构成合计 {identity.parts.toLocaleString("en-US")} ≠ raw{" "}
-              {snapshot.cost.raw.toLocaleString("en-US")}
-            </p>
-          )}
-          <MixBar
-            className="headline-mix"
-            testId="headline-mix"
-            label={`浪费 ${tokenWaste}（按 token）`}
-            segments={[
-              {
-                key: "useful",
-                label: "有效",
-                value: Math.max(0, snapshot.cost.raw - snapshot.waste.raw),
-                className: "useful",
-              },
-              {
-                key: "waste",
-                label: "浪费",
-                value: snapshot.waste.raw,
-                className: "waste",
-              },
-            ]}
-          />
-          <div className="headline-legend">
-            <span className="swatch useful" /> 有效
-            <span className="swatch waste" /> 浪费 {unitWaste}
-            {unit !== "tokens" && unitWaste !== tokenWaste && (
-              <span className="legend-note">token {tokenWaste}</span>
-            )}
+          <div className="headline-row stat">
+            <span className="headline-label">疑似可优化</span>
+            <span
+              className="headline-value waste"
+              data-testid="waste-headline"
+              title={formatCostTitle(snapshot.waste, unit)}
+            >
+              {unit === "tokens"
+                ? formatCostTokens(snapshot.waste)
+                : formatCost(snapshot.waste, unit)}
+            </span>
+            <small>{formatUnitSuffix(unit)} · 占比 {unitWaste}</small>
+          </div>
+          <div className="headline-row stat">
+            <span className="headline-label">缓存命中</span>
+            <span className="headline-value">
+              {hit != null ? formatPercent(100 * hit) : "—"}
+            </span>
+            <small>按输入 token 计算</small>
+          </div>
+          <div className="headline-row stat">
+            <span className="headline-label">定价覆盖</span>
+            <span className="headline-value">{pricingCoverage}</span>
+            <small>{unpriced ?? "全部用量已有价格"}</small>
+          </div>
+          <div className="headline-row stat">
+            <span className="headline-label">子会话</span>
+            <span className="headline-value">
+              {(snapshot.children ?? []).length}
+            </span>
+            <small>
+              {(snapshot.children ?? []).length > 0
+                ? "费用已汇总到本会话"
+                : "该会话没有子 Agent 记录"}
+            </small>
           </div>
         </div>
+        {unpriced ? (
+          <p className="headline-note identity-warn">{unpriced}</p>
+        ) : null}
+        {!identity.ok && (
+          <p className="headline-note identity-warn">
+            构成合计 {identity.parts.toLocaleString("en-US")} ≠ raw{" "}
+            {snapshot.cost.raw.toLocaleString("en-US")}
+          </p>
+        )}
+        <MixBar
+          className="headline-mix"
+          testId="headline-mix"
+          label={`浪费 ${tokenWaste}（按 token）`}
+          segments={[
+            {
+              key: "useful",
+              label: "有效",
+              value: Math.max(0, snapshot.cost.raw - snapshot.waste.raw),
+              className: "useful",
+            },
+            {
+              key: "waste",
+              label: "浪费",
+              value: snapshot.waste.raw,
+              className: "waste",
+            },
+          ]}
+        />
+        <div className="headline-legend">
+          <span className="swatch useful" /> 有效
+          <span className="swatch waste" /> 浪费 {unitWaste}
+          {unit !== "tokens" && unitWaste !== tokenWaste && (
+            <span className="legend-note">token {tokenWaste}</span>
+          )}
+        </div>
       </header>
-      <PerformanceMetrics performance={snapshot.performance} />
+      <PerformanceMetrics
+        performance={snapshot.performance}
+        turns={turns}
+      />
       <p className="disclaimer">{disclaimer(snapshot.rateCardAsOf)}</p>
 
-      <div className="session-body">
-        <div className="session-left">
+      <div className="session-body two">
+        <div className="session-left tree-panel">
           <CostTree
             key={snapshot.id}
             tree={snapshot.tree}

@@ -55,6 +55,26 @@ components:
     textColor: "{colors.danger}"
   quality-strip:
     backgroundColor: "{colors.border}"
+  ledger-strip:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.primary}"
+    rounded: "{rounded.DEFAULT}"
+  chart-card:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.DEFAULT}"
+  rail-panel:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.DEFAULT}"
+  rank-row:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.control}"
+  hist-card:
+    backgroundColor: "{colors.inset}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.control}"
 ---
 
 # Token Analyser design system
@@ -65,7 +85,7 @@ The reference is an `htop` ledger: precise numeric columns, visible branches, qu
 
 ## Macrostructure family
 
-App pages use a **Catalogue-led index**: the session inventory is the first reading surface, and the selected session opens into an evidence split. Overview leads with four compact metrics, then a trend beside a Token allocation summary, followed by response performance and detailed disclosures. The variant changes hierarchy and rhythm from the earlier workbench presentation without changing the underlying data model or route behavior.
+App pages use a **Catalogue-led index**: the session inventory is the first reading surface, and the selected session opens into an evidence split. Overview reads as a ledger: a strip of equal-width figures with the comparison against the previous equal-length window, then a trend panel beside Token composition, then response performance (fixed latency histograms) beside the ranked behaviour list, a right rail for ledger state / top sessions / data sources, and detailed disclosures last. The variant changes hierarchy and rhythm from the earlier workbench presentation without changing the underlying data model or route behavior.
 
 - Navigation: compact filled selection on desktop; equal-width links with an active rule on mobile. Source, time range and unit live in their own filter toolbar. Mobile starts with a collapsed filter summary; an explicit button expands all controls.
 - App footer: single inline rule with local-processing and read-only notes (Ft2-inspired)
@@ -89,7 +109,7 @@ The body stack is local and Chinese-capable; no download or font swap changes la
 
 ## Layout
 
-The document owns page scrolling. Overview uses a 1424px maximum width; session analysis uses 1760px. The overview starts with four equally sized, compact metrics. Below 960px they become two columns; the leading total keeps its mint tint. Trends and a compact Token allocation summary sit side by side on wide screens and stack below 960px. Response performance follows, with detailed analysis behind disclosures. Pricing limitations remain visible next to totals; the longer mode explanation lives inside data quality.
+The document owns page scrolling. Overview uses a 1424px maximum width; session analysis uses 1760px. The overview starts with the ledger strip: four equal figures separated by 1px rules, each figure carrying its own comparison line; the leading total keeps its mint tint. Below 1360px the strip becomes two columns and the rail drops under the content as an equal-width panel row; below 780px it becomes one column. Panel pairs (trend + composition, performance + ranked behaviour) sit side by side above 1180px and stack below it; the trend plot scrolls horizontally inside its own frame so a 30-day window keeps 24px targets. Detailed analysis stays behind disclosures. Pricing limitations remain visible next to totals; the longer mode explanation lives inside data quality.
 
 The session page has a sticky catalogue rail beside its evidence pane on wide screens. Below 780px, it shows either the list or the detail. Selecting a session opens and focuses the detail; “返回会话列表” restores focus to the selected item. Search, selection and list scroll remain mounted. The list is bounded to 65dvh on mobile. Source switches return to the list; the keyboard search shortcut also reveals the list before focusing the input. Controls reflow down to 320px. No page shell has a fixed height to accommodate a table.
 
@@ -116,6 +136,8 @@ Cards use `--radius` (14px); controls use `--radius-control` (8px). Pills are re
 | `spacing.panel / gap`                 | `--space-panel / --space-gap`      | Panel padding and layout rhythm                 |
 
 `ui.tsx` owns Button (emphasis × intent), SegmentedControl, SearchField, StatePanel, Notice, and icons. Enabled actions have a hover treatment, 2px focus ring, pressed state, and pointer cursor. Disabled and busy actions cannot run; a busy button reserves its label's dimensions. Native links navigate. Native buttons expand turn evidence. Do not make table rows pretend to be buttons.
+
+The ledger strip, chart cards, rail panels, ranked rows and histogram cards are surfaces, not cards to be clicked: only ranked rows, the session-count figure and rail session rows are buttons, and each names what pressing it does. A chart figure is always paired with its tabular `srTable`, a text value, and a comparison where one exists; a number without a comparison states that plainly. Histograms use fixed shared buckets (`≤ 1s`, `1–2s`, … and `≤ 10 tok/s`, …) so two sessions, ranges and sources compare on one scale, and their denominator is stated (`3/14 轮有记录`).
 
 Loading uses an app-owned spinner in a reserved StatePanel, never a speculative skeleton. Stale reads retain data and show an inline notice. Search has an explicit clear button. Import shows a file name, truthful busy state, validation, and a persistent outcome. Details and context disclosures use native semantics. Behavior, privacy, navigation, and recovery are owned by [UX-CONTRACT.md](UX-CONTRACT.md).
 

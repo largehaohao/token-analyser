@@ -13,8 +13,8 @@ import { sha256 } from "./hash.ts";
 import { tokenAnalyserHome } from "./config.ts";
 import type { SessionSnapshot } from "./types.ts";
 
-// v12 includes request-level timing alongside the existing task metrics.
-export const CACHE_VERSION = 13;
+// v14 preserves quota event timestamps for comparisons across sessions/windows.
+export const CACHE_VERSION = 14;
 
 export function cacheDir(home?: string): string {
   return path.join(home ?? tokenAnalyserHome(), "cache");
