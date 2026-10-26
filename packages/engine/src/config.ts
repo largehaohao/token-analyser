@@ -2,12 +2,15 @@ import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { defaultSessionPaths } from "./session-files.ts";
+import { mergePowerConfig, type PowerQueryConfig } from "./power.ts";
 
 export type UserConfig = {
   watch_paths: string[];
   usd_per_credit?: number;
   /** Overrides the CNY→USD rate used when refreshing Qwen prices. */
   usd_per_cny?: number;
+  /** Prometheus power collection for the 硬件用电 page. */
+  power: PowerQueryConfig;
 };
 
 function defaultWatchPaths(): string[] {
@@ -21,7 +24,7 @@ export function tokenAnalyserHome(): string {
 export function loadUserConfig(): UserConfig {
   const configPath = path.join(tokenAnalyserHome(), "config.json");
   if (!existsSync(configPath)) {
-    return { watch_paths: defaultWatchPaths() };
+    return { watch_paths: defaultWatchPaths(), power: mergePowerConfig(undefined) };
   }
   try {
     const parsed = JSON.parse(readFileSync(configPath, "utf8")) as Partial<UserConfig>;
@@ -42,10 +45,11 @@ export function loadUserConfig(): UserConfig {
         : undefined;
     return {
       watch_paths: watchPaths.length > 0 ? watchPaths : defaultWatchPaths(),
+      power: mergePowerConfig(parsed.power),
       usd_per_credit: usdPerCredit,
       usd_per_cny: usdPerCny,
     };
   } catch {
-    return { watch_paths: defaultWatchPaths() };
+    return { watch_paths: defaultWatchPaths(), power: mergePowerConfig(undefined) };
   }
 }

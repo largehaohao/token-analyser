@@ -173,12 +173,12 @@ test("trend dates align below bars and anomaly segments retain their proportion"
   await expect(tooltip).toHaveCount(0);
 });
 
-test("the first touch opens the trend tooltip", async ({ browser }) => {
+test("the first touch opens the trend tooltip", async ({ browser, baseURL }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 900 }, hasTouch: true, isMobile: true });
   try {
     const page = await context.newPage();
     await page.route((url) => url.pathname === "/overview", (route) => route.fulfill({ json: overview() }));
-    await page.goto("http://127.0.0.1:7798/#overview");
+    await page.goto(`${baseURL}/#overview`);
     await page.locator(".trend-col").first().tap();
     await expect(page.locator(".chart-tooltip")).toBeVisible();
   } finally { await context.close(); }

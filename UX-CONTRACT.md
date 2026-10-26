@@ -30,7 +30,7 @@ The older brief's classification list is refined by the maintained README and cu
 | Analysis surface | `LedgerStrip.tsx`, `TrendPanel.tsx`, `OverviewPanels.tsx`, `Histogram.tsx`, `perf-buckets.ts`, `session-range.ts` | Engine overview payload; this contract | Ledger figures with comparison / trend / composition / ranked list / histograms / rail | Fixed-bucket tests, comparison-window tests, chart `srTable`, keyboard tooltip tests |
 | Performance     | `PerformanceMetrics.tsx`, `ContextMeter.tsx`, `performance.ts`        | This contract; session API      | Agent-task basis / per-request basis / not recorded  | Basis label, unavailable-reason, context-meter tests   |
 
-No select/listbox, date picker, bulk table selection, toast, modal, authentication, or delete capability is present. Segmented buttons are not listboxes; disclosure and inline feedback do not need a modal or toast system.
+No custom select/listbox or date-picker popup, bulk table selection, toast, modal, authentication, or delete capability is present. The hardware electricity preview uses native datetime-local inputs. Segmented buttons are not listboxes; disclosure and inline feedback do not need a modal or toast system.
 
 ## Measurement basis
 
@@ -88,7 +88,7 @@ No select/listbox, date picker, bulk table selection, toast, modal, authenticati
 
 - The API returns the complete session summary list. Preserve the existing explicit Load more strategy: 100 sessions or 100 turns per batch. Do not infer server paging or an incomplete dataset.
 - Session queries filter locally, commit after IME composition, and clear immediately. Empty input is distinct from no results. A clear action returns focus to the search input.
-- **Privacy override to URL defaults:** session IDs, search queries (which can contain local paths), list limit, and scroll position stay in tab-scoped sessionStorage. They never enter URLs or persistent localStorage. Range and active view are restored per tab; only `#overview` and `#sessions` appear in route URLs. Display unit uses the existing non-sensitive local preference.
+- **Privacy override to URL defaults:** session IDs, search queries (which can contain local paths), list limit, and scroll position stay in tab-scoped sessionStorage. They never enter URLs or persistent localStorage. Range and active view are restored per tab; only `#overview`, `#sessions`, and `#power` appear in route URLs. Display unit uses the existing non-sensitive local preference.
 - Browser Back restores the route, selection, and range. Returning to sessions restores its query, batch limit, and scroll offset. Changing a query resets the batch; a selected session outside the query remains readable and is explicitly explained.
 - Below 780px, the filter toolbar starts collapsed with the current source, range and unit visible in its summary. The filter button exposes its expanded state and controls relationship.
 - Below 780px, list and detail are separate panes: selecting a session opens and focuses detail; returning restores the selected list item. The search shortcut reveals the list first. A selected item outside the search results remains accessible through “查看当前会话”. This presentation state stays local to the current mount.
@@ -108,7 +108,7 @@ No select/listbox, date picker, bulk table selection, toast, modal, authenticati
 
 ## Navigation and responsive behavior
 
-Top-level navigation uses real hash links with `aria-current`. Route document title policy: `成本总览 · Token Analyser` or `会话明细 · Token Analyser`; failures use an honest route label and never leak prompts or local paths into the title. Session selection is a button action inside the current route. A skip link targets the current main region.
+Top-level navigation uses real hash links with `aria-current`. Route document title policy: `成本总览 · Token Analyser`, `会话明细 · Token Analyser`, or `硬件用电 · Token Analyser`; failures use an honest route label and never leak prompts or local paths into the title. Session selection is a button action inside the current route. A skip link targets the current main region.
 
 The document scrolls naturally. On desktop the session selector can scroll independently; on narrow screens it remains a bounded region above the detail. The turn table scrolls horizontally with an explicit cue and vertically within its own frame. Full evidence remains reachable at 360px and reduced motion. The narrow header is not sticky, so it cannot cover the focused field or evidence.
 
@@ -135,3 +135,16 @@ There are no unsaved text-edit forms, sensitive-value fields, clipboard operatio
 Required checks: web TypeScript, engine and web unit tests, production build, Playwright against isolated fixture ports, token drift check, DESIGN.md lint, and the Frontend Design Premium strict audit. See `premium-ui.json` for executable project checks.
 
 Compare overview and session detail in the existing dark theme at desktop and 390px. Exercise normal, loading, zero data, no matches, read failure/retry, stale requests, import validation/single-flight/success/failure, toggle failure, keyboard, Back/reload, long text, reduced motion, and global scrollbar styles. No Japanese market, dropdown popup, auth, delete, or payment verification is applicable.
+
+## Hardware electricity preview
+
+`HardwarePowerPage.tsx` owns `#power`; `hardware-power.ts` owns deterministic demo samples,
+range validation, trapezoidal energy integration and CNY cost. It uses no hardware
+network requests. Every reading remains labelled as demo data, and electricity
+never enters Token cost totals. CPU and GPU are components of the whole-machine
+reading, not additional totals. Range controls update trends, energy and cost;
+current watts remain current. Custom ranges are limited to 31 days. Missing
+samples interrupt integration, incomplete energy/cost is labelled as a lower
+bound, and measured zero remains distinct from missing. Native date inputs and
+price errors are labelled; charts have a screen-reader table and focusable data
+points; the statistics table has a keyboard-accessible horizontal scroll region.

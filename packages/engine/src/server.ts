@@ -23,6 +23,7 @@ import {
   type QwenPricingUpdateOptions,
 } from "./qwen-pricing.ts";
 import { SessionStore, type SessionIngestOptions } from "./store.ts";
+import { fetchPowerRange } from "./power.ts";
 import { watchSessions } from "./watch.ts";
 import { collectSessionFiles, isSessionFile } from "./session-files.ts";
 import type { SessionSnapshot, WasteToggleId } from "./types.ts";
@@ -616,6 +617,54 @@ export async function startServer(opts?: {
             : {}),
         }),
       );
+      return;
+    }
+
+    if (req.method === "GET" && parts[0] === "power" && parts.length === 1) {
+      // 硬件用电：向 Prometheus 拉取所选范围的功率采样。采集源不可达时
+      // 返回 connected:false，由前端回退到演示数据，绝不伪造读数。
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const startMs = Number(url.searchParams.get("start"));
+      const endMs = Number(url.searchParams.get("end"));
+      const stepMs = Number(url.searchParams.get("step"));
+      if (
+        !Number.isFinite(startMs) || !Number.isFinite(endMs) ||
+        !Number.isFinite(stepMs) || endMs <= startMs || stepMs <= 0 ||
+        endMs - startMs > 31 * 86_400_000 ||
+        (endMs - startMs) / stepMs > 20_000
+      ) {
+        sendJson(res, 400, { error: "invalid_range" });
+        return;
+      }
+      const config = loadUserConfig();
+      const result = await fetchPowerRange({
+        config: config.power,
+        startMs,
+        endMs,
+        stepMs,
+      });
+      if (result.ok) {
+        sendJson(res, 200, {
+          source: "prometheus",
+          connected: true,
+          url: result.config.prometheus_url,
+          startMs,
+          endMs,
+          stepMs,
+          samples: result.samples,
+        });
+      } else {
+        sendJson(res, 200, {
+          source: "prometheus",
+          connected: false,
+          url: result.config.prometheus_url,
+          error: result.error,
+          startMs,
+          endMs,
+          stepMs,
+          samples: [],
+        });
+      }
       return;
     }
 

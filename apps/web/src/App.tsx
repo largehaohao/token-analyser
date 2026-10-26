@@ -22,6 +22,7 @@ import {
   type CostUnit,
 } from "./format";
 import { OverviewPage } from "./OverviewPage";
+import { HardwarePowerPage } from "./HardwarePowerPage";
 import { RangeSwitcher } from "./RangeSwitcher";
 import { SessionList } from "./SessionList";
 import { SourceSwitcher } from "./SourceSwitcher";
@@ -637,13 +638,14 @@ function AppShell() {
     if (next === view) return;
     if (next === "sessions") openSessions();
     else {
-      pushSessionNavigation({ view: "overview", selectedId, range, source });
-      setView("overview");
+      pushSessionNavigation({ view: next, selectedId, range, source });
+      setView(next);
     }
   }
 
   useEffect(() => {
-    const page = view === "overview" ? "成本总览" : "会话明细";
+    const page =
+      view === "overview" ? "成本总览" : view === "sessions" ? "会话明细" : "硬件用电";
     document.title = `${page}${view === "overview" && overviewState === "error" ? " · 加载失败" : ""} · Token Analyser`;
   }, [view, overviewState]);
 
@@ -689,6 +691,15 @@ function AppShell() {
                 <Icon name="sessions" />
                 会话明细
               </a>
+              <a
+                href="#power"
+                className={view === "power" ? "active" : ""}
+                aria-current={view === "power" ? "page" : undefined}
+                onClick={(event) => navigate(event, "power")}
+              >
+                <Icon name="power" />
+                硬件用电
+              </a>
             </nav>
           </div>
           <div className="header-right app-tools">
@@ -710,6 +721,7 @@ function AppShell() {
             <span className="local-label"><Icon name="shield" /> 本地运行</span>
           </div>
         </header>
+        {view !== "power" && (
         <Button
           className="mobile-filter-toggle"
           emphasis="ghost"
@@ -723,6 +735,8 @@ function AppShell() {
           </span>
           <span className="mobile-filter-action">筛选 <Icon name="chevron" /></span>
         </Button>
+        )}
+        {view !== "power" && (
         <div id="workspace-filters" className="workspace-filters" data-expanded={filtersOpen}>
         <SourceSwitcher
           source={source}
@@ -744,6 +758,7 @@ function AppShell() {
             </div>
           </div>
         </div>
+        )}
         {view === "overview" && importStatus && (
           <div className="app-notice">
             <Notice
@@ -791,7 +806,9 @@ function AppShell() {
           className="app-content"
           tabIndex={-1}
         >
-          {view === "overview" ? (
+          {view === "power" ? (
+            <HardwarePowerPage now={now} />
+          ) : view === "overview" ? (
             overviewState === "ready" && overview ? (
               <div className="layout overview-layout">
                 <OverviewPage

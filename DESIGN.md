@@ -150,3 +150,11 @@ Use 140ms color/border transitions; motion never drives layout. Under reduced mo
 - Do use labels, focus, patterns, and textual values alongside color.
 - Don't add accounts, cloud delivery, deletion, or pricing rules as part of UI work.
 - Don't hide failures behind success copy, move controls during loading, or expose search text and local paths in URLs.
+
+## Hardware electricity preview
+
+The `#power` page reuses the existing ledger figures, chart cards, controls,
+spacing, semantic colors and Chinese copy. CPU/GPU/whole-machine watts precede
+whole-machine interval energy and CNY cost. The demo notice stays visible and
+component readings never add to the whole-machine total. Three line styles
+supplement color; overflowing charts and tables give an explicit scroll cue.

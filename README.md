@@ -136,6 +136,20 @@ turn is only kept in the fallback when its tool shape does not match any of
 the explicit rules, so the breakdown remains auditable instead of hiding all
 read or verification work in one bucket.
 
+## Hardware electricity preview
+
+Open **硬件用电** (`#power`) for CPU, GPU, and whole-machine power in W,
+range energy in kWh, and electricity cost in CNY. Choose a rolling 1-hour,
+24-hour, or 7-day range, or a custom interval of up to 31 days. The demonstration
+price starts at 0.55 CNY/kWh and is editable. Whole-machine readings include
+the component readings; they must not be added to CPU and GPU again.
+
+This page currently uses deterministic **demo data, not measured hardware data**.
+It makes no Grafana, Prometheus, or SSH connections. Missing samples break the
+integral and produce a clearly labelled lower bound; absent readings show `—`.
+Demo electricity costs never enter Token cost totals. The data adapter in
+`apps/web/src/hardware-power.ts` is the boundary for a future real data source.
+
 ## Test
 
 ```bash

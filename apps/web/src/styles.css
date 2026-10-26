@@ -5070,3 +5070,279 @@ button.ledger-item:focus-visible {
     transition: none;
   }
 }
+
+/* ============================================================
+ * 硬件用电页 · 演示数据（尚未接入）
+ * 复用账本 strip / chart-card / 表格体系与全部既有 tokens；
+ * 仅补充本页的控件布局、折线坐标与响应式规则。
+ * ============================================================ */
+.power-page .page-heading {
+  margin-bottom: 20px;
+}
+.power-controls-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 28px;
+}
+.power-custom-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+}
+.power-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.power-field > label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.power-input {
+  min-height: 38px;
+  padding: 0 0.6rem;
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.power-input:hover {
+  border-color: var(--border-hot);
+}
+.power-price-input {
+  width: 9rem;
+}
+.power-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 11px;
+}
+.power-note {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.6;
+  max-width: 34ch;
+}
+.power-apply {
+  min-height: 38px;
+}
+.power-window {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.power-ledger-now {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 14px;
+}
+.power-ledger-range {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0 0 14px;
+}
+.power-ledger-range .ledger-label {
+  white-space: normal;
+}
+.power-chart-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+}
+.power-plot {
+  position: relative;
+}
+.power-svg {
+  display: block;
+}
+.power-grid {
+  stroke: var(--border);
+  stroke-dasharray: 4 5;
+  opacity: 0.6;
+}
+.power-ylab {
+  fill: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.power-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.power-cols {
+  position: absolute;
+  top: 0;
+  height: 220px;
+  display: flex;
+}
+.power-col {
+  flex: 1 1 0;
+  min-width: 24px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.power-col:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.power-col .chart-tooltip {
+  position: fixed;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  width: 200px;
+  max-width: calc(100vw - 16px);
+  padding: 8px 10px;
+  border: 1px solid var(--border-hot);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  box-shadow: var(--shadow-tooltip);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  transform: none;
+  pointer-events: none;
+}
+.power-col .chart-tooltip b {
+  color: var(--accent);
+  font-weight: 600;
+}
+.power-col .chart-tooltip .sep {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.power-ticks {
+  position: relative;
+  height: 28px;
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 9.5px;
+}
+.power-ticks span {
+  position: absolute;
+  min-width: 120px;
+  transform: translateX(-50%);
+  text-align: center;
+  white-space: nowrap;
+}
+.power-legend {
+  margin: 0;
+}
+.power-table-scroll {
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+.power-mt {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.power-mt th,
+.power-mt td {
+  padding: 8px 10px 8px 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+.power-mt tr:last-child th,
+.power-mt tr:last-child td {
+  border-bottom: 0;
+}
+.power-mt thead th {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.power-mt tbody th {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.power-mt td.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.power-mt td:not(.num) {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.power-mt tbody tr:hover {
+  background: var(--accent-dim);
+}
+
+@media (max-width: 1360px) {
+  .power-ledger-now {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 900px) {
+  .power-ledger-now {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .power-ledger-range {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .power-controls-grid {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .power-range-switch {
+    width: 100%;
+  }
+  .power-range-switch button {
+    flex: 1 1 auto;
+    min-height: 40px;
+  }
+  .power-custom-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .power-custom-form .power-field,
+  .power-custom-form .power-input {
+    width: 100%;
+  }
+  .power-apply {
+    align-self: flex-start;
+    min-height: 44px;
+  }
+}
+@media (max-width: 540px) {
+  .power-mt {
+    min-width: 560px;
+  }
+  .power-note {
+    max-width: none;
+  }
+}
+
+/* Page headings keep their description below the title, including narrow screens. */
+.power-page .chart-head > div:first-child { display: block; min-width: 0; }
+.power-page .ledger-value { font-size: clamp(1.5rem, 2vw, 2rem); }
+.power-table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 900px) {
+  .power-page .chart-head { display: block; }
+  .power-page .power-legend { margin-top: 12px; flex-wrap: wrap; }
+}
