@@ -18,7 +18,7 @@ test("overview keeps secondary analysis collapsed and accessible by keyboard", a
   const viewNavigation = page.getByRole("navigation", { name: "视图" });
   await expect(viewNavigation).toHaveClass(/primary-nav/);
   await expect(viewNavigation).toBeVisible();
-  await expect(viewNavigation.getByRole("link")).toHaveCount(2);
+  await expect(viewNavigation.getByRole("link")).toHaveCount(3);
   await expect(page.getByRole("group", { name: "时间范围" })).toBeVisible();
   await expect(
     page.locator(".ledger-label", { hasText: "总支出（tokens）" }),

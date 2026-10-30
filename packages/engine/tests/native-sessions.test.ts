@@ -46,6 +46,33 @@ describe("native session adapters", () => {
     expect(store.list()[0].cost.raw).toBe(720);
   });
 
+  it("reads DeepSeek Harness zstd sessions with usage, tools and titles", () => {
+    const dir = home();
+    const zstd = path.join(fixtures, "dsh.jsonl.zstd");
+    const target = path.join(dir, ".dsh", "sessions", "proj", "dsh-demo", "session.v4.jsonl.zstd");
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, readFileSync(zstd));
+    const snap = ingestFile(target, { cacheHome: dir });
+    expect(snap.source).toBe("dsh");
+    expect(snap.id).toBe("dsh:dsh-demo");
+    expect(snap.nickname).toBe("DSH demo");
+    expect(snap.cwd).toBe("/tmp/demo");
+    expect(snap.turns).toHaveLength(1);
+    expect(snap.turns[0].prompt).toBe("Read the README");
+    expect(snap.turns[0].usage).toMatchObject({
+      input_tokens: 150, cached_input_tokens: 50, output_tokens: 20,
+    });
+    expect(snap.turns[0].tools[0].outputPreview).toBe("Demo README");
+    // TTFT/duration from step/start → stream; tok/s is decode = output/(duration−TTFT).
+    expect(snap.turns[0].requestPerformance).toMatchObject({
+      ttftMs: 500, durationMs: 1700, outputTokensPerSecond: 20 * 1000 / 1200, speedSource: "decode",
+    });
+    expect(snap.performance).toMatchObject({
+      basis: "request", avgTtftMs: 500, ttftSampleCount: 1, outputTokensPerSecond: 20 * 1000 / 1200,
+    });
+    expect(snap.cost.raw).toBe(170);
+  });
+
   it("reads pi recorded USD, tools, branch context and usage-only entries", () => {
     const dir = home();
     const events = fixture("pi").trim().split("\n").map((line) => JSON.parse(line));
@@ -60,6 +87,71 @@ describe("native session adapters", () => {
     expect(snap.turns[0].tools[0].outputPreview).toBe("Demo README");
     expect(snap.turns[0].requestPerformance?.durationMs).toBe(2000);
     expect(snap.performance).toMatchObject({ basis: "request", avgTtftMs: null, ttftSampleCount: 0, outputTokensPerSecond: 5 });
+  });
+
+  it("times pi requests from the request-timing extension and reports the decode rate", () => {
+    const dir = home();
+    const snap = ingestFile(write(dir, "pi-request-timing.jsonl", fixture("pi-request-timing")), { cacheHome: dir });
+    expect(snap.turns).toHaveLength(5);
+    // The entry's TTFT joins by messageEntryId; pi's own durationMs wins over
+    // the entry's copy, and tok/s drops the first-token wait -> decode rate.
+    expect(snap.turns[0].requestPerformance).toMatchObject({
+      ttftMs: 4720, durationMs: 5342, speedSource: "decode",
+      outputTokensPerSecond: 63 * 1000 / (5342 - 4720),
+    });
+    // An assistant entry with no durationMs takes the entry's measured window.
+    expect(snap.turns[1].requestPerformance).toMatchObject({
+      ttftMs: 598, durationMs: 1115, speedSource: "decode",
+      outputTokensPerSecond: 46 * 1000 / (1115 - 598),
+    });
+    // A first-token time past the logged window stays a valid measurement;
+    // only the decode window is lost, so no speed is invented.
+    expect(snap.turns[2].requestPerformance).toMatchObject({
+      ttftMs: 1200, durationMs: 1000, outputTokensPerSecond: null, speedSource: null,
+    });
+    // A turn whose entry has no messageEntryId joins by responseId.
+    expect(snap.turns[3].requestPerformance).toMatchObject({
+      ttftMs: 800, durationMs: 2000, speedSource: "decode", outputTokensPerSecond: 10,
+    });
+    // With the extension off the request keeps the full-window rate, labelled
+    // separately so the two denominators are never read as one number.
+    expect(snap.turns[4].requestPerformance).toMatchObject({
+      ttftMs: null, durationMs: 4000, speedSource: "duration", outputTokensPerSecond: 5,
+    });
+    // Session summary pools only requests that have a generation window, and
+    // averages TTFT over the requests that recorded one.
+    expect(snap.performance).toMatchObject({
+      basis: "request", ttftSampleCount: 4, avgTtftMs: (4720 + 598 + 1200 + 800) / 4,
+      speedSampleCount: 4,
+      outputTokensPerSecond: (63 + 46 + 12 + 20) * 1000 / (622 + 517 + 1200 + 4000),
+    });
+    // Performance figures never leak into the token ledger: usage and recorded
+    // USD come from the assistant entries alone.
+    expect(snap.turns.map((turn) => turn.usage.output_tokens)).toEqual([63, 46, 20, 12, 20]);
+    expect(snap.cost.usd).toBeCloseTo(0.0021, 10);
+  });
+
+  it("joins extension-recorded pi request timing onto its model call", () => {
+    const dir = home();
+    const events = fixture("pi").trim().split("\n").map((line) => JSON.parse(line));
+    events.push({ type: "custom", customType: "request_timing", id: "t1", parentId: "a1", timestamp: "2026-10-08T00:02:00Z",
+      data: { version: 1, messageEntryId: "a1", responseId: null, ttft_ms: 500, piDurationMs: 2000, attempts: 1 } });
+    const snap = ingestFile(write(dir, "pi.jsonl", events.map((event) => JSON.stringify(event)).join("\n")), { cacheHome: dir });
+    const call = snap.turns[0].requestPerformance;
+    expect(call?.ttftMs).toBe(500);
+    // pi's own durationMs stays authoritative, and tok/s drops the first-token wait.
+    expect(call?.durationMs).toBe(2000);
+    expect(call?.speedSource).toBe("decode");
+    expect(call?.outputTokensPerSecond).toBeCloseTo(10 * 1000 / 1500, 6);
+    expect(snap.performance).toMatchObject({ basis: "request", avgTtftMs: 500, ttftSampleCount: 1 });
+
+    // Requests whose turn never emitted an entry id join by responseId instead.
+    const orphan = fixture("pi").trim().split("\n").map((line) => JSON.parse(line));
+    orphan[3].message.responseId = "resp-a1";
+    orphan.push({ type: "custom", customType: "request_timing", id: "t2", parentId: "a1", timestamp: "2026-10-08T00:02:00Z",
+      data: { version: 1, messageEntryId: null, responseId: "resp-a1", ttft_ms: 800, piDurationMs: 2000 } });
+    const fallback = ingestFile(write(dir, "pi-orphan.jsonl", orphan.map((event) => JSON.stringify(event)).join("\n")), { cacheHome: dir });
+    expect(fallback.turns[0].requestPerformance?.ttftMs).toBe(800);
   });
 
   it("excludes inherited pi fork entries from total spend", () => {
@@ -165,6 +257,8 @@ describe("Cursor database and multi-source integration", () => {
     } finally { db.close(); }
   });
 
+  // A state.vscdb is re-ingested on a 5s debounce (Cursor rewrites its WAL
+  // continuously), so this needs a longer budget than the default 5s test.
   it("discovers JSONL and DB file roots and updates Cursor sessions when only WAL changes", async () => {
     const dir = home(); const { file, db, session } = cursorDb(dir);
     const pi = write(dir, "pi.jsonl", fixture("pi"));
@@ -174,10 +268,10 @@ describe("Cursor database and multi-source integration", () => {
     try {
       session("added");
       appendFileSync(pi, JSON.stringify({ type: "message", id: "appended", parentId: "r1", timestamp: new Date().toISOString(), message: { role: "assistant", model: "custom", content: "Another reply", usage: { input: 1, output: 2, cost: { total: 0.1 } } } }) + "\n");
-      await expect.poll(() => store.get("cursor:added")?.source, { timeout: 3000 }).toBe("cursor");
-      await expect.poll(() => store.get("pi:native-pi")?.cost.raw, { timeout: 3000 }).toBe(363);
+      await expect.poll(() => store.get("cursor:added")?.source, { timeout: 8_000 }).toBe("cursor");
+      await expect.poll(() => store.get("pi:native-pi")?.cost.raw, { timeout: 8_000 }).toBe(363);
     } finally { stop(); db.close(); }
-  });
+  }, 20_000);
 
   it("imports all three native formats over HTTP, restores them after restart, and reports USD without unpriced false positives", async () => {
     const dir = home(); process.env.TOKEN_ANALYSER_HOME = dir;

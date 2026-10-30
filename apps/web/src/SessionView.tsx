@@ -254,6 +254,7 @@ export function SessionView({
       <PerformanceMetrics
         performance={snapshot.performance}
         turns={turns}
+        source={snapshot.source}
       />
       <p className="disclaimer">{disclaimer(snapshot.rateCardAsOf)}</p>
 
@@ -273,6 +274,7 @@ export function SessionView({
           highlightNonce={highlightNonce}
           resetKey={`${snapshot.id}:${selectedNodeId ?? ""}`}
           scopeLabel={selectedAppearance.label}
+          source={snapshot.source}
         />
       </div>
       <div className="detail-stack">

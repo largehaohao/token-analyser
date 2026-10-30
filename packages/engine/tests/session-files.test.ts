@@ -11,10 +11,12 @@ describe("default source discovery", () => {
     vi.stubEnv("CODEX_HOME", "/custom/codex");
     vi.stubEnv("CLAUDE_CONFIG_DIR", "/custom/claude");
     vi.stubEnv("PI_CODING_AGENT_DIR", "/custom/pi");
+    vi.stubEnv("DSH_HOME", "/custom/dsh");
     const roots = defaultSessionPaths();
     expect(roots).toContain(path.join("/custom/codex", "sessions"));
     expect(roots).toContain(path.join("/custom/claude", "projects"));
     expect(roots).toContain(path.join("/custom/pi", "sessions"));
+    expect(roots).toContain(path.join("/custom/dsh", "sessions"));
     expect(roots).toContain(path.join(homedir(), ".cursor/projects"));
     expect(roots).toContain(path.join(homedir(), ".cursor/chats"));
     expect(roots.some((root) => root.endsWith(path.join("Cursor/User/globalStorage", "state.vscdb")))).toBe(true);
@@ -22,7 +24,11 @@ describe("default source discovery", () => {
     expect(loadUserConfig().watch_paths).toEqual(roots);
   });
   it("only selects supported session files", () => {
-    for (const file of ["session.jsonl", "session.NDJSON", "state.vscdb"]) expect(isSessionFile(file)).toBe(true);
-    for (const file of ["memory.md", "state.vscdb-wal", "state.vscdb-shm", "settings.json"]) expect(isSessionFile(file)).toBe(false);
+    for (const file of ["session.jsonl", "session.NDJSON", "session.v4.jsonl.zstd", "state.vscdb"]) {
+      expect(isSessionFile(file)).toBe(true);
+    }
+    for (const file of ["memory.md", "state.vscdb-wal", "state.vscdb-shm", "settings.json", "session.lock"]) {
+      expect(isSessionFile(file)).toBe(false);
+    }
   });
 });

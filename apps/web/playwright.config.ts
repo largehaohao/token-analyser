@@ -5,6 +5,8 @@ const repoRoot = "../..";
 const fixtureHome = fileURLToPath(
   new URL("./test-results/engine", import.meta.url),
 );
+const enginePort = process.env.E2E_ENGINE_PORT ?? "7799";
+const webPort = process.env.E2E_WEB_PORT ?? "7798";
 const quotedFixtureHome = `'${fixtureHome.replaceAll("'", "'\\''")}'`;
 
 export default defineConfig({
@@ -12,14 +14,14 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   use: {
-    baseURL: "http://127.0.0.1:7798",
+    baseURL: `http://127.0.0.1:${webPort}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
   webServer: [
     {
-      command: `TOKEN_ANALYSER_HOME=${quotedFixtureHome} FIXTURE_DIR=fixtures/redacted PORT=7799 pnpm --filter engine start`,
-      url: "http://127.0.0.1:7799/sessions",
+      command: `mkdir -p ${quotedFixtureHome} && printf '{"power":{"prometheus_url":"http://127.0.0.1:1"}}' > ${quotedFixtureHome}/config.json && TOKEN_ANALYSER_HOME=${quotedFixtureHome} FIXTURE_DIR=fixtures/redacted PORT=${enginePort} pnpm --filter engine start`,
+      url: `http://127.0.0.1:${enginePort}/sessions`,
       cwd: repoRoot,
       // Never reuse a live user's engine for mutation tests.
       reuseExistingServer: false,
@@ -30,8 +32,8 @@ export default defineConfig({
       // dev script here launches a second engine and can take the Vite child
       // down when that duplicate hits EADDRINUSE.
       command:
-        "TOKEN_ANALYSER_API_URL=http://127.0.0.1:7799 pnpm --filter web dev --port 7798 --strictPort",
-      url: "http://127.0.0.1:7798",
+        `TOKEN_ANALYSER_API_URL=http://127.0.0.1:${enginePort} pnpm --filter web dev --port ${webPort} --strictPort`,
+      url: `http://127.0.0.1:${webPort}`,
       reuseExistingServer: false,
       timeout: 30_000,
     },

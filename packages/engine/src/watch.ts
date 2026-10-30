@@ -81,6 +81,21 @@ export function watchSessions(
     }
   }
 
+  function ingestDelayMs(fullPath: string): number {
+    // Cursor rewrites state.vscdb WAL continuously while the app is open. A
+    // 50ms debounce turns every keystroke into a multi-second SQLite reparse
+    // that blocks /sessions and freezes the UI.
+    if (fullPath.endsWith(".vscdb") || fullPath.endsWith("state.vscdb")) {
+      return 5_000;
+    }
+    try {
+      if (statSync(fullPath).size >= 10 * 1024 * 1024) return 2_000;
+    } catch {
+      // Missing files still go through remove handling promptly.
+    }
+    return 50;
+  }
+
   function scheduleIngest(fullPath: string): void {
     fullPath = sessionPath(fullPath);
     if (!isSessionFile(fullPath)) return;
@@ -89,7 +104,7 @@ export function watchSessions(
     const timer = setTimeout(() => {
       pending.delete(fullPath);
       ingestIfSession(fullPath);
-    }, 50);
+    }, ingestDelayMs(fullPath));
     pending.set(fullPath, timer);
   }
 

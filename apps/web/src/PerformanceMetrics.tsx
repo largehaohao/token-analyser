@@ -1,4 +1,4 @@
-import type { PerformanceSummary, Turn } from "./api";
+import type { PerformanceSummary, SessionSource, Turn } from "./api";
 import { formatPerformanceNumber } from "./format";
 import { performanceCopy } from "./performance-copy";
 import { turnDistributions } from "./perf-buckets";
@@ -8,12 +8,14 @@ type Props = {
   performance?: PerformanceSummary;
   /** When the turn records are in scope, the fixed-bucket distributions are shown. */
   turns?: Turn[];
+  /** Sharpens the copy where one source can record more than another. */
+  source?: SessionSource;
 };
 
-export function PerformanceMetrics({ performance, turns }: Props) {
+export function PerformanceMetrics({ performance, turns, source }: Props) {
   const ttft = performance?.avgTtftMs;
   const speed = performance?.outputTokensPerSecond;
-  const text = performanceCopy(performance);
+  const text = performanceCopy(performance, source);
   const distributions = turnDistributions(turns ?? []);
   return (
     <section className="performance-metrics" aria-label="响应性能">

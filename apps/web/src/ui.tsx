@@ -23,7 +23,8 @@ type IconName =
   | "filter"
   | "back"
   | "layers"
-  | "gauge";
+  | "gauge"
+  | "power";
 
 const ICON_PATHS: Record<IconName, string> = {
   overview: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
@@ -44,6 +45,7 @@ const ICON_PATHS: Record<IconName, string> = {
   back: "M20 12H4M10 6l-6 6 6 6",
   layers: "M12 3 3 8l9 5 9-5zM3 13l9 5 9-5",
   gauge: "M12 13l4-4M4 19a9 9 0 1 1 16 0",
+  power: "M13 2 4 14h6l-1 8 9-12h-6l1-8z",
 };
 
 export function Icon({

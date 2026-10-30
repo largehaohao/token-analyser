@@ -18,5 +18,6 @@ describe("native usage presentation", () => {
   it("uses recognizable source labels", () => {
     expect(sourceLabel()).toBe("Codex"); expect(sourceLabel("claude")).toBe("Claude Code");
     expect(sourceLabel("cursor")).toBe("Cursor"); expect(sourceLabel("pi")).toBe("pi");
+    expect(sourceLabel("dsh")).toBe("DeepSeek Harness");
   });
 });

@@ -15,7 +15,7 @@ export type TokenUsage = {
   total_tokens: number;
 };
 
-export type SessionSource = "codex" | "claude" | "cursor" | "pi";
+export type SessionSource = "codex" | "claude" | "cursor" | "pi" | "dsh";
 
 export type Cost = {
   raw: number;
@@ -60,12 +60,16 @@ export type PerformanceSummary = {
   basis: PerformanceBasis | null;
 };
 
+/** How a request's output speed was obtained: logged by the source, derived
+ * from the decode window (duration − TTFT), or from the whole request window. */
+export type SpeedSource = "recorded" | "decode" | "duration";
+
 /** Timing recorded for one model request, independent of task-level timing. */
 export type RequestPerformance = {
   ttftMs: number | null;
   durationMs: number | null;
   outputTokensPerSecond: number | null;
-  speedSource: "recorded" | "duration" | null;
+  speedSource: SpeedSource | null;
 };
 
 export type Bucket =

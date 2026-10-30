@@ -122,10 +122,13 @@ describe("session performance basis", () => {
     } as SessionSnapshot;
   }
   function requestTurn(id: string, output: number, durationMs: number, ttftMs: number | null): Turn {
+    const generationMs = ttftMs != null && durationMs > ttftMs ? durationMs - ttftMs : durationMs;
     return {
       id, sessionId: id, startedAt: "2026-10-08T00:00:00.000Z", endedAt: "2026-10-08T00:00:02.000Z",
       model: null, effort: null, fastMode: false, pricing: null, usageRecorded: true,
-      requestPerformance: { ttftMs, durationMs, outputTokensPerSecond: output * 1000 / durationMs, speedSource: "duration" },
+      requestPerformance: {
+        ttftMs, durationMs, outputTokensPerSecond: output * 1000 / generationMs, speedSource: "duration",
+      },
       prompt: "", response: "", tools: [], usage: usage(output),
       cost: emptyCost(), bucket: "other", labels: [], hasPatchApply: false, collaborationMode: null,
     };
@@ -165,7 +168,10 @@ describe("per-request performance", () => {
     } as Turn));
     turns.push({ id: "missing", startedAt: "2026-10-08T00:00:00Z", endedAt: "2026-10-08T00:00:10Z" } as Turn);
     expect(performanceDistribution(requestTimings(turns))).toEqual({
-      ttft: [1, 1, 1, 1, 0], tps: [1, 1, 1, 1, 0], sampleCount: 5,
+      ttft: [1, 1, 1, 1, 0],
+      // 10 / 25 / 40 全落 ≤ 40（边界含内），60 落 50–60。
+      tps: [3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      sampleCount: 5,
     });
   });
 
@@ -176,7 +182,33 @@ describe("per-request performance", () => {
       requestPerformance: requestPerformance(10, { tokens_per_second: 70, duration_ms: durationMs }),
     } as Turn));
     expect(performanceDistribution(requestTimings(turns))).toEqual({
-      ttft: [0, 0, 0, 0, 0], tps: [0, 0, 0, 0, 2], sampleCount: 2,
+      ttft: [0, 0, 0, 0, 0],
+      // 70 tok/s 落 60–70 桶（上边界含内）。
+      tps: [0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      sampleCount: 2,
+    });
+    // Headline average must use the same recorded speeds as the histogram.
+    expect(summarizePerformance(requestTimings(turns))).toMatchObject({
+      speedSampleCount: 2,
+      outputTokensPerSecond: 70,
+    });
+  });
+
+  it("summarizes recorded speed when output tokens are missing", () => {
+    const turns = [{
+      id: "recorded-only",
+      startedAt: "2026-10-08T00:00:00Z",
+      endedAt: "2026-10-08T00:00:02Z",
+      usageRecorded: false,
+      requestPerformance: requestPerformance(null, {
+        tokens_per_second: 70,
+        duration_ms: null,
+      }),
+    } as Turn];
+    expect(performanceDistribution(requestTimings(turns)).tps[3]).toBe(1);
+    expect(summarizePerformance(requestTimings(turns))).toMatchObject({
+      speedSampleCount: 1,
+      outputTokensPerSecond: 70,
     });
   });
 
@@ -185,13 +217,21 @@ describe("per-request performance", () => {
       ttftMs: 250, durationMs: 2000, outputTokensPerSecond: 70, speedSource: "recorded",
     });
     expect(requestPerformance(100, { timing: { ttftMs: 250, durationMs: 2000 } })).toEqual({
-      ttftMs: 250, durationMs: 2000, outputTokensPerSecond: 50, speedSource: "duration",
+      ttftMs: 250, durationMs: 2000, outputTokensPerSecond: 100 * 1000 / 1750, speedSource: "decode",
+    });
+    // Without TTFT (e.g. pi durationMs only), tok/s still uses the full request duration.
+    expect(requestPerformance(100, { durationMs: 2000 })).toEqual({
+      ttftMs: null, durationMs: 2000, outputTokensPerSecond: 50, speedSource: "duration",
     });
   });
   it("preserves real zeros and leaves missing or invalid measurements unknown", () => {
     expect(requestPerformance(0, { ttft_ms: 0, duration_ms: 1000 })).toMatchObject({ ttftMs: 0, outputTokensPerSecond: 0 });
     expect(requestPerformance(null, { duration_ms: 1000 })).toMatchObject({ outputTokensPerSecond: null, speedSource: null });
-    expect(requestPerformance(100, { ttft_ms: 3000, duration_ms: 1000 })).toMatchObject({ ttftMs: null });
+    // A first-token time past the logged window is kept as a measurement; the
+    // decode window is what is unknown, so the speed is.
+    expect(requestPerformance(100, { ttft_ms: 3000, duration_ms: 1000 })).toMatchObject({
+      ttftMs: 3000, durationMs: 1000, outputTokensPerSecond: null, speedSource: null,
+    });
     expect(requestPerformance(100, { duration_ms: 0, ttft_ms: -1, tokens_per_second: Infinity })).toEqual({ ttftMs: null, durationMs: null, outputTokensPerSecond: null, speedSource: null });
     expect(requestPerformance(100)).toEqual({ ttftMs: null, durationMs: null, outputTokensPerSecond: null, speedSource: null });
   });
@@ -200,7 +240,9 @@ describe("per-request performance", () => {
     first.payload!.request_performance = { ttft_ms: 200, duration_ms: 2000 };
     const snap = analyseSession({ sessionId: "requests", path: "/tmp/requests.jsonl", events: [start(0), first, count(5, 50, 150), complete(10, "t1", { duration_ms: 10000, time_to_first_token_ms: 1200 })] });
     expect(snap.turns).toHaveLength(2);
-    expect(snap.turns[0].requestPerformance).toMatchObject({ ttftMs: 200, outputTokensPerSecond: 50 });
+    expect(snap.turns[0].requestPerformance).toMatchObject({
+      ttftMs: 200, outputTokensPerSecond: 100 * 1000 / 1800,
+    });
     expect(snap.turns[1].requestPerformance).toMatchObject({ ttftMs: null, outputTokensPerSecond: null });
     expect(snap.performance?.avgTtftMs).toBe(1200);
   });
