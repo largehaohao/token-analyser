@@ -43,6 +43,9 @@ type Props = {
   refreshError?: boolean;
   onRetry: () => void;
   onInspectSlice: (key: string, label: string) => void;
+  /** Changes when range/source/now window changes so panel model filters re-query. */
+  filterScope: string;
+  fetchOverviewForModel: (model: string) => Promise<Overview>;
 };
 
 export function OverviewPage({
@@ -57,6 +60,8 @@ export function OverviewPage({
   refreshError,
   onRetry,
   onInspectSlice,
+  filterScope,
+  fetchOverviewForModel,
 }: Props) {
   const { unit, setUnit } = useUnit();
   const wastePct = wasteShare(overview.waste, overview.cost, unit);
@@ -156,12 +161,18 @@ export function OverviewPage({
           overview={overview}
           chartMetric={unit}
           onChartMetric={setUnit}
+          filterScope={filterScope}
+          fetchOverviewForModel={fetchOverviewForModel}
         />
         <CompositionPanel overview={overview} />
       </div>
 
       <div className="panel-grid">
-        <PerformancePanel overview={overview} />
+        <PerformancePanel
+          overview={overview}
+          filterScope={filterScope}
+          fetchOverviewForModel={fetchOverviewForModel}
+        />
         <BehaviorRankPanel
           overview={overview}
           unit={unit}

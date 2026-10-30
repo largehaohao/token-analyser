@@ -10,6 +10,10 @@ import {
   flaggedValue,
   formatChartDay,
   shouldLabelChartDay,
+  TREND_COLUMN_GAP_PX,
+  TREND_COLUMN_MIN_WIDTH_PX,
+  TREND_COLUMN_SLOT_PX,
+  trendContentMinWidth,
   unitToChartMetric,
 } from "./chart-metric";
 
@@ -135,5 +139,18 @@ describe("chart labels", () => {
   it("follows the page unit instead of a second chart unit", () => {
     expect(unitToChartMetric("tokens")).toBe("tokens");
     expect(unitToChartMetric("usd")).toBe("usd");
+  });
+
+  it("reserves a column wide enough for a full MM/DD tick", () => {
+    expect(formatChartDay("2026-10-30")).toBe("10/30");
+    // Slot must include CSS min-width and the flex gap between columns.
+    expect(TREND_COLUMN_MIN_WIDTH_PX).toBe(34);
+    expect(TREND_COLUMN_GAP_PX).toBe(3);
+    expect(TREND_COLUMN_SLOT_PX).toBe(
+      TREND_COLUMN_MIN_WIDTH_PX + TREND_COLUMN_GAP_PX,
+    );
+    expect(trendContentMinWidth(8)).toBe(
+      44 + 8 * TREND_COLUMN_SLOT_PX - TREND_COLUMN_GAP_PX,
+    );
   });
 });

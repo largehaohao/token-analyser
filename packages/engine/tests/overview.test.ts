@@ -25,6 +25,8 @@ function turn(partial: {
   startedAt?: string;
   endedAt?: string;
   priced?: boolean;
+  model?: string | null;
+  requestPerformance?: Turn["requestPerformance"];
 }): Turn {
   const priced = cost(partial.raw);
   return {
@@ -32,7 +34,7 @@ function turn(partial: {
     sessionId: "s",
     startedAt: partial.startedAt ?? "2026-08-27T10:00:00.000Z",
     endedAt: partial.endedAt ?? partial.startedAt ?? "2026-08-27T10:00:01.000Z",
-    model: "gpt-5.6-luna",
+    model: partial.model === undefined ? "gpt-5.6-luna" : partial.model,
     effort: "max",
     fastMode: false,
     prompt: "",
@@ -53,6 +55,9 @@ function turn(partial: {
     labels: [],
     hasPatchApply: false,
     collaborationMode: null,
+    ...(partial.requestPerformance
+      ? { requestPerformance: partial.requestPerformance, usageRecorded: true }
+      : {}),
   };
 }
 
@@ -809,6 +814,95 @@ describe("buildOverview", () => {
       tps: [1, 0, 0, 1, 0],
       sampleCount: 3,
     });
+  });
+
+  it("filters days and performance by model while keeping the full models list", () => {
+    const mixed = session({
+      id: "mixed",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      turns: [
+        turn({
+          id: "a",
+          bucket: "code",
+          raw: 1000,
+          model: "gpt-a",
+          startedAt: "2026-08-27T10:00:00.000Z",
+          requestPerformance: {
+            ttftMs: 1000,
+            durationMs: 2000,
+            outputTokensPerSecond: 40,
+            speedSource: "recorded",
+          },
+        }),
+        turn({
+          id: "b",
+          bucket: "code",
+          raw: 5000,
+          model: "gpt-b",
+          startedAt: "2026-08-27T11:00:00.000Z",
+          requestPerformance: {
+            ttftMs: 2000,
+            durationMs: 4000,
+            outputTokensPerSecond: 20,
+            speedSource: "recorded",
+          },
+        }),
+      ],
+    });
+    const opts = { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z", dayCount: 2 };
+    const all = buildOverview([mixed], opts);
+    expect(all.models.map((entry) => entry.model).sort()).toEqual(["gpt-a", "gpt-b"]);
+    expect(all.cost.raw).toBe(6000);
+    expect(all.performance.ttftSampleCount).toBe(2);
+
+    const filtered = buildOverview([mixed], { ...opts, model: "gpt-a" });
+    expect(filtered.models.map((entry) => entry.model).sort()).toEqual([
+      "gpt-a",
+      "gpt-b",
+    ]);
+    expect(filtered.cost.raw).toBe(1000);
+    expect(filtered.turnCount).toBe(1);
+    const day = filtered.days.find((item) => item.date === "2026-08-27");
+    expect(day?.cost.raw).toBe(1000);
+    expect(filtered.performance.ttftSampleCount).toBe(1);
+    expect(filtered.performance.avgTtftMs).toBe(1000);
+  });
+
+  it("scopes quality warnings to sessions that match the model filter", () => {
+    const matching = session({
+      id: "match",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      ledger_warning: true,
+      turns: [
+        turn({
+          id: "a",
+          bucket: "code",
+          raw: 100,
+          model: "gpt-a",
+          startedAt: "2026-08-27T10:00:00.000Z",
+        }),
+      ],
+    });
+    const unrelated = session({
+      id: "other",
+      startedAt: "2026-08-27T11:00:00.000Z",
+      ledger_warning: true,
+      turns: [
+        turn({
+          id: "b",
+          bucket: "code",
+          raw: 200,
+          model: "gpt-b",
+          startedAt: "2026-08-27T11:00:00.000Z",
+        }),
+      ],
+    });
+    const opts = { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z", dayCount: 2 };
+    expect(buildOverview([matching, unrelated], opts).quality.ledgerWarningSessions).toBe(2);
+    expect(
+      buildOverview([matching, unrelated], { ...opts, model: "gpt-a" }).quality
+        .ledgerWarningSessions,
+    ).toBe(1);
   });
 
   it("reports the newest source-recorded rate-limit snapshot in the window", () => {

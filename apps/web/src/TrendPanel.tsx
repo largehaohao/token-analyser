@@ -10,15 +10,20 @@ import {
   formatChartDay,
   shouldLabelChartDay,
   trendColumnAriaLabel,
+  trendContentMinWidth,
   type ChartMetric,
 } from "./chart-metric";
 import { formatChartNumber } from "./format";
+import { ModelFilterSelect } from "./ModelFilterSelect";
+import { useModelFilteredOverview } from "./useModelFilteredOverview";
 import { srTable } from "./ui";
 
 type Props = {
   overview: Overview;
   chartMetric: ChartMetric;
   onChartMetric: (metric: ChartMetric) => void;
+  filterScope: string;
+  fetchOverviewForModel: (model: string) => Promise<Overview>;
 };
 
 const METRICS: { id: ChartMetric; label: string }[] = [
@@ -33,10 +38,19 @@ const METRICS: { id: ChartMetric; label: string }[] = [
  * have no price, which is a data-quality signal, not a zero-cost day.
  */
 export function TrendPanel({
-  overview,
+  overview: baseOverview,
   chartMetric,
   onChartMetric,
+  filterScope,
+  fetchOverviewForModel,
 }: Props) {
+  const {
+    model,
+    setModel,
+    overview,
+    loading,
+    error,
+  } = useModelFilteredOverview(baseOverview, filterScope, fetchOverviewForModel);
   const [hovered, setHovered] = useState<string | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState({ left: 8, top: 8 });
   const metric = chartMetric;
@@ -89,30 +103,44 @@ export function TrendPanel({
             聚焦任意一天可读出当日明细，Esc 关闭。
           </p>
         </div>
-        <div
-          className="chart-metric-tabs"
-          role="group"
-          aria-label="趋势图单位"
-        >
-          {METRICS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={selectedMetric === item.id ? "on" : ""}
-              aria-pressed={selectedMetric === item.id}
-              onClick={() => onChartMetric(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div className="chart-head-controls">
+          <ModelFilterSelect
+            id="trend-model-filter"
+            models={baseOverview.models}
+            value={model}
+            onChange={setModel}
+            disabled={loading}
+          />
+          <div
+            className="chart-metric-tabs"
+            role="group"
+            aria-label="趋势图单位"
+          >
+            {METRICS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={selectedMetric === item.id ? "on" : ""}
+                aria-pressed={selectedMetric === item.id}
+                onClick={() => onChartMetric(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+      {error ? (
+        <p className="empty-inline" role="alert">
+          按模型筛选失败：{error}
+        </p>
+      ) : null}
       {overview.days.length === 0 ? (
         <p className="empty-inline">该时间范围内没有每日用量。</p>
       ) : (
         <>
           <div className="chart-body trend" onScroll={positionTooltip}>
-            <div className="trend-content" style={{ minWidth: 44 + overview.days.length * 27 - 3 }}>
+            <div className="trend-content" style={{ minWidth: trendContentMinWidth(overview.days.length) }}>
               <div className="grid">
                 {[1, 0.5, 0].map((ratio) => (
                   <span
@@ -205,6 +233,7 @@ export function TrendPanel({
                         ? ""
                         : "muted-tick"
                     }`}
+                    title={formatChartDay(day.date)}
                   >
                     {formatChartDay(day.date)}
                   </span>

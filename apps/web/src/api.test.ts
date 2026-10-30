@@ -78,6 +78,10 @@ describe("getOverview", () => {
     expect(url.searchParams.has("since")).toBe(false);
     await getOverview();
     expect(new URL(String(fetchMock.mock.calls[1]![0]), "http://localhost").searchParams.has("source")).toBe(false);
+    await getOverview("7d", Date.now(), "all", undefined, "gpt-a");
+    expect(
+      new URL(String(fetchMock.mock.calls[2]![0]), "http://localhost").searchParams.get("model"),
+    ).toBe("gpt-a");
   });
 
   it("sends the browser timezone so daily totals follow local calendar days", async () => {

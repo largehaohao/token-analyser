@@ -586,6 +586,7 @@ export async function startServer(opts?: {
       }
       const timezoneRaw = url.searchParams.get("timezone_offset_minutes");
       const timezone = url.searchParams.get("timezone")?.trim();
+      const modelRaw = url.searchParams.get("model")?.trim();
       const sinceMs = sinceRaw ? Date.parse(sinceRaw) : Number.NaN;
       const untilMs = untilRaw ? Date.parse(untilRaw) : Number.NaN;
       const dayCount = daysRaw ? Number(daysRaw) : Number.NaN;
@@ -614,6 +615,7 @@ export async function startServer(opts?: {
           ...(timezone && timezone.length <= 100 && isValidTimezone(timezone)
             ? { timezone }
             : {}),
+          ...(modelRaw && modelRaw.length <= 200 ? { model: modelRaw } : {}),
         }),
       );
       return;

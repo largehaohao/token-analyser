@@ -13,11 +13,13 @@ import {
   tokenIdentity,
   type CostUnit,
 } from "./format";
+import { ModelFilterSelect } from "./ModelFilterSelect";
 import { PerformanceMetrics } from "./PerformanceMetrics";
 import { RateLimits } from "./RateLimits";
 import { arrayHistogram, TPS_LABELS, TTFT_LABELS } from "./perf-buckets";
 import { HistogramPair } from "./Histogram";
 import { sourceLabel } from "./format";
+import { useModelFilteredOverview } from "./useModelFilteredOverview";
 import { srTable } from "./ui";
 
 function InspectButton({
@@ -376,7 +378,22 @@ export function ModelPanel({
  * Latency and output speed. The averages come from the source records; the
  * histograms use fixed buckets so any two windows can be compared on one scale.
  */
-export function PerformancePanel({ overview }: { overview: Overview }) {
+export function PerformancePanel({
+  overview: baseOverview,
+  filterScope,
+  fetchOverviewForModel,
+}: {
+  overview: Overview;
+  filterScope: string;
+  fetchOverviewForModel: (model: string) => Promise<Overview>;
+}) {
+  const {
+    model,
+    setModel,
+    overview,
+    loading,
+    error,
+  } = useModelFilteredOverview(baseOverview, filterScope, fetchOverviewForModel);
   const dist = overview.performanceDistribution;
   return (
     <section className="chart-card perf-card" data-testid="performance-panel" aria-label="响应性能分布">
@@ -387,7 +404,21 @@ export function PerformancePanel({ overview }: { overview: Overview }) {
             首 token 延迟与输出速度，来自来源记录的完整请求样本。
           </p>
         </div>
+        <div className="chart-head-controls">
+          <ModelFilterSelect
+            id="performance-model-filter"
+            models={baseOverview.models}
+            value={model}
+            onChange={setModel}
+            disabled={loading}
+          />
+        </div>
       </div>
+      {error ? (
+        <p className="empty-inline" role="alert">
+          按模型筛选失败：{error}
+        </p>
+      ) : null}
       <PerformanceMetrics performance={overview.performance} />
       {dist ? (
         <HistogramPair

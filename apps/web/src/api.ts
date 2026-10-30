@@ -309,6 +309,7 @@ export async function getOverview(
   nowMs = Date.now(),
   source: SessionSourceFilter = "all",
   window?: { sinceMs: number; untilMs: number; days: number },
+  model?: string,
 ): Promise<Overview> {
   const query = window
     ? {
@@ -328,6 +329,7 @@ export async function getOverview(
   );
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (timezone) params.set("timezone", timezone);
+  if (model) params.set("model", model);
   return requestJson<Overview>(`/overview?${params.toString()}`);
 }
 

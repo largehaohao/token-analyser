@@ -224,6 +224,11 @@ function AppShell() {
   const rangeLabel =
     SESSION_RANGES.find((item) => item.id === range)?.label ?? range;
 
+  const fetchOverviewForModel = useCallback(
+    (model: string) => getOverview(range, now, source, undefined, model),
+    [range, now, source],
+  );
+
   const refreshOverview = useCallback(async (force = false) => {
     const requestedRange = rangeRef.current;
     const requestedSource = sourceRef.current;
@@ -814,6 +819,8 @@ function AppShell() {
                       ? `${rangeLabel}（趋势为近 30 个本地日）`
                       : rangeLabel
                   }
+                  filterScope={`${source}:${range}:${overview.sessionCount}:${overview.turnCount}:${overview.cost.raw}`}
+                  fetchOverviewForModel={fetchOverviewForModel}
                 />
                 <OverviewRail
                   overview={overview}

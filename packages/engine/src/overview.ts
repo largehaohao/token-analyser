@@ -103,19 +103,22 @@ export type OverviewOptions = {
   timezone?: string;
   /** Minutes east of UTC, matching `-Date#getTimezoneOffset()`. */
   timezoneOffsetMinutes?: number;
+  /**
+   * When set, days / cost / slices / performance only include this model.
+   * The models list still covers every model in the window.
+   */
+  model?: string;
 };
+
+/** Stable model key for overview grouping and filters. */
+export function turnModelKey(model: string | null | undefined): string {
+  return model?.trim() || "(unknown)";
+}
 
 export const OVERVIEW_EARLIER_DATE = "earlier";
 export const OVERVIEW_LATER_DATE = "later";
 
 const SLICE_SET = new Set<string>(OVERVIEW_SLICE_KEYS);
-
-function countTurns(snap: SessionSnapshot): number {
-  return (
-    snap.turns.length +
-    snap.children.reduce((sum, child) => sum + countTurns(child), 0)
-  );
-}
 
 function collectQuality(
   session: SessionSnapshot,
@@ -299,6 +302,18 @@ function walkTurns(
   for (const child of session.children) walkTurns(child, visit, true);
 }
 
+function flattenTurns(session: SessionSnapshot): Turn[] {
+  return [
+    ...session.turns,
+    ...session.children.flatMap((child) => flattenTurns(child)),
+  ];
+}
+
+function turnMatchesModel(turn: Turn, model: string | undefined): boolean {
+  if (model == null || model === "") return true;
+  return turnModelKey(turn.model) === model;
+}
+
 function collectTurnsById(
   session: SessionSnapshot,
   map = new Map<string, Turn>(),
@@ -320,7 +335,12 @@ function windowTurnIds(
   return ids;
 }
 
-function windowedWaste(session: SessionSnapshot, sinceMs?: number, untilMs?: number): Cost {
+function windowedWaste(
+  session: SessionSnapshot,
+  sinceMs?: number,
+  untilMs?: number,
+  model?: string,
+): Cost {
   const { turnIds } = computeWaste({
     turns: session.turns,
     children: session.children,
@@ -331,7 +351,9 @@ function windowedWaste(session: SessionSnapshot, sinceMs?: number, untilMs?: num
   let waste = emptyMaybeCost();
   for (const id of turnIds) {
     if (!inWindow.has(id)) continue;
-    waste = addKnownCost(waste, byId.get(id)!.cost);
+    const turn = byId.get(id)!;
+    if (!turnMatchesModel(turn, model)) continue;
+    waste = addKnownCost(waste, turn.cost);
   }
   return normalizeCost(waste);
 }
@@ -405,6 +427,7 @@ export function buildOverview(
   let cost = emptyMaybeCost();
   let waste = emptyMaybeCost();
   let turnCount = 0;
+  let sessionCount = 0;
   let unpricedRaw = 0;
   let overflow = emptyMaybeCost();
   let overflowFlagged = emptyMaybeCost();
@@ -414,21 +437,18 @@ export function buildOverview(
   let laterUnpriced = 0;
   let ledgerWarningSessions = 0;
   let parseErrors = 0;
+  const modelFilter = opts.model?.trim() || undefined;
 
   for (const session of included) {
-    const quality = collectQuality(session);
-    ledgerWarningSessions += quality.ledgerWarningSessions;
-    parseErrors += quality.parseErrors;
     const ranged = filterSessionTurns(session, opts.sinceMs, opts.untilMs);
-    waste = addKnownCost(waste, windowedWaste(session, opts.sinceMs, opts.untilMs));
-    turnCount += countTurns(ranged);
+    waste = addKnownCost(
+      waste,
+      windowedWaste(session, opts.sinceMs, opts.untilMs, modelFilter),
+    );
+    let sessionMatched = false;
 
     walkTurns(ranged, (turn, flagged, nested) => {
-      if (turn.cost.credits == null && turn.cost.usd == null) unpricedRaw += turn.cost.raw;
-      cost = addKnownCost(cost, turn.cost);
-      const key = sliceKey(turn, nested);
-      slices[key] = addKnownCost(slices[key], turn.cost);
-      const model = turn.model?.trim() || "(unknown)";
+      const model = turnModelKey(turn.model);
       const prev = models.get(model) ?? {
         cost: emptyMaybeCost(),
         turnCount: 0,
@@ -438,6 +458,14 @@ export function buildOverview(
       prev.turnCount += 1;
       if (turn.cost.credits == null && turn.cost.usd == null) prev.unpricedRaw += turn.cost.raw;
       models.set(model, prev);
+
+      if (!turnMatchesModel(turn, modelFilter)) return;
+      sessionMatched = true;
+      turnCount += 1;
+      if (turn.cost.credits == null && turn.cost.usd == null) unpricedRaw += turn.cost.raw;
+      cost = addKnownCost(cost, turn.cost);
+      const key = sliceKey(turn, nested);
+      slices[key] = addKnownCost(slices[key], turn.cost);
 
       const day = calendarDay(
         turn.endedAt || turn.startedAt,
@@ -461,6 +489,13 @@ export function buildOverview(
         if (flagged) overflowFlagged = addKnownCost(overflowFlagged, turn.cost);
       }
     });
+    // Quality follows the same session membership as cost/days when filtered.
+    if (sessionMatched || modelFilter == null) {
+      sessionCount += 1;
+      const quality = collectQuality(session);
+      ledgerWarningSessions += quality.ledgerWarningSessions;
+      parseErrors += quality.parseErrors;
+    }
   }
 
   const chartDays: OverviewDay[] = days.map((date) =>
@@ -481,6 +516,17 @@ export function buildOverview(
   }
 
   const timedSamples = included.flatMap((session) => {
+    const ranged = filterSessionTurns(session, opts.sinceMs, opts.untilMs);
+    // Model filters are turn-scoped; task windows are not attributed to a model.
+    if (modelFilter) {
+      const turns = flattenTurns(ranged).filter((turn) =>
+        turnMatchesModel(turn, modelFilter),
+      );
+      return requestTimings(turns).map((sample) => ({
+        ...sample,
+        basis: "request" as const,
+      }));
+    }
     const hasTasks = collectTaskTimings(session).length > 0;
     // Sources without agent-task windows time a single model request.
     return (hasTasks ? collectTaskTimings(session) : requestTimings(session.turns))
@@ -493,7 +539,7 @@ export function buildOverview(
 
   const card = loadRateCard();
   return {
-    sessionCount: included.length,
+    sessionCount: modelFilter ? sessionCount : included.length,
     turnCount,
     live: included.some((session) => session.live),
     collecting: opts.collecting ?? true,

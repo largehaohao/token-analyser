@@ -7,6 +7,20 @@ import {
 
 export type ChartMetric = "usd" | "tokens" | "credits";
 
+/**
+ * Bar + tick slot = column min-width + inter-column gap.
+ * CSS uses `min-width: 34px` and `gap: 3px`; 24px alone clipped `MM/DD`.
+ */
+export const TREND_COLUMN_MIN_WIDTH_PX = 34;
+export const TREND_COLUMN_GAP_PX = 3;
+export const TREND_COLUMN_SLOT_PX =
+  TREND_COLUMN_MIN_WIDTH_PX + TREND_COLUMN_GAP_PX;
+
+/** Y-axis gutter is 44px; N columns with (N-1) gaps. */
+export function trendContentMinWidth(dayCount: number): number {
+  return 44 + dayCount * TREND_COLUMN_SLOT_PX - TREND_COLUMN_GAP_PX;
+}
+
 export function unitToChartMetric(unit: CostUnit): ChartMetric {
   return unit;
 }
