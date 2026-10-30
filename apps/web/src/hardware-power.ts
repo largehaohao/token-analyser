@@ -182,6 +182,29 @@ export function resolveQuickWindow(
   };
 }
 
+/** Live when the backend is connected and returned at least one in-range sample. */
+export function isLivePowerFeed(
+  connected: boolean,
+  sampleCount: number,
+): boolean {
+  return connected && sampleCount > 0;
+}
+
+/**
+ * Prefill for the custom range form. Demo data cannot start before the
+ * synthetic epoch; a live Prometheus feed may hold older points.
+ */
+export function customRangePrefill(
+  activeStartMs: number,
+  endMs: number,
+  live: boolean,
+): PowerWindow {
+  const startMs = live
+    ? activeStartMs
+    : Math.max(activeStartMs, POWER_DEMO_ANCHOR_MS);
+  return { startMs, endMs, label: "自定义" };
+}
+
 /**
  * 采集与展示分两层：采样网格（sampleStepMs）决定用电量、平均功率与峰值的精度，
  * 积分直接跑网格上的原始采样（24 小时 1 分钟，1 小时 15 秒，7 天 5 分钟）；

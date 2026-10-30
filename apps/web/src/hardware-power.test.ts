@@ -6,6 +6,7 @@ import {
   POWER_RANGES,
   bucketizeSamples,
   chartBucketMs,
+  customRangePrefill,
   demoPowerAdapter,
   demoSampleAt,
   energyCostCny,
@@ -15,6 +16,7 @@ import {
   formatKwh,
   formatPricePerKwh,
   integrateSeries,
+  isLivePowerFeed,
   parseLocalDateTime,
   resolveQuickWindow,
   sampleStepMs,
@@ -25,6 +27,7 @@ import {
 
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
+const DAY = 86_400_000;
 
 function constant(t0: number, hours: number, watts: number | null, step = MINUTE): SeriesPoint[] {
   const out: SeriesPoint[] = [];
@@ -185,6 +188,23 @@ describe("范围解析与边界", () => {
       expect(result.window.startMs).toBe(Date.parse("2026-10-22T08:30:00"));
       expect(result.window.endMs).toBe(Date.parse("2026-10-23T08:30:00"));
     }
+  });
+
+  it("treats a single connected sample as live feed data", () => {
+    expect(isLivePowerFeed(true, 1)).toBe(true);
+    expect(isLivePowerFeed(true, 0)).toBe(false);
+    expect(isLivePowerFeed(false, 5)).toBe(false);
+  });
+
+  it("clamps custom prefill to the demo epoch only when not live", () => {
+    const beforeAnchor = POWER_DEMO_ANCHOR_MS - DAY;
+    const end = POWER_DEMO_ANCHOR_MS + HOUR;
+    expect(customRangePrefill(beforeAnchor, end, false).startMs).toBe(
+      POWER_DEMO_ANCHOR_MS,
+    );
+    expect(customRangePrefill(beforeAnchor, end, true).startMs).toBe(
+      beforeAnchor,
+    );
   });
 
   it("rejects end <= start, future end and malformed input with field errors", () => {
