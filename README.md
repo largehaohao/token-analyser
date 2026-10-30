@@ -1,6 +1,6 @@
 # Token Analyser
 
-Local dashboard for Codex, Claude Code, Cursor, and pi sessions. The Node engine reads local JSONL and Cursor's SQLite store; the Vite UI talks to it over HTTP and SSE. Session data stays on the machine. Figures come from recorded usage or dated public API rates; they are not subscription bills.
+Local dashboard for Codex, Claude Code, Cursor, pi, and DeepSeek Harness sessions. The Node engine reads local JSONL (and DSH's zstd-compressed JSONL) plus Cursor's SQLite store; the Vite UI talks to it over HTTP and SSE. Session data stays on the machine. Figures come from recorded usage or dated public API rates; they are not subscription bills.
 
 ## Run
 
@@ -32,7 +32,8 @@ Default sources are discovered recursively:
 | Codex | `~/.codex/sessions/**/*.jsonl` (`CODEX_HOME` supported) | Tokens, credits, USD, tools; agent-task TTFT and tok/s when logged |
 | Claude Code | `~/.claude/projects/**/*.jsonl` (`CLAUDE_CONFIG_DIR` supported) | Input, cache read/write, output, API-equivalent USD, tools, subagents |
 | Cursor | `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` and Cursor User `globalStorage/state.vscdb` / `workspaceStorage/**/state.vscdb` | Conversation, tools, session metadata, Cursor's own context-token meter; request usage, TTFT and tok/s are not recorded |
-| pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR` supported) | Input, cache read/write, output, recorded USD, tools, branch/fork context, per-request duration (tok/s) |
+| pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR` supported) | Input, cache read/write, output, recorded USD, tools, branch/fork context, per-request duration (tok/s); TTFT with the [pi request-timing extension](#pi-request-timing) |
+| DeepSeek Harness | `~/.dsh/sessions/**/session*.jsonl.zstd` (`DSH_HOME` supported) | Input, cache read, output, tools, subagent parent links; tok/s from per-message stream timing when present |
 
 Cursor's User directory is `~/Library/Application Support/Cursor/User` on macOS,
 `%APPDATA%/Cursor/User` on Windows, and `$XDG_CONFIG_HOME/Cursor/User` (or
@@ -42,7 +43,7 @@ Zero-valued Cursor token placeholders are treated as missing telemetry, not
 measured zero. The UI shows `—` for missing usage and `≥` for partial totals.
 TTFT and tok/s stay unavailable for logs that do not record the required timings.
 The performance panel states which unit it measured: **整次 agent 任务** (Codex
-`task_started` / `task_complete` windows) or **单次模型请求** (sources that only
+`task_started` / `task_complete` windows) or **单次模型请求** (sources that
 record request timing, such as pi's `durationMs`). The two are never mixed, and
 neither is derived from gaps between log timestamps. A source that records
 neither request duration nor output tokens — including Cursor, whose local store
@@ -50,11 +51,48 @@ keeps both at zero — reports `—` with the reason stated.
 The request detail table and its expanded rows show TTFT (seconds) and tok/s
 for each LLM call. Request-level `time_to_first_token_ms` / `ttft_ms`,
 `duration_ms`, and `output_tokens_per_second` fields are read from the call's
-metadata (including `metrics`, `timing`, `request_performance`, and pi's
-`durationMs`). Recorded
-speed takes precedence; otherwise tok/s is output tokens divided by the
-recorded request duration, including first-token wait. Task-level measurements
-are kept in the summary and are not copied into individual request rows.
+metadata (including `metrics`, `timing`, `request_performance`, pi's
+`durationMs`, and the [pi request-timing extension](#pi-request-timing)).
+Recorded speed takes precedence. Otherwise tok/s is output tokens divided by
+the generation window, and each row names the denominator it used: **解码时长**
+(request duration minus TTFT) when the request recorded a first-token time,
+**请求总耗时** (whole window, first-token wait included) when it logged only a
+duration. The session summary divides summed output by summed generation
+windows, so its rate covers exactly the requests that have a window, and TTFT
+is averaged over the requests that recorded one. A first-token time that
+exceeds the logged window stays a valid TTFT; that request's tok/s is `—`
+because the two recorded numbers leave no decode window. Task-level
+measurements are kept in the summary and are not copied into individual request
+rows.
+
+### pi request timing
+
+pi's log carries three time facts per request — `message.timestamp` (request
+start), the entry `timestamp` (request end), and `durationMs` — so the
+first-token instant is absent and cannot be recovered from them. Historical pi
+sessions therefore keep `日志未记录首 token 时间`.
+
+`integrations/pi/request-timing.ts` measures it where it happens:
+
+```bash
+cp integrations/pi/request-timing.ts ~/.pi/agent/extensions/request-timing.ts
+```
+
+Each model request then appends a `request_timing` session entry with
+`ttft_ms` (provider request sent → first output delta), response-header time,
+the first raw stream chunk, retry count, and pi's own duration. The analyser
+joins the entry to its model call by assistant entry id (`turn_end.messageEntryId`),
+falling back to `responseId`, and feeds `ttft_ms` into the same request-basis
+TTFT summary, histogram, and detail table as any other recorded field, because
+it is a measurement taken inside the request and not an inference from log
+gaps. pi's own `durationMs` on the assistant entry stays the reported duration;
+the entry's `piDurationMs` (or its own `startedAt` → `endedAt` window) is used
+only when that entry records none. With both known, turn tok/s is a decode rate
+over `durationMs − ttft_ms` instead of the full-window rate, and the row says
+so. Retries restart the extension's clock, so the sample describes the attempt
+that produced the message and `attempts` keeps the retries visible. Toggle the
+extension in pi with `/request-timing` or set `PI_REQUEST_TIMING=0`; the entry
+stores no prompt or response text.
 
 Cursor records how much context a conversation held
 (`promptTokenBreakdown`, `contextTokensUsed`, `contextTokenLimit`,
@@ -64,7 +102,7 @@ measurement, not billable token usage, so it never enters the token ledger, cost
 or cache-hit figures.
 
 Use the visible **会话来源** buttons below the header to select all sources,
-Codex, Claude Code, Cursor, or pi in both the overview and session detail views.
+Codex, Claude Code, Cursor, pi, or DeepSeek Harness in both the overview and session detail views.
 Their counts include all discovered root sessions across all time. The default
 7-day range can hide older sessions; **查看全部时间** reveals that history.
 The selected source is restored on reload and browser back navigation.
@@ -140,9 +178,21 @@ read or verification work in one bucket.
 
 Open **硬件用电** (`#power`) for CPU, GPU, and whole-machine power in W,
 range energy in kWh, and electricity cost in CNY. Choose a rolling 1-hour,
-24-hour, or 7-day range, or a custom interval of up to 31 days. The demonstration
-price starts at 0.55 CNY/kWh and is editable. Whole-machine readings include
+24-hour, or 7-day range, or a custom interval of up to 31 days. The default
+price is **0.6629 CNY/kWh** and stays editable. Whole-machine energy and cost
+are the page's primary readings: they carry the largest type on the page and a
+compact summary under the page title, and the price label keeps all four
+decimals (0.6629, never 0.66). Whole-machine readings include
 the component readings; they must not be added to CPU and GPU again.
+
+Sampling is split into two layers so the curve stays readable without
+thinning the data: the **sampling grid** feeds the trapezoid integration and is
+15 s for 1 hour, 1 minute for 24 hours, 10 minutes for 7 days, and 30 minutes
+for a 31-day custom range (capped at ~2 000 samples per request); the **chart
+bucket** only aggregates those samples into per-column means (30 s / 10 min /
+2 h / 8 h) plus the peak inside each bucket, shown on hover. Energy, average
+power and peak power therefore never use the bucketed series, so a spike
+between two old 15-minute points is no longer averaged away.
 
 This page currently uses deterministic **demo data, not measured hardware data**.
 It makes no Grafana, Prometheus, or SSH connections. Missing samples break the

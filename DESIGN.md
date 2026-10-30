@@ -137,7 +137,7 @@ Cards use `--radius` (14px); controls use `--radius-control` (8px). Pills are re
 
 `ui.tsx` owns Button (emphasis × intent), SegmentedControl, SearchField, StatePanel, Notice, and icons. Enabled actions have a hover treatment, 2px focus ring, pressed state, and pointer cursor. Disabled and busy actions cannot run; a busy button reserves its label's dimensions. Native links navigate. Native buttons expand turn evidence. Do not make table rows pretend to be buttons.
 
-The ledger strip, chart cards, rail panels, ranked rows and histogram cards are surfaces, not cards to be clicked: only ranked rows, the session-count figure and rail session rows are buttons, and each names what pressing it does. A chart figure is always paired with its tabular `srTable`, a text value, and a comparison where one exists; a number without a comparison states that plainly. Histograms use fixed shared buckets (`≤ 1s`, `1–2s`, … and `≤ 10 tok/s`, …) so two sessions, ranges and sources compare on one scale, and their denominator is stated (`3/14 轮有记录`).
+The ledger strip, chart cards, rail panels, ranked rows and histogram cards are surfaces, not cards to be clicked: only ranked rows, the session-count figure and rail session rows are buttons, and each names what pressing it does. A chart figure is always paired with its tabular `srTable`, a text value, and a comparison where one exists; a number without a comparison states that plainly. Histograms use fixed shared buckets (`≤ 1s`, `1–2s`, … and `≤ 40 tok/s`, `40–50 tok/s`, …, `140–150 tok/s`, `> 150 tok/s`) so two sessions, ranges and sources compare on one scale, and their denominator is stated (`3/14 轮有记录`). Output speed stays coarse up to 40 tok/s and then splits every 10 tok/s, so a fast model's spread is visible. A dense histogram labels each bar with its bucket's upper edge (`≤40`, `50`, …, `>150`) and prints the percentage only on the tallest bar; the full range name stays in the hover text and in the summary line.
 
 Loading uses an app-owned spinner in a reserved StatePanel, never a speculative skeleton. Stale reads retain data and show an inline notice. Search has an explicit clear button. Import shows a file name, truthful busy state, validation, and a persistent outcome. Details and context disclosures use native semantics. Behavior, privacy, navigation, and recovery are owned by [UX-CONTRACT.md](UX-CONTRACT.md).
 
@@ -155,6 +155,14 @@ Use 140ms color/border transitions; motion never drives layout. Under reduced mo
 
 The `#power` page reuses the existing ledger figures, chart cards, controls,
 spacing, semantic colors and Chinese copy. CPU/GPU/whole-machine watts precede
-whole-machine interval energy and CNY cost. The demo notice stays visible and
+whole-machine interval energy and CNY cost, and that pair is the page's primary
+reading: a two-figure hero panel in the largest ledger type on the page, echoed
+by a compact energy/cost summary under the page title. The price field starts at
+0.6629 CNY/kWh and its label keeps four decimals for prices finer than a cent.
+The demo notice stays visible and
 component readings never add to the whole-machine total. Three line styles
 supplement color; overflowing charts and tables give an explicit scroll cue.
+The trend keeps its 24px columns: at most 150 columns per range, each column a
+sampling bucket's mean, so finer sampling scrolls the plot instead of shrinking
+it. The bucket's peak rides in the tooltip, and the statistics table reports
+total, average and peak from the raw sampling grid, never from the buckets.

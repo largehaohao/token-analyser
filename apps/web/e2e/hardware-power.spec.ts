@@ -5,9 +5,30 @@ test("hardware energy follows its range and price without entering token costs",
   await page.goto("/#power");
   await expect(page.getByRole("heading", { name: "硬件用电", exact: true })).toBeVisible();
   const totals = page.getByRole("region", { name: "所选范围累计用电与电费", exact: true });
+  // 默认电价为 0.6629 元/kWh，用电量与电费以大字号摘要展示。
+  await expect(page.getByRole("spinbutton", { name: "电价（元/kWh）" })).toHaveValue("0.6629");
+  const hero = page.getByTestId("power-energy-hero");
+  await expect(hero).toBeVisible();
+  await expect(totals).toContainText("电价 0.6629 元/kWh");
+  const heroFontSize = await hero
+    .locator(".power-hero-value")
+    .first()
+    .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(heroFontSize).toBeGreaterThanOrEqual(28);
+  // 采集粒度与展示分桶分开：24 小时按 1 分钟采集，曲线按 10 分钟均值。
+  const grid = page.getByRole("status").filter({ hasText: "当前统计范围" });
+  await expect(grid).toContainText("采集粒度每 1 分钟");
+  await expect(grid).toContainText("曲线均值粒度每 10 分钟");
+  await expect(page.getByTestId("power-trend")).toContainText("取一列均值");
+  expect(await page.locator(".power-col").count()).toBeLessThanOrEqual(150);
+  const summary = page.getByTestId("power-summary");
+  await expect(summary).toContainText("用电量");
+  await expect(summary).toContainText("电价 0.6629 元/kWh");
   const energy = async () => Number((await totals.locator(".ledger-value").first().innerText()).replace(/[^\d.]/g, ""));
   const dayEnergy = await energy();
   await page.getByRole("button", { name: "近1小时", exact: true }).click();
+  // 切到 1 小时：采集粒度同步细到 15 秒。
+  await expect(grid).toContainText("采集粒度每 15 秒");
   expect(await energy()).toBeLessThan(dayEnergy);
   const hourEnergy = await energy();
   await page.getByRole("spinbutton", { name: "电价（元/kWh）" }).fill("1.10");

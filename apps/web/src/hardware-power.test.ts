@@ -1,17 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_PRICE_CNY_PER_KWH,
+  MAX_POWER_COLUMNS,
   POWER_DEMO_ANCHOR_MS,
   POWER_RANGES,
+  bucketizeSamples,
+  chartBucketMs,
   demoPowerAdapter,
   demoSampleAt,
   energyCostCny,
   formatCny,
+  formatClock,
+  formatDuration,
   formatKwh,
+  formatPricePerKwh,
   integrateSeries,
   parseLocalDateTime,
   resolveQuickWindow,
+  sampleStepMs,
   toLocalDateTimeInput,
-  trendStepMs,
   validateCustomRange,
   type SeriesPoint,
 } from "./hardware-power";
@@ -142,6 +149,21 @@ describe("电费一致性", () => {
   });
 });
 
+describe("默认电价与展示", () => {
+  it("starts at 0.6629 CNY/kWh", () => {
+    expect(DEFAULT_PRICE_CNY_PER_KWH).toBe(0.6629);
+    expect(energyCostCny(1, DEFAULT_PRICE_CNY_PER_KWH)).toBeCloseTo(0.6629, 6);
+  });
+
+  it("keeps four decimals for the default price and two for cent-level prices", () => {
+    expect(formatPricePerKwh(DEFAULT_PRICE_CNY_PER_KWH)).toBe("0.6629");
+    expect(formatPricePerKwh(1.1)).toBe("1.10");
+    expect(formatPricePerKwh(0.55)).toBe("0.55");
+    expect(formatPricePerKwh(0.5)).toBe("0.50");
+    expect(formatPricePerKwh(Number.NaN)).toBe("—");
+  });
+});
+
 describe("范围解析与边界", () => {
   it("resolves quick windows as rolling windows ending at now", () => {
     const now = Date.UTC(2026, 9, 23, 8, 0);
@@ -192,11 +214,85 @@ describe("范围解析与边界", () => {
     expect(validateCustomRange("2026-01-01T00:00", "2026-10-22T00:00", Date.UTC(2026, 9, 23)).ok).toBe(false);
   });
 
-  it("picks a coarser trend step for longer spans", () => {
-    expect(trendStepMs(HOUR)).toBe(2 * MINUTE);
-    expect(trendStepMs(24 * HOUR)).toBe(15 * MINUTE);
-    expect(trendStepMs(7 * 86_400_000)).toBe(HOUR);
-    expect(trendStepMs(40 * 86_400_000)).toBe(2 * HOUR);
+  it("samples far finer than the old 15-minute grid and stays under the point cap", () => {
+    expect(sampleStepMs(HOUR)).toBe(15_000);
+    expect(sampleStepMs(24 * HOUR)).toBe(MINUTE);
+    expect(sampleStepMs(7 * 86_400_000)).toBe(10 * MINUTE);
+    expect(sampleStepMs(31 * 86_400_000)).toBe(30 * MINUTE);
+    for (const span of [HOUR, 24 * HOUR, 7 * 86_400_000, 31 * 86_400_000])
+      expect(span / sampleStepMs(span)).toBeLessThanOrEqual(2100);
+  });
+
+  it("keeps chart columns bounded and never finer than the sampling grid", () => {
+    for (const span of [HOUR, 24 * HOUR, 7 * 86_400_000, 31 * 86_400_000]) {
+      const step = sampleStepMs(span);
+      const bucket = chartBucketMs(span, step);
+      expect(bucket).toBeGreaterThanOrEqual(step);
+      expect(span / bucket).toBeLessThanOrEqual(MAX_POWER_COLUMNS);
+    }
+    expect(chartBucketMs(24 * HOUR, MINUTE)).toBe(10 * MINUTE);
+  });
+});
+
+describe("展示分桶（均值 / 峰值 / 缺失）", () => {
+  it("averages the samples inside a bucket and keeps its peak", () => {
+    const t0 = Date.UTC(2026, 9, 20);
+    const samples = [
+      { t: t0, cpu: 10, gpu: 100, machine: 200 },
+      { t: t0 + MINUTE, cpu: 30, gpu: null, machine: 400 },
+      { t: t0 + 3 * MINUTE, cpu: 50, gpu: null, machine: null },
+    ];
+    const buckets = bucketizeSamples(samples, 2 * MINUTE, t0);
+    expect(buckets.length).toBe(2);
+    expect(buckets[0]!.cpu).toBeCloseTo(20, 6);
+    expect(buckets[0]!.peak.cpu).toBe(30);
+    // 仅一个非空采样时，均值就是它本身，峰值同步保留。
+    expect(buckets[0]!.gpu).toBe(100);
+    expect(buckets[0]!.count).toBe(2);
+    // 桶内无有效采样→该序列显示 —，不补零。
+    expect(buckets[1]!.machine).toBeNull();
+    expect(buckets[1]!.peak.machine).toBeNull();
+    expect(buckets[1]!.count).toBe(1);
+    expect(buckets[1]!.t).toBe(t0 + 3 * MINUTE);
+  });
+
+  it("drops empty buckets so the curve breaks instead of flattening", () => {
+    const t0 = Date.UTC(2026, 9, 20);
+    const samples = [
+      { t: t0, cpu: 10, gpu: 1, machine: 100 },
+      { t: t0 + 5 * MINUTE, cpu: 20, gpu: 2, machine: 200 },
+    ];
+    const buckets = bucketizeSamples(samples, MINUTE, t0);
+    expect(buckets.map((b) => b.t)).toEqual([t0 + 30_000, t0 + 5 * MINUTE + 30_000]);
+    expect(buckets.map((b) => `${b.startMs}-${b.endMs}`)).toEqual([
+      `${t0}-${t0 + MINUTE}`,
+      `${t0 + 5 * MINUTE}-${t0 + 6 * MINUTE}`,
+    ]);
+  });
+
+  it("integrates the raw grid, so an off-grid spike is no longer averaged away", () => {
+    const t0 = Date.UTC(2026, 9, 20);
+    const fine: SeriesPoint[] = [];
+    for (let m = 0; m <= 60; m += 1)
+      fine.push({ t: t0 + m * MINUTE, v: m === 8 ? 1000 : 100 });
+    // 旧的 15 分钟网格正好错过了第 8 分钟的尖峰。
+    const coarse = fine.filter((_, i) => i % 15 === 0);
+    const fineKwh = integrateSeries(fine, t0, t0 + 60 * MINUTE).kwh!;
+    const coarseKwh = integrateSeries(coarse, t0, t0 + 60 * MINUTE).kwh!;
+    expect(coarseKwh).toBeCloseTo(0.1, 6);
+    expect(fineKwh).toBeGreaterThan(coarseKwh + 0.01);
+  });
+
+  it("formats sub-minute sampling steps as seconds", () => {
+    expect(formatDuration(15_000)).toBe("15 秒");
+    expect(formatDuration(MINUTE)).toBe("1 分钟");
+    expect(formatDuration(10 * MINUTE)).toBe("10 分钟");
+  });
+
+  it("shows seconds in bucket labels when the bucket is sub-minute", () => {
+    const t = new Date(2026, 9, 20, 3, 4, 9).getTime();
+    expect(formatClock(t)).toBe("10-20 03:04");
+    expect(formatClock(t, true)).toBe("10-20 03:04:09");
   });
 });
 

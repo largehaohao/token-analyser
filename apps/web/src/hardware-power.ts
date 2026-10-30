@@ -28,7 +28,8 @@ export type PowerDataAdapter = {
 
 /** 演示序列的固定纪元：此时刻之前没有任何采样（返回 null / —）。 */
 export const POWER_DEMO_ANCHOR_MS = Date.UTC(2025, 0, 1);
-export const DEMO_PRICE_CNY_PER_KWH = 0.55;
+/** 默认电价：居民合表 / 代理购电常用档位（元/kWh），页面内可改。 */
+export const DEFAULT_PRICE_CNY_PER_KWH = 0.6629;
 
 export const POWER_SERIES: {
   key: PowerSeriesKey;
@@ -182,14 +183,123 @@ export function resolveQuickWindow(
 }
 
 /**
- * 趋势/积分共用同一采样网格，保证“看到的曲线”就是“被积分的曲线”。
- * 跨度越大步长越粗，最长 7 天量级内保持可读的点数。
+ * 采集与展示分两层：采样网格（sampleStepMs）决定用电量、平均功率与峰值的精度，
+ * 积分直接跑网格上的原始采样（24 小时 1 分钟，1 小时 15 秒，7 天 5 分钟）；
+ * 展示分桶（chartBucketMs）只把原始采样聚成可读的图表列均值与悬停峰值，
+ * 不参与积分，因此曲线看起来多粗都不再限制采集精度。
  */
-export function trendStepMs(spanMs: number): number {
-  if (spanMs <= 2 * HOUR) return 2 * MINUTE;
-  if (spanMs <= 26 * HOUR) return 15 * MINUTE;
-  if (spanMs <= 9 * DAY) return HOUR;
-  return 2 * HOUR;
+export const POWER_SAMPLE_STEPS = [
+  15_000,
+  30_000,
+  MINUTE,
+  2 * MINUTE,
+  5 * MINUTE,
+  10 * MINUTE,
+  15 * MINUTE,
+  30 * MINUTE,
+  HOUR,
+  2 * HOUR,
+];
+
+/** 图表分桶阶梯：分桶只影响曲线与悬停，绝不参与积分。 */
+export const POWER_BUCKET_STEPS = [
+  ...POWER_SAMPLE_STEPS,
+  4 * HOUR,
+  8 * HOUR,
+  12 * HOUR,
+  DAY,
+];
+
+/** 采集下限 15 秒：低于常见导出器的 scrape 间隔只会得到更多空点。 */
+export const MIN_SAMPLE_STEP_MS = 15_000;
+/** 单次请求的采样上限（后端硬上限 20 000 点），同时保住响应体积与解析开销。 */
+export const MAX_POWER_SAMPLES = 2000;
+/** 图表列上限：24px 一列，超出后靠面板内横向滚动而不是无限铺列。 */
+export const MAX_POWER_COLUMNS = 150;
+
+function pickStep(ladder: number[], minMs: number): number {
+  for (const step of ladder) if (step >= minMs) return step;
+  return ladder[ladder.length - 1]!;
+}
+
+/** 采样步长：直接决定能耗积分精度；范围越大越粗，下限 15 秒。 */
+export function sampleStepMs(spanMs: number): number {
+  if (!(spanMs > 0)) return POWER_SAMPLE_STEPS[0]!;
+  return pickStep(
+    POWER_SAMPLE_STEPS,
+    Math.max(MIN_SAMPLE_STEP_MS, spanMs / MAX_POWER_SAMPLES),
+  );
+}
+
+/** 图表分桶宽度：不细于采样步长，也不宽于一天。 */
+export function chartBucketMs(spanMs: number, stepMs: number): number {
+  if (!(spanMs > 0)) return stepMs;
+  return pickStep(POWER_BUCKET_STEPS, Math.max(stepMs, spanMs / MAX_POWER_COLUMNS));
+}
+
+/** 一个图表列：桶内均值（曲线）+ 桶内峰值（悬停）+ 采样个数。 */
+export type PowerBucket = {
+  t: number;
+  startMs: number;
+  endMs: number;
+  count: number;
+  cpu: number | null;
+  gpu: number | null;
+  machine: number | null;
+  peak: { cpu: number | null; gpu: number | null; machine: number | null };
+};
+
+/**
+ * 把原始采样聚成展示分桶：均值是桶内非空采样的算术平均；桶内全空则不生成该桶
+ * （曲线在此断开，保持缺失即 — 的语义）。积分永远跑原始采样。
+ */
+export function bucketizeSamples(
+  samples: PowerSample[],
+  bucketMs: number,
+  windowStartMs: number,
+): PowerBucket[] {
+  if (!(bucketMs > 0) || !Number.isFinite(windowStartMs)) return [];
+  const keys = ["cpu", "gpu", "machine"] as const;
+  type Acc = Record<(typeof keys)[number], { n: number; sum: number; peak: number }>;
+  const empty = (): Acc => ({
+    cpu: { n: 0, sum: 0, peak: 0 },
+    gpu: { n: 0, sum: 0, peak: 0 },
+    machine: { n: 0, sum: 0, peak: 0 },
+  });
+  const buckets = new Map<number, Acc>();
+  for (const s of samples) {
+    if (!Number.isFinite(s.t)) continue;
+    const idx = Math.floor((s.t - windowStartMs) / bucketMs);
+    if (idx < 0) continue;
+    const acc = buckets.get(idx) ?? empty();
+    buckets.set(idx, acc);
+    for (const key of keys) {
+      const v = s[key];
+      if (v == null || !Number.isFinite(v)) continue;
+      acc[key].n += 1;
+      acc[key].sum += v;
+      acc[key].peak = Math.max(acc[key].peak, v);
+    }
+  }
+  return [...buckets.keys()]
+    .sort((a, b) => a - b)
+    .map((idx) => {
+      const acc = buckets.get(idx)!;
+      const startMs = windowStartMs + idx * bucketMs;
+      const mean = (k: (typeof keys)[number]) =>
+        acc[k].n > 0 ? acc[k].sum / acc[k].n : null;
+      const peak = (k: (typeof keys)[number]) => (acc[k].n > 0 ? acc[k].peak : null);
+      return {
+        t: startMs + bucketMs / 2,
+        startMs,
+        endMs: startMs + bucketMs,
+        count: Math.max(acc.cpu.n, acc.gpu.n, acc.machine.n),
+        cpu: mean("cpu"),
+        gpu: mean("gpu"),
+        machine: mean("machine"),
+        peak: { cpu: peak("cpu"), gpu: peak("gpu"), machine: peak("machine") },
+      };
+    });
 }
 
 export type CustomRangeResult =
@@ -316,6 +426,16 @@ export function formatKwh(
   return complete ? text : `≥ ${text}`;
 }
 
+/**
+ * 电价展示：整分级电价保留两位（0.55 → “0.55”），补贴级电价保留全部四位
+ * 有效小数（0.6629 → “0.6629”），避免默认电价被四舍五入成 0.66。
+ */
+export function formatPricePerKwh(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  const units = Math.round(value * 10_000);
+  return units % 100 === 0 ? (units / 10_000).toFixed(2) : (units / 10_000).toFixed(4);
+}
+
 export function formatCny(v: number | null, complete = true): string {
   if (v == null) return "—";
   const text =
@@ -328,7 +448,7 @@ export function formatCny(v: number | null, complete = true): string {
 export function formatCoverage(integral: SeriesIntegral): string {
   if (integral.kwh == null) return "无采样";
   if (integral.complete) return "100%";
-  const missingMin = Math.round((integral.windowMs - integral.coveredMs) / MINUTE);
+  const missingMin = Math.max(1, Math.round((integral.windowMs - integral.coveredMs) / MINUTE));
   const pct = integral.windowMs > 0
     ? Math.round((100 * integral.coveredMs) / integral.windowMs)
     : 0;
@@ -339,9 +459,10 @@ function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-export function formatClock(ms: number): string {
+export function formatClock(ms: number, withSeconds = false): string {
   const d = new Date(ms);
-  return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const base = `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return withSeconds ? `${base}:${pad2(d.getSeconds())}` : base;
 }
 
 export function formatWindowRange(w: PowerWindow): string {
@@ -349,6 +470,7 @@ export function formatWindowRange(w: PowerWindow): string {
 }
 
 export function formatDuration(ms: number): string {
+  if (ms < MINUTE) return `${Math.max(1, Math.round(ms / 1000))} 秒`;
   if (ms < HOUR) return `${Math.max(1, Math.round(ms / MINUTE))} 分钟`;
   if (ms < 48 * HOUR) return `${(ms / HOUR).toFixed(ms < 10 * HOUR ? 1 : 0)} 小时`;
   return `${(ms / DAY).toFixed(1)} 天`;

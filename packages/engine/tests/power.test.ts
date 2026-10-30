@@ -130,6 +130,33 @@ describe("fetchPowerRange", () => {
     if (!result.ok) expect(result.error).toBe("prometheus_unreachable");
   });
 
+  it("keeps cpu/machine samples when the gpu query alone fails", async () => {
+    const s0 = T0 / 1000;
+    const { impl } = fetchWith({
+      "node_rapl_package_milliwatts": matrix([
+        [s0, "12.5"],
+        [s0 + 60, "18.75"],
+      ]),
+      "DCGM_FI_DEV_POWER_USAGE": { error: "fetch failed" },
+      "node_hwmon_power_watts": matrix([
+        [s0, "215.4"],
+        [s0 + 60, "220"],
+      ]),
+    });
+    const result = await fetchPowerRange({
+      startMs: T0,
+      endMs: T0 + 2 * MINUTE,
+      stepMs: MINUTE,
+      fetchImpl: impl,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.samples).toEqual([
+      { t: T0, cpu: 12.5, gpu: null, machine: 215.4 },
+      { t: T0 + MINUTE, cpu: 18.75, gpu: null, machine: 220 },
+    ]);
+  });
+
   it("reports non-success responses with the http status", async () => {
     const impl: FetchLike = async () => ({ ok: false, status: 503, json: async () => ({}) });
     const result = await fetchPowerRange({

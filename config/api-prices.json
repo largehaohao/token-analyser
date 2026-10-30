@@ -138,7 +138,7 @@
     }
   },
   "qwen": {
-    "as_of": "2026-10-26",
+    "as_of": "2026-10-30",
     "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
     "markdown_source": "https://help.aliyun.com/zh/model-studio/model-pricing.md",
     "cache_rule_source": "https://help.aliyun.com/zh/model-studio/model-pricing",

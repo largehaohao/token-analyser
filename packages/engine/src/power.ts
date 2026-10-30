@@ -128,13 +128,21 @@ export async function fetchPowerRange(options: {
     gpu: new Map(),
     machine: new Map(),
   };
+  let successCount = 0;
+  let firstError: string | null = null;
   keys.forEach((key, index) => {
     const part = parts[index]!;
-    if (part.ok) maps[key] = part.map;
+    if (part.ok) {
+      maps[key] = part.map;
+      successCount += 1;
+    } else if (firstError == null) {
+      firstError = part.error;
+    }
   });
-  for (const part of parts) {
-    if (!part.ok) return { ...base, error: part.error };
-  }
+  // 允许部分序列失败（例如 GPU 导出器未装）：成功的序列照常返回，
+  // 失败序列保持 null。仅当三个查询全部失败时才判采集不可达。
+  if (successCount === 0)
+    return { ...base, error: firstError ?? "prometheus_unreachable" };
 
   // 三个查询的时间网格取并集；某序列在该时刻没有点则保持缺失（null）。
   const times = new Set<number>();

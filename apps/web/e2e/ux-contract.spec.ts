@@ -44,11 +44,13 @@ test("per-request TTFT and tok/s show recorded, calculated, and missing measurem
   const requests = page.locator(".turn-table tbody tr:not(.turn-detail-row)").filter({ has: page.locator(".turn-expand") });
   await expect(requests).toHaveCount(3);
   await expect(requests.nth(0).locator("td.turn-performance")).toHaveText(["—", "—"]);
-  await expect(requests.nth(1).locator("td.turn-performance")).toHaveText(["0.50", "50.00"]);
+  await expect(requests.nth(1).locator("td.turn-performance")).toHaveText(["0.50", "66.67"]);
   await expect(requests.nth(2).locator("td.turn-performance")).toHaveText(["0.25", "75.00"]);
   await requests.nth(1).getByRole("button").click();
-  await expect(page.getByLabel("本次 LLM 请求性能")).toContainText("50.00 tok/s");
-  await expect(page.locator(".turn-detail")).toContainText("含首 token 等待");
+  await expect(page.getByLabel("本次 LLM 请求性能")).toContainText("66.67 tok/s");
+  // The request records TTFT, so its speed is a decode rate over the window
+  // left after the first-token wait, and the detail says so.
+  await expect(page.locator(".turn-detail")).toContainText("解码时长");
   await requests.nth(0).getByRole("button").click();
   await expect(page.getByLabel("本次 LLM 请求性能")).toContainText("— s");
   await expect(page.locator(".turn-detail")).toContainText("日志未记录本次请求的 TTFT");

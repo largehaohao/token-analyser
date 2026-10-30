@@ -40,9 +40,22 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
   the tok/s heading follows the basis (`任务平均 tok/s` / `请求平均 tok/s`).
 - Timing is only ever read from recorded fields. Gaps between log timestamps are
   never presented as duration, TTFT, or speed.
+- Timing a source does not log is added at the source, never reconstructed here:
+  pi's `request_timing` entries are measured inside the provider request by
+  `integrations/pi/request-timing.ts`, so they enter the request-basis summary
+  like any recorded field, and sessions without them keep
+  `日志未记录首 token 时间` and name the extension that records it.
+- The tok/s denominator is stated per sample. A request that recorded TTFT
+  divides its output by the decode window and is labelled
+  `解码时长（请求时长 − 首 token 等待）`; a request that logged only a duration
+  divides by the whole window and is labelled `请求总耗时（含首 token 等待）`; a
+  source-recorded speed says `采用日志记录的本次请求输出速度`. The two
+  denominators are never presented as one measurement.
 - A missing measurement keeps its `—` value and states why
   (`日志未记录首 token 时间`, `该来源未记录请求时长或输出 Token 数`).
-  `0.00` is shown only for a recorded zero.
+  `0.00` is shown only for a recorded zero. A recorded first-token time that
+  exceeds the logged request window stays visible, and that request's tok/s is
+  `—` because no decode window can be derived from the two numbers.
 - Cursor's context meter renders in **上下文与会话信息** as a context size with
   its category breakdown, labelled as a source-recorded measurement. It never
   enters token totals, cost, cache-hit rates, or the performance panel.
@@ -145,6 +158,15 @@ never enters Token cost totals. CPU and GPU are components of the whole-machine
 reading, not additional totals. Range controls update trends, energy and cost;
 current watts remain current. Custom ranges are limited to 31 days. Missing
 samples interrupt integration, incomplete energy/cost is labelled as a lower
-bound, and measured zero remains distinct from missing. Native date inputs and
+bound, and measured zero remains distinct from missing. The price field starts
+at 0.6629 CNY/kWh, is editable, and is echoed at full precision (0.6629, not
+0.66) beside the cost; whole-machine energy and cost are the page's primary
+readings and repeat as a summary under the page title. Sampling adapts to the
+range (15 s, 1 min, 10 min, 30 min, capped at ~2 000 samples per request) and
+the visible curve only aggregates those samples into per-bucket means; energy,
+average and peak stay on the raw grid. The status line, chart description,
+tooltip and screen-reader table name the sampling grid, the bucket width, the
+bucket window and the sample count, so an averaged curve is never presented as
+raw readings, and sub-minute buckets show seconds in their labels. Native date inputs and
 price errors are labelled; charts have a screen-reader table and focusable data
 points; the statistics table has a keyboard-accessible horizontal scroll region.

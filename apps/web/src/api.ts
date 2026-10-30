@@ -11,7 +11,7 @@ export type Cost = {
   unmeasured?: number;
 };
 
-export type SessionSource = "codex" | "claude" | "cursor" | "pi";
+export type SessionSource = "codex" | "claude" | "cursor" | "pi" | "dsh";
 
 export type PerformanceBasis = "task" | "request";
 
@@ -29,7 +29,7 @@ export type RequestPerformance = {
   ttftMs: number | null;
   durationMs: number | null;
   outputTokensPerSecond: number | null;
-  speedSource: "recorded" | "duration" | null;
+  speedSource: "recorded" | "decode" | "duration" | null;
 };
 
 export type WasteToggleId =
@@ -479,7 +479,7 @@ export async function importNdjson(
       throw new Error("文件超过引擎的导入上限，请选择较小的记录。");
     if (status && status < 500)
       throw new Error(
-        "无法识别会话记录，请确认文件来自 Codex、Claude Code、Cursor 或 pi，且包含有效的 JSONL 内容。",
+        "无法识别会话记录，请确认文件来自 Codex、Claude Code、Cursor、pi 或 DeepSeek Harness，且包含有效的 JSONL 内容。",
       );
     throw new Error(
       "导入结果尚未确认。请先检查会话列表，确认未导入后再重新选择文件。",

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  DEMO_PRICE_CNY_PER_KWH,
+  DEFAULT_PRICE_CNY_PER_KWH,
   POWER_DEMO_ANCHOR_MS,
   POWER_RANGES,
   POWER_SERIES,
+  bucketizeSamples,
+  chartBucketMs,
   demoPowerAdapter,
   energyCostCny,
   formatClock,
@@ -11,13 +13,15 @@ import {
   formatCny,
   formatDuration,
   formatKwh,
+  formatPricePerKwh,
   formatWatts,
   formatWindowRange,
   integrateSeries,
   resolveQuickWindow,
+  sampleStepMs,
   toLocalDateTimeInput,
-  trendStepMs,
   validateCustomRange,
+  type PowerBucket,
   type PowerDataAdapter,
   type PowerQuickRangeId,
   type PowerSample,
@@ -41,6 +45,8 @@ const PLOT_LEFT = 44;
 const PLOT_TOP = 8;
 const PLOT_H = 208;
 const COL_W = 24;
+/** 瞬时功率短窗步长：与所选统计范围无关，始终以 now 为终点。 */
+const INSTANT_STEP_MS = 30_000;
 
 function seriesPoints(samples: PowerSample[], key: "cpu" | "gpu" | "machine"): SeriesPoint[] {
   return samples.map((s) => ({ t: s.t, v: s[key] }));
@@ -65,7 +71,10 @@ function parsePrice(raw: string): { value: number; error: string | null } {
   const trimmed = raw.trim();
   const v = Number(trimmed);
   if (trimmed === "" || !Number.isFinite(v) || v <= 0)
-    return { value: 0, error: "请输入大于 0 的电价，例如 0.55（元/kWh）。" };
+    return {
+      value: 0,
+      error: `请输入大于 0 的电价，例如 ${formatPricePerKwh(DEFAULT_PRICE_CNY_PER_KWH)}（元/kWh）。`,
+    };
   if (v > 1000) return { value: 0, error: "电价过高，请检查单位（元/kWh）。" };
   return { value: v, error: null };
 }
@@ -89,7 +98,7 @@ export function HardwarePowerPage({
   const [rangeErrors, setRangeErrors] = useState<
     { field: "start" | "end"; message: string }[]
   >([]);
-  const [priceRaw, setPriceRaw] = useState(String(DEMO_PRICE_CNY_PER_KWH));
+  const [priceRaw, setPriceRaw] = useState(String(DEFAULT_PRICE_CNY_PER_KWH));
   const [tipIndex, setTipIndex] = useState<number | null>(null);
   const [tipPos, setTipPos] = useState({ left: 8, top: 8 });
 
@@ -103,7 +112,8 @@ export function HardwarePowerPage({
     [mode, now],
   );
   const spanMs = activeWindow.endMs - activeWindow.startMs;
-  const stepMs = trendStepMs(spanMs);
+  const stepMs = sampleStepMs(spanMs);
+  const bucketMs = chartBucketMs(spanMs, stepMs);
 
   // 后端 /power → Prometheus 实时采集；不可达或返回空时回退演示序列。
   const [feed, setFeed] = useState<{
@@ -116,9 +126,15 @@ export function HardwarePowerPage({
   const feedRequest = useRef(0);
   useEffect(() => {
     const requestId = ++feedRequest.current;
-    setFeed((current) =>
-      current.samples || current.error ? { ...current, loading: true } : current,
-    );
+    // 范围一切换就丢掉上一窗的 samples/connected，避免图表、积分和
+    // “已接入”横幅在新范围标签下继续展示旧窗数据。
+    setFeed((current) => ({
+      loading: true,
+      connected: false,
+      url: current.url,
+      samples: null,
+      error: null,
+    }));
     // 范围切换/卸载时主动取消在途请求（开发模式 StrictMode 下首轮请求
     // 会被立即取消，不能把它当“采集失败”，否则页面会闪回演示态）。
     const controller = new AbortController();
@@ -153,14 +169,53 @@ export function HardwarePowerPage({
     };
   }, [activeWindow.startMs, activeWindow.endMs, stepMs]);
 
+  // 瞬时功率单独拉一段以 now 为终点的短窗，与所选统计范围解耦。
+  const [instantSample, setInstantSample] = useState<PowerSample | null>(null);
+  const instantRequest = useRef(0);
+  useEffect(() => {
+    const requestId = ++instantRequest.current;
+    const controller = new AbortController();
+    const startMs = now - 3 * INSTANT_STEP_MS;
+    getPowerFeed(startMs, now, INSTANT_STEP_MS, controller.signal)
+      .then((result) => {
+        if (requestId !== instantRequest.current) return;
+        const last =
+          result.connected && result.samples.length > 0
+            ? result.samples[result.samples.length - 1]!
+            : null;
+        setInstantSample(last);
+      })
+      .catch((err: unknown) => {
+        if (requestId !== instantRequest.current) return;
+        const isAbort =
+          typeof DOMException !== "undefined" &&
+          err instanceof DOMException &&
+          err.name === "AbortError";
+        if (isAbort) return;
+        setInstantSample(null);
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [now]);
+
   const live = feed.connected && feed.samples != null;
-  const samples = useMemo(
-    () =>
-      live && feed.samples
-        ? feed.samples
-        : adapter.series(activeWindow.startMs, activeWindow.endMs, stepMs),
-    [live, feed.samples, adapter, activeWindow.startMs, activeWindow.endMs, stepMs],
-  );
+  const samples = useMemo(() => {
+    if (live && feed.samples) return feed.samples;
+    // 已知采集地址时，重拉过程中不要闪回演示序列；首访（尚无 url）仍
+    // 可用演示数据填满首屏，避免离线 e2e / 冷启动空表。
+    if (feed.loading && feed.url) return [];
+    return adapter.series(activeWindow.startMs, activeWindow.endMs, stepMs);
+  }, [
+    live,
+    feed.samples,
+    feed.loading,
+    feed.url,
+    adapter,
+    activeWindow.startMs,
+    activeWindow.endMs,
+    stepMs,
+  ]);
 
   const integrals: Record<"cpu" | "gpu" | "machine" | "other", SeriesIntegral> =
     useMemo(() => {
@@ -174,10 +229,30 @@ export function HardwarePowerPage({
       };
     }, [samples, activeWindow.startMs, activeWindow.endMs]);
 
-  // 瞬时功率：实时模式取最新采样；演示模式取当前时刻的确定性采样。
-  const current: PowerSample = live
-    ? (feed.samples![feed.samples!.length - 1] ?? adapter.sampleAt(now))
-    : adapter.sampleAt(now);
+  // 曲线展示把原始采样聚成可读的列（桶内均值 + 桶内峰值）；用电量、平均
+  // 功率与峰值积分始终跑原始采样，分桶不会把尖峰抹平。
+  const buckets: PowerBucket[] = useMemo(
+    () => bucketizeSamples(samples, bucketMs, activeWindow.startMs),
+    [samples, bucketMs, activeWindow.startMs],
+  );
+  // 分桶细于 1 分钟时，桶标签必须带上秒，否则起止看起来是同一刻。
+  const bucketHasSeconds = bucketMs < 60_000;
+
+  // 瞬时功率不受统计范围影响：优先用 now 短窗的最新采样；演示模式用
+  // adapter.sampleAt(now)。实时但短窗尚未返回时，仅当范围终点≈now 才
+  // 借用范围序列末点，避免历史自定义窗把“当前功率”显示成窗尾功率。
+  const current: PowerSample = (() => {
+    if (instantSample) return instantSample;
+    if (!live) return adapter.sampleAt(now);
+    if (
+      feed.samples &&
+      feed.samples.length > 0 &&
+      activeWindow.endMs >= now - stepMs
+    ) {
+      return feed.samples[feed.samples.length - 1]!;
+    }
+    return { t: now, cpu: null, gpu: null, machine: null };
+  })();
   const otherNow =
     current.machine != null && current.cpu != null && current.gpu != null
       ? Math.max(0, current.machine - current.cpu - current.gpu)
@@ -214,18 +289,25 @@ export function HardwarePowerPage({
     const rect = target.getBoundingClientRect();
     setTipPos({
       left: Math.max(8, Math.min(rect.left + rect.width / 2 - 100, window.innerWidth - 216)),
-      top: Math.max(8, Math.min(rect.top - 8, window.innerHeight - 190)),
+      top: Math.max(8, Math.min(rect.top - 8, window.innerHeight - 232)),
     });
     setTipIndex(index);
   }
 
-  const n = samples.length;
+  const n = buckets.length;
   const chartWidth = Math.max(680, PLOT_LEFT + n * COL_W);
   const yMax = niceMaxW(
     Math.max(
       0,
-      ...samples.flatMap((s) =>
-        [s.cpu, s.gpu, s.machine].filter((v): v is number => v != null),
+      ...buckets.flatMap((b) =>
+        [
+          b.cpu,
+          b.gpu,
+          b.machine,
+          b.peak.cpu,
+          b.peak.gpu,
+          b.peak.machine,
+        ].filter((v): v is number => v != null),
       ),
     ),
   );
@@ -235,8 +317,8 @@ export function HardwarePowerPage({
   function pathFor(key: "cpu" | "gpu" | "machine"): string {
     let d = "";
     let open = false;
-    samples.forEach((s, i) => {
-      const v = s[key];
+    buckets.forEach((b, i) => {
+      const v = b[key];
       if (v == null) {
         open = false;
         return;
@@ -248,23 +330,28 @@ export function HardwarePowerPage({
   }
 
   const tickEvery = Math.max(1, Math.ceil((n - 1) / 5) || 1);
-  const visibleTicks = samples
-    .map((s, i) => ({ s, i }))
+  const visibleTicks = buckets
+    .map((b, i) => ({ b, i }))
     .filter(({ i }) => i % tickEvery === 0 || i === n - 1);
   const srStride = Math.max(1, Math.ceil(n / 120));
-  const srRows = samples
+  const srRows = buckets
     .filter((_, i) => i % srStride === 0)
-    .map((s) => [
-      formatClock(s.t),
-      formatWatts(s.cpu),
-      formatWatts(s.gpu),
-      formatWatts(s.machine),
+    .map((b) => [
+      `${formatClock(b.startMs, bucketHasSeconds)} → ${formatClock(b.endMs, bucketHasSeconds)}`,
+      formatWatts(b.cpu),
+      formatWatts(b.gpu),
+      formatWatts(b.machine),
     ]);
 
-  const sampleLabel = (s: PowerSample) =>
-    `${formatClock(s.t)} · CPU ${formatWatts(s.cpu)} · GPU ${
-      s.gpu == null ? "缺失" : formatWatts(s.gpu)
-    } · 整机 ${formatWatts(s.machine)}`;
+  const bucketLabel = (b: PowerBucket) =>
+    `${formatClock(b.startMs, bucketHasSeconds)} → ${formatClock(
+      b.endMs,
+      bucketHasSeconds,
+    )} · CPU 均值 ${formatWatts(b.cpu)} 峰值 ${formatWatts(b.peak.cpu)} · GPU 均值 ${formatWatts(
+      b.gpu,
+    )} 峰值 ${formatWatts(b.peak.gpu)} · 整机 均值 ${formatWatts(b.machine)} 峰值 ${formatWatts(
+      b.peak.machine,
+    )} · ${b.count} 个采样`;
 
   const rangeSub =
     mode.kind === "quick" ? activeWindow.label : "自定义范围";
@@ -282,12 +369,34 @@ export function HardwarePowerPage({
           <p>
             查看 CPU、GPU 与整机的当前功率，以及所选时间段的用电量和电费。
           </p>
+          <p className="power-heading-summary" data-testid="power-summary">
+            <span className="power-heading-figure">
+              <span className="power-heading-figure-label">{rangeSub}用电量</span>
+              <span className="power-heading-figure-value">
+                {formatKwh(integrals.machine)}
+                <span className="power-heading-figure-unit"> kWh</span>
+              </span>
+            </span>
+            <span className="power-heading-figure">
+              <span className="power-heading-figure-label">
+                {live ? "电费" : "演示电费"}
+              </span>
+              <span className="power-heading-figure-value">
+                {formatCny(cost(integrals.machine), integrals.machine.complete)}
+              </span>
+            </span>
+            <span className="power-heading-figure-note">
+              电价{" "}
+              {price.error ? "—" : formatPricePerKwh(price.value)}{" "}
+              元/kWh · {formatWindowRange(activeWindow)}
+            </span>
+          </p>
         </div>
       </header>
 
       {live ? (
         <Notice tone="success">
-          已接入实时采集：Prometheus（{feed.url ?? "已配置地址"}）。以下功率、能耗与电费均来自该范围内真实采样；
+          已接入实时采集：Prometheus（{feed.url ?? "已配置地址"}）。以下功率、用电量与电费均来自该范围内真实采样；
           瞬时功率为最新采样。电费仍为本地估算，不计入成本总览的 Token 成本。
         </Notice>
       ) : feed.loading && !feed.samples && !feed.error ? (
@@ -305,7 +414,8 @@ export function HardwarePowerPage({
           <div>
             <h2 className="chart-title">统计范围与电价</h2>
             <p className="chart-desc">
-              时间范围作用于趋势、用电量和电费；当前功率不受范围影响。
+              时间范围作用于趋势、用电量和电费；当前功率不受范围影响。采样粒度越细，
+              用电量与峰值越接近真实用电曲线；曲线只按分桶均值展示。
             </p>
           </div>
         </div>
@@ -387,14 +497,15 @@ export function HardwarePowerPage({
               </p>
             )}
             <p className="power-note">
-              示例电价 {DEMO_PRICE_CNY_PER_KWH.toFixed(2)} 元/kWh，可调整；电费 =
-              范围能耗 × 电价，仅为演示。
+              默认电价 {formatPricePerKwh(DEFAULT_PRICE_CNY_PER_KWH)} 元/kWh，可调整；电费 = 范围用电量 × 电价，仅为演示。
             </p>
           </div>
         </div>
         <p className="power-window" role="status">
           当前统计范围：{formatWindowRange(activeWindow)}（共 {formatDuration(spanMs)} ·{" "}
-          {rangeSub}；{mode.kind === "quick" ? "结束于当前时间" : "按自定义起止时间统计"}）。趋势、能耗与电费均来自这一范围。
+          {rangeSub}；{mode.kind === "quick" ? "结束于当前时间" : "按自定义起止时间统计"}）。
+          趋势、用电量与电费均来自这一范围：采集粒度每 {formatDuration(stepMs)}（共{" "}
+          {samples.length} 个采样），曲线均值粒度每 {formatDuration(bucketMs)}。
         </p>
       </section>
 
@@ -422,10 +533,14 @@ export function HardwarePowerPage({
         })}
       </section>
 
-      <section className="ledger power-ledger-range" aria-label="所选范围累计用电与电费">
-        <div className="ledger-item">
-          <span className="ledger-label">整机 累计用电（{rangeSub}）</span>
-          <span className="ledger-value">
+      <section
+        className="ledger power-ledger-range power-energy-hero"
+        aria-label="所选范围累计用电与电费"
+        data-testid="power-energy-hero"
+      >
+        <div className="ledger-item power-hero-item">
+          <span className="ledger-label">整机 用电量（{rangeSub}）</span>
+          <span className="ledger-value power-hero-value">
             {formatKwh(integrals.machine)}
             <span className="ledger-unit"> kWh</span>
           </span>
@@ -435,11 +550,11 @@ export function HardwarePowerPage({
               : `${formatWindowRange(activeWindow)} · 覆盖 ${formatCoverage(integrals.machine)}`}
           </span>
         </div>
-        <div className="ledger-item">
+        <div className="ledger-item power-hero-item">
           <span className="ledger-label">
             整机 {live ? "电费" : "演示电费"}（{rangeSub}）
           </span>
-          <span className="ledger-value">
+          <span className="ledger-value power-hero-value">
             {formatCny(cost(integrals.machine), integrals.machine.complete)}
           </span>
           <span className="ledger-delta">
@@ -447,7 +562,7 @@ export function HardwarePowerPage({
               ? "电价无效，电费显示 —"
               : integrals.machine.kwh == null
                 ? `${rangeSub}无整机采样`
-                : `电价 ${price.value.toFixed(2)} 元/kWh · ${live ? "本地估算，不计入 Token 成本" : "演示值，不计入 Token 成本"}`}
+                : `电价 ${formatPricePerKwh(price.value)} 元/kWh · ${live ? "本地估算，不计入 Token 成本" : "演示值，不计入 Token 成本"}`}
           </span>
         </div>
       </section>
@@ -457,9 +572,10 @@ export function HardwarePowerPage({
           <div>
             <h2 className="chart-title">功率趋势</h2>
             <p className="chart-desc">
-              {formatWindowRange(activeWindow)} · {rangeSub} · 每{" "}
-              {formatDuration(stepMs)}一采样。颜色与线型区分设备，断开表示缺失。
-              左右滚动查看完整范围，聚焦采样点查看数值，Esc 关闭。
+              {formatWindowRange(activeWindow)} · {rangeSub} · 采集粒度每{" "}
+              {formatDuration(stepMs)}（{samples.length} 个采样），曲线每{" "}
+              {formatDuration(bucketMs)} 取一列均值（{n} 列），桶内峰值见悬停与明细表。
+              颜色与线型区分设备，断开表示缺失。左右滚动查看完整范围，聚焦数据列查看数值，Esc 关闭。
             </p>
           </div>
           <div className="chart-legend power-legend" aria-hidden="true">
@@ -480,6 +596,7 @@ export function HardwarePowerPage({
               </span>
             ))}
             <span>断开 = 缺失（—）</span>
+            <span>曲线 = {formatDuration(bucketMs)} 均值 · 峰值见悬停</span>
           </div>
         </div>
         {n < 2 ? (
@@ -531,12 +648,12 @@ export function HardwarePowerPage({
                   className="power-cols"
                   style={{ left: PLOT_LEFT, width: chartWidth - PLOT_LEFT - 8 }}
                 >
-                  {samples.map((s, i) => (
+                  {buckets.map((b, i) => (
                     <button
-                      key={s.t}
+                      key={b.t}
                       type="button"
                       className="power-col"
-                      aria-label={sampleLabel(s)}
+                      aria-label={bucketLabel(b)}
                       onMouseEnter={(e) => showTip(i, e.currentTarget)}
                       onMouseLeave={() => setTipIndex(null)}
                       onFocus={(e) => showTip(i, e.currentTarget)}
@@ -548,11 +665,22 @@ export function HardwarePowerPage({
                     >
                       {tipIndex === i && (
                         <span className="chart-tooltip" style={tipPos}>
-                          <b>{formatClock(s.t)}</b>
-                          <span>CPU {formatWatts(s.cpu)}</span>
-                          <span>GPU {s.gpu == null ? "—" : formatWatts(s.gpu)}</span>
-                          <span>整机 {formatWatts(s.machine)}</span>
+                          <b>
+                            {formatClock(b.startMs, bucketHasSeconds)} →{" "}
+                            {formatClock(b.endMs, bucketHasSeconds)}
+                          </b>
+                          <span>
+                            CPU 均值 {formatWatts(b.cpu)} · 峰值 {formatWatts(b.peak.cpu)}
+                          </span>
+                          <span>
+                            GPU 均值 {formatWatts(b.gpu)} · 峰值 {formatWatts(b.peak.gpu)}
+                          </span>
+                          <span>
+                            整机 均值 {formatWatts(b.machine)} · 峰值{" "}
+                            {formatWatts(b.peak.machine)}
+                          </span>
                           <span className="sep">
+                            {b.count} 个采样（每 {formatDuration(stepMs)}）·{" "}
                             {live ? "实时采集 · Prometheus" : "演示数据，尚未接入"}
                           </span>
                         </span>
@@ -561,19 +689,21 @@ export function HardwarePowerPage({
                   ))}
                 </div>
                 <div className="power-ticks">
-                  {visibleTicks.map(({ s, i }) => (
-                    <span key={s.t} style={{ left: Math.min(chartWidth - 70, Math.max(70, x(i))) }}>
-                      {formatClock(s.t)}
+                  {visibleTicks.map(({ b, i }) => (
+                    <span key={b.t} style={{ left: Math.min(chartWidth - 70, Math.max(70, x(i))) }}>
+                      {formatClock(b.t)}
                     </span>
                   ))}
                 </div>
               </div>
             </div>
             <div className="visually-hidden">{srTable(
-              `功率趋势（${live ? "实时采集" : "演示数据"}，每 ${formatDuration(stepMs)} 一采样${
+              `功率趋势（${live ? "实时采集" : "演示数据"}，每 ${formatDuration(
+                stepMs,
+              )} 一采样，曲线按每 ${formatDuration(bucketMs)} 取均值${
                 srStride > 1 ? `，表格每 ${srStride} 条取 1 条` : ""
               }）`,
-              ["时间", "CPU", "GPU", "整机"],
+              ["时间", "CPU 均值", "GPU 均值", "整机 均值"],
               srRows,
             )}</div>
           </>
@@ -587,6 +717,8 @@ export function HardwarePowerPage({
             <p className="chart-desc">
               整机包含 CPU、GPU 和其他硬件，各行不可重复相加。
               覆盖不足时显示已知下限。表格可左右滚动查看用电量、电费和覆盖率。
+              用电量、平均功率与峰值都取自每 {formatDuration(stepMs)} 的原始采样，
+              不受曲线分桶影响。
             </p>
           </div>
         </div>
@@ -596,7 +728,7 @@ export function HardwarePowerPage({
               <tr>
                 <th scope="col">设备</th>
                 <th scope="col">瞬时功率（当前）</th>
-                <th scope="col">区间能耗 kWh</th>
+                <th scope="col">区间用电量 kWh</th>
                 <th scope="col">区间电费</th>
                 <th scope="col">平均功率</th>
                 <th scope="col">峰值功率</th>
@@ -647,7 +779,7 @@ export function HardwarePowerPage({
         </div>
         <p className="power-note">
           “其他硬件”行是整机与两个分项在同一采样上的差值（内存、存储、风扇与电源转换损耗等），
-          任一序列缺失时无法推算，显示 —；其余各行的能耗都来自各自序列的独立积分。
+          任一序列缺失时无法推算，显示 —；其余各行的用电量都来自各自序列的独立积分。
           {live ? "电费" : "演示电费"}不会加入成本总览的 Token 成本。
         </p>
       </section>

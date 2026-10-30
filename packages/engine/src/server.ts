@@ -198,7 +198,8 @@ function wireStoreChangeEvents(
   const origIngest = store.ingestPath.bind(store);
   store.ingestPath = (filePath: string, ingestOptions?: SessionIngestOptions) => {
     try {
-      const idsBefore = new Set(store.list().map((s) => s.id));
+      // Avoid store.list() here: it runs refreshLiveFlags and can re-enter ingest.
+      const idsBefore = new Set(store.peekRootIds());
       const id = origIngest(filePath, ingestOptions);
       if (id) {
         const snap = store.get(id);
@@ -581,7 +582,7 @@ export async function startServer(opts?: {
       const untilRaw = url.searchParams.get("until");
       const daysRaw = url.searchParams.get("days");
       const source = url.searchParams.get("source");
-      if (source != null && source !== "all" && source !== "codex" && source !== "claude" && source !== "cursor" && source !== "pi") {
+      if (source != null && source !== "all" && source !== "codex" && source !== "claude" && source !== "cursor" && source !== "pi" && source !== "dsh") {
         sendJson(res, 400, { error: "invalid_source" });
         return;
       }
@@ -792,6 +793,8 @@ function collectFixtureFiles(dir: string): string[] {
     .map((f) => path.join(dir, f));
 }
 
+const STORE_DUMP_INTERVAL_MS = 60_000;
+
 async function main(): Promise<void> {
   const config = loadUserConfig();
   const store = new SessionStore();
@@ -800,6 +803,8 @@ async function main(): Promise<void> {
     "../../..",
   );
   const ingestErrors: { id: string; reason: string }[] = [];
+  /** Cursor state.vscdb paths deferred until after listen when dump is warm. */
+  let deferredVscdb: string[] = [];
 
   const fixtureDir = process.env.FIXTURE_DIR;
   if (fixtureDir) {
@@ -816,12 +821,44 @@ async function main(): Promise<void> {
       }
     }
   } else {
-    store.refresh(collectSessionFiles(config.watch_paths), {
-      onError: (filePath, err) => {
-        ingestErrors.push({ id: errorIdFromPath(filePath), reason: err.message });
-        console.error(`ingest failed ${filePath}: ${err.message}`);
-      },
-    });
+    // Warm start: restore dump first so the UI has sessions immediately.
+    // Cursor's state.vscdb is often hundreds of MB and stays dirty while the
+    // app is open — defer that re-parse until after the server is listening
+    // when a dump already has Cursor sessions.
+    const bootStarted = Date.now();
+    const restored = store.loadDump();
+    if (restored > 0) {
+      console.log(`store dump restored ${restored} session(s)`);
+    }
+    const onRefreshError = (filePath: string, err: Error) => {
+      ingestErrors.push({ id: errorIdFromPath(filePath), reason: err.message });
+      console.error(`ingest failed ${filePath}: ${err.message}`);
+    };
+    const allFiles = collectSessionFiles(config.watch_paths);
+    // Large / often-dirty sources (Cursor DB, multi‑MB live JSONL) block boot if
+    // parsed synchronously. With a warm dump, keep dump data and refresh them
+    // after listen; cold start still loads everything before listen.
+    const DEFER_BYTES = 10 * 1024 * 1024;
+    const heavyFiles: string[] = [];
+    const lightFiles: string[] = [];
+    for (const filePath of allFiles) {
+      let defer = path.basename(filePath) === "state.vscdb";
+      if (!defer && restored > 0) {
+        try {
+          defer = statSync(filePath).size >= DEFER_BYTES;
+        } catch {
+          defer = false;
+        }
+      }
+      (defer ? heavyFiles : lightFiles).push(filePath);
+    }
+    store.refresh(lightFiles, { onError: onRefreshError });
+    // Cold start with no dump: heavy sources must load before listen.
+    if (restored === 0 && heavyFiles.length > 0) {
+      store.refresh(heavyFiles, { onError: onRefreshError });
+    } else {
+      deferredVscdb = heavyFiles;
+    }
     loadImportedSessions(
       store,
       path.join(tokenAnalyserHome(), "imports"),
@@ -829,6 +866,14 @@ async function main(): Promise<void> {
         ingestErrors.push({ id: errorIdFromPath(filePath), reason: err.message });
         console.error(`import ingest failed ${filePath}: ${err.message}`);
       },
+    );
+    // Do not force a synchronous 100MB+ dump on the listen path; refresh
+    // scheduleDump() persists shortly after, and exit hooks still dump.
+    console.log(
+      `startup session load (pre-listen): ${Date.now() - bootStarted}ms` +
+        (deferredVscdb.length > 0
+          ? ` · deferring ${deferredVscdb.length} heavy source refresh`
+          : ""),
     );
   }
 
@@ -852,11 +897,52 @@ async function main(): Promise<void> {
   console.log(`token-analyser engine listening on ${url}`);
 
   if (!fixtureDir) {
+    if (deferredVscdb.length > 0) {
+      const heavyFiles = deferredVscdb;
+      const heavyStarted = Date.now();
+      // Wait for the first UI /sessions paint, then refresh one heavy file at a
+      // time so a 790MB state.vscdb parse cannot stall the HTTP event loop for
+      // the whole batch.
+      const refreshNext = (index: number): void => {
+        if (index >= heavyFiles.length) {
+          try {
+            store.dump();
+          } catch (err) {
+            console.error(
+              `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+          console.log(
+            `heavy source refresh finished in ${Date.now() - heavyStarted}ms` +
+              ` (${heavyFiles.length} file(s))`,
+          );
+          return;
+        }
+        const filePath = heavyFiles[index]!;
+        try {
+          store.ingestPath(filePath);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          onIngestError(errorIdFromPath(filePath), reason);
+          console.error(`ingest failed ${filePath}: ${reason}`);
+        }
+        setTimeout(() => refreshNext(index + 1), 0);
+      };
+      setTimeout(() => refreshNext(0), 1_500);
+    }
     // Qwen publishes new rates without warning the local ledger, so refresh
     // them automatically and keep every estimate on the dated official card.
     startQwenPriceAutoRefresh(store, {
-      onUpdate: ({ asOf, modelCount }) =>
-        console.log(`qwen prices refreshed: ${modelCount} models (${asOf})`),
+      onUpdate: ({ asOf, modelCount }) => {
+        console.log(`qwen prices refreshed: ${modelCount} models (${asOf})`);
+        try {
+          store.dump();
+        } catch (err) {
+          console.error(
+            `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
       onError: (reason) => console.error(`qwen price refresh failed: ${reason}`),
     });
 
@@ -867,6 +953,30 @@ async function main(): Promise<void> {
       recursive: process.platform !== "darwin",
       onError: onIngestError,
     });
+
+    const dumpTimer = setInterval(() => {
+      try {
+        store.dump();
+      } catch (err) {
+        console.error(
+          `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }, STORE_DUMP_INTERVAL_MS);
+    dumpTimer.unref?.();
+
+    const dumpAndExit = (code: number) => {
+      try {
+        store.dump();
+      } catch (err) {
+        console.error(
+          `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      process.exit(code);
+    };
+    process.once("SIGINT", () => dumpAndExit(0));
+    process.once("SIGTERM", () => dumpAndExit(0));
   }
 }
 

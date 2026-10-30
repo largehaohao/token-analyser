@@ -27,32 +27,31 @@ export function SourceSwitcher({
   const label = SESSION_SOURCES.find((item) => item.id === source)!.label;
   return (
     <section className="source-toolbar" aria-label="会话来源筛选">
-      <div className="source-toolbar-controls">
-        <span className="source-toolbar-label">来源</span>
-        <div
-          className="segmented-control source-switch"
-          role="group"
+      <label className="filter-field source-filter-field">
+        <span className="filter-label">来源</span>
+        <select
+          className="source-select"
           aria-label="会话来源"
+          value={source}
+          onChange={(event) =>
+            onChange(event.target.value as SessionSourceFilter)
+          }
         >
-          {SESSION_SOURCES.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              aria-label={item.label}
-              aria-pressed={source === item.id}
-              className={source === item.id ? "active" : ""}
-              title={`${item.label} · 全部时间已发现 ${loaded ? counts[item.id] : "…"} 个会话`}
-              onClick={() => onChange(item.id)}
-            >
-              {item.label}
-              <span className="source-count" aria-hidden="true">
-                {loaded ? counts[item.id] : "—"}
-              </span>
-            </button>
-          ))}
-        </div>
+          {SESSION_SOURCES.map((item) => {
+            const count = loaded ? counts[item.id] : "—";
+            return (
+              <option
+                key={item.id}
+                value={item.id}
+                title={`${item.label} · 全部时间已发现 ${count} 个会话`}
+              >
+                {item.label} {count}
+              </option>
+            );
+          })}
+        </select>
         <span className="source-count-caption">全部时间的会话数</span>
-      </div>
+      </label>
       {loaded && source !== "all" && counts[source] === 0 && (
         <p className="source-range-notice" role="status">
           {sourceEmptyCopy(source)}
