@@ -811,7 +811,8 @@ describe("buildOverview", () => {
 
     expect(overview.performanceDistribution).toEqual({
       ttft: [1, 1, 0, 0, 1],
-      tps: [1, 0, 0, 1, 0],
+      // 100 tok / 2 s = 50 → 40–50 桶；40 tok / 4 s = 10 → ≤ 40 桶。
+      tps: [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       sampleCount: 3,
     });
   });

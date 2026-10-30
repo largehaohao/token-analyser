@@ -13,6 +13,7 @@ export function defaultSessionPaths(): string[] {
     path.join(process.env.CODEX_HOME ?? path.join(home, ".codex"), "sessions"),
     path.join(process.env.CLAUDE_CONFIG_DIR ?? path.join(home, ".claude"), "projects"),
     path.join(process.env.PI_CODING_AGENT_DIR ?? path.join(home, ".pi/agent"), "sessions"),
+    path.join(process.env.DSH_HOME ?? path.join(home, ".dsh"), "sessions"),
     path.join(home, ".cursor/projects"), path.join(home, ".cursor/chats"),
     path.join(cursorUser, "globalStorage/state.vscdb"),
     path.join(cursorUser, "workspaceStorage"),
@@ -20,7 +21,7 @@ export function defaultSessionPaths(): string[] {
 }
 
 export function isSessionFile(name: string): boolean {
-  return /\.(jsonl|ndjson)$/i.test(name) || path.basename(name) === "state.vscdb";
+  return /\.(jsonl|ndjson)(\.zstd)?$/i.test(name) || path.basename(name) === "state.vscdb";
 }
 
 export function collectSessionFiles(roots: string[]): string[] {

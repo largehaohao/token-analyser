@@ -16,7 +16,7 @@ import {
 import { ModelFilterSelect } from "./ModelFilterSelect";
 import { PerformanceMetrics } from "./PerformanceMetrics";
 import { RateLimits } from "./RateLimits";
-import { arrayHistogram, TPS_LABELS, TTFT_LABELS } from "./perf-buckets";
+import { arrayHistogram, TPS_LABELS, TPS_TICKS, TTFT_LABELS, TTFT_TICKS } from "./perf-buckets";
 import { HistogramPair } from "./Histogram";
 import { sourceLabel } from "./format";
 import { useModelFilteredOverview } from "./useModelFilteredOverview";
@@ -422,8 +422,8 @@ export function PerformancePanel({
       <PerformanceMetrics performance={overview.performance} />
       {dist ? (
         <HistogramPair
-          ttft={arrayHistogram(TTFT_LABELS, dist.ttft, "s", dist.sampleCount ?? overview.performance?.taskCount ?? overview.turnCount)}
-          speed={arrayHistogram(TPS_LABELS, dist.tps, " tok/s", dist.sampleCount ?? overview.performance?.taskCount ?? overview.turnCount)}
+          ttft={arrayHistogram(TTFT_LABELS, dist.ttft, "s", dist.sampleCount ?? overview.performance?.taskCount ?? overview.turnCount, TTFT_TICKS)}
+          speed={arrayHistogram(TPS_LABELS, dist.tps, " tok/s", dist.sampleCount ?? overview.performance?.taskCount ?? overview.turnCount, TPS_TICKS)}
         />
       ) : (
         <p className="chart-desc">

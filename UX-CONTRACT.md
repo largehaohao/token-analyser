@@ -30,7 +30,7 @@ The older brief's classification list is refined by the maintained README and cu
 | Analysis surface | `LedgerStrip.tsx`, `TrendPanel.tsx`, `OverviewPanels.tsx`, `Histogram.tsx`, `perf-buckets.ts`, `session-range.ts` | Engine overview payload; this contract | Ledger figures with comparison / trend / composition / ranked list / histograms / rail | Fixed-bucket tests, comparison-window tests, chart `srTable`, keyboard tooltip tests |
 | Performance     | `PerformanceMetrics.tsx`, `ContextMeter.tsx`, `performance.ts`        | This contract; session API      | Agent-task basis / per-request basis / not recorded  | Basis label, unavailable-reason, context-meter tests   |
 
-No select/listbox, date picker, bulk table selection, toast, modal, authentication, or delete capability is present. Segmented buttons are not listboxes; disclosure and inline feedback do not need a modal or toast system.
+No custom select/listbox or date-picker popup, bulk table selection, toast, modal, authentication, or delete capability is present. The hardware electricity preview uses native datetime-local inputs. Segmented buttons are not listboxes; disclosure and inline feedback do not need a modal or toast system.
 
 ## Measurement basis
 
@@ -40,9 +40,22 @@ No select/listbox, date picker, bulk table selection, toast, modal, authenticati
   the tok/s heading follows the basis (`任务平均 tok/s` / `请求平均 tok/s`).
 - Timing is only ever read from recorded fields. Gaps between log timestamps are
   never presented as duration, TTFT, or speed.
+- Timing a source does not log is added at the source, never reconstructed here:
+  pi's `request_timing` entries are measured inside the provider request by
+  `integrations/pi/request-timing.ts`, so they enter the request-basis summary
+  like any recorded field, and sessions without them keep
+  `日志未记录首 token 时间` and name the extension that records it.
+- The tok/s denominator is stated per sample. A request that recorded TTFT
+  divides its output by the decode window and is labelled
+  `解码时长（请求时长 − 首 token 等待）`; a request that logged only a duration
+  divides by the whole window and is labelled `请求总耗时（含首 token 等待）`; a
+  source-recorded speed says `采用日志记录的本次请求输出速度`. The two
+  denominators are never presented as one measurement.
 - A missing measurement keeps its `—` value and states why
   (`日志未记录首 token 时间`, `该来源未记录请求时长或输出 Token 数`).
-  `0.00` is shown only for a recorded zero.
+  `0.00` is shown only for a recorded zero. A recorded first-token time that
+  exceeds the logged request window stays visible, and that request's tok/s is
+  `—` because no decode window can be derived from the two numbers.
 - Cursor's context meter renders in **上下文与会话信息** as a context size with
   its category breakdown, labelled as a source-recorded measurement. It never
   enters token totals, cost, cache-hit rates, or the performance panel.
@@ -88,7 +101,7 @@ No select/listbox, date picker, bulk table selection, toast, modal, authenticati
 
 - The API returns the complete session summary list. Preserve the existing explicit Load more strategy: 100 sessions or 100 turns per batch. Do not infer server paging or an incomplete dataset.
 - Session queries filter locally, commit after IME composition, and clear immediately. Empty input is distinct from no results. A clear action returns focus to the search input.
-- **Privacy override to URL defaults:** session IDs, search queries (which can contain local paths), list limit, and scroll position stay in tab-scoped sessionStorage. They never enter URLs or persistent localStorage. Range and active view are restored per tab; only `#overview` and `#sessions` appear in route URLs. Display unit uses the existing non-sensitive local preference.
+- **Privacy override to URL defaults:** session IDs, search queries (which can contain local paths), list limit, and scroll position stay in tab-scoped sessionStorage. They never enter URLs or persistent localStorage. Range and active view are restored per tab; only `#overview`, `#sessions`, and `#power` appear in route URLs. Display unit uses the existing non-sensitive local preference.
 - Browser Back restores the route, selection, and range. Returning to sessions restores its query, batch limit, and scroll offset. Changing a query resets the batch; a selected session outside the query remains readable and is explicitly explained.
 - Below 780px, the filter toolbar starts collapsed with the current source, range and unit visible in its summary. The filter button exposes its expanded state and controls relationship.
 - Below 780px, list and detail are separate panes: selecting a session opens and focuses detail; returning restores the selected list item. The search shortcut reveals the list first. A selected item outside the search results remains accessible through “查看当前会话”. This presentation state stays local to the current mount.
@@ -108,7 +121,7 @@ No select/listbox, date picker, bulk table selection, toast, modal, authenticati
 
 ## Navigation and responsive behavior
 
-Top-level navigation uses real hash links with `aria-current`. Route document title policy: `成本总览 · Token Analyser` or `会话明细 · Token Analyser`; failures use an honest route label and never leak prompts or local paths into the title. Session selection is a button action inside the current route. A skip link targets the current main region.
+Top-level navigation uses real hash links with `aria-current`. Route document title policy: `成本总览 · Token Analyser`, `会话明细 · Token Analyser`, or `硬件用电 · Token Analyser`; failures use an honest route label and never leak prompts or local paths into the title. Session selection is a button action inside the current route. A skip link targets the current main region.
 
 The document scrolls naturally. On desktop the session selector can scroll independently; on narrow screens it remains a bounded region above the detail. The turn table scrolls horizontally with an explicit cue and vertically within its own frame. Full evidence remains reachable at 360px and reduced motion. The narrow header is not sticky, so it cannot cover the focused field or evidence.
 
@@ -135,3 +148,25 @@ There are no unsaved text-edit forms, sensitive-value fields, clipboard operatio
 Required checks: web TypeScript, engine and web unit tests, production build, Playwright against isolated fixture ports, token drift check, DESIGN.md lint, and the Frontend Design Premium strict audit. See `premium-ui.json` for executable project checks.
 
 Compare overview and session detail in the existing dark theme at desktop and 390px. Exercise normal, loading, zero data, no matches, read failure/retry, stale requests, import validation/single-flight/success/failure, toggle failure, keyboard, Back/reload, long text, reduced motion, and global scrollbar styles. No Japanese market, dropdown popup, auth, delete, or payment verification is applicable.
+
+## Hardware electricity preview
+
+`HardwarePowerPage.tsx` owns `#power`; `hardware-power.ts` owns deterministic demo samples,
+range validation, trapezoidal energy integration and CNY cost. It uses no hardware
+network requests. Every reading remains labelled as demo data, and electricity
+never enters Token cost totals. CPU and GPU are components of the whole-machine
+reading, not additional totals. Range controls update trends, energy and cost;
+current watts remain current. Custom ranges are limited to 31 days. Missing
+samples interrupt integration, incomplete energy/cost is labelled as a lower
+bound, and measured zero remains distinct from missing. The price field starts
+at 0.6629 CNY/kWh, is editable, and is echoed at full precision (0.6629, not
+0.66) beside the cost; whole-machine energy and cost are the page's primary
+readings and repeat as a summary under the page title. Sampling adapts to the
+range (15 s, 1 min, 10 min, 30 min, capped at ~2 000 samples per request) and
+the visible curve only aggregates those samples into per-bucket means; energy,
+average and peak stay on the raw grid. The status line, chart description,
+tooltip and screen-reader table name the sampling grid, the bucket width, the
+bucket window and the sample count, so an averaged curve is never presented as
+raw readings, and sub-minute buckets show seconds in their labels. Native date inputs and
+price errors are labelled; charts have a screen-reader table and focusable data
+points; the statistics table has a keyboard-accessible horizontal scroll region.

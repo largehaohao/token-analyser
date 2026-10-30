@@ -6,7 +6,7 @@ import {
 import { SESSION_PAGE_SIZE } from "./session-page";
 import { normalizeSourceFilter, type SessionSourceFilter } from "./session-source";
 
-export type SessionNavigationView = "overview" | "sessions";
+export type SessionNavigationView = "overview" | "sessions" | "power";
 
 export type SessionNavigation = {
   view: SessionNavigationView;
@@ -47,7 +47,10 @@ export function readSessionNavigation(): SessionNavigation {
     if (parsed && typeof parsed === "object") {
       const record = parsed as Record<string, unknown>;
       navigation = {
-        view: record.view === "sessions" ? "sessions" : "overview",
+        view:
+          record.view === "sessions" || record.view === "power"
+            ? record.view
+            : "overview",
         selectedId:
           typeof record.selectedId === "string" && record.selectedId.length > 0
             ? record.selectedId
@@ -62,7 +65,7 @@ export function readSessionNavigation(): SessionNavigation {
     // Corrupt history/storage must not prevent navigation.
   }
   const hash = typeof window === "undefined" ? "" : window.location.hash;
-  if (hash === "#overview" || hash === "#sessions")
+  if (hash === "#overview" || hash === "#sessions" || hash === "#power")
     navigation = {
       ...navigation,
       view: hash.slice(1) as SessionNavigationView,

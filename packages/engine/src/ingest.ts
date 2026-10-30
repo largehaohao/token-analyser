@@ -13,6 +13,7 @@ import { effectiveRateCard } from "./rate-card.ts";
 import { loadApiPrices } from "./native-pricing.ts";
 import { detectSource } from "./session-adapters.ts";
 import { readCursorSessions } from "./cursor-store.ts";
+import { isZstdSessionFile, readZstdJsonlFile } from "./zstd-jsonl.ts";
 
 export const READ_CHUNK_BYTES = 64 * 1024;
 
@@ -154,6 +155,14 @@ export function ingestFile(
   let events: RolloutLine[];
   let parse_errors: ParseError[];
   let builder: LedgerBuilder | undefined;
+  // DSH session files are concatenated zstd frames; always reread the whole file.
+  if (isZstdSessionFile(filePath)) {
+    liveReadStates.delete(filePath);
+    ({ events, parse_errors } = readZstdJsonlFile(filePath));
+    const snapshot = analyseSession({ events, path: filePath, live, parse_errors });
+    if (!live) writeCache(key, snapshot, opts?.cacheHome);
+    return snapshot;
+  }
   if (live && opts?.allowAppend) {
     const previous = liveReadStates.get(filePath);
     const canAppend =

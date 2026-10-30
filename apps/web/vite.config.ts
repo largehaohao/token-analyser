@@ -16,6 +16,7 @@ export default defineConfig({
     proxy: {
       "/sessions": apiTarget,
       "/overview": apiTarget,
+      "/power": apiTarget,
       "/stream": { target: apiTarget, ws: false },
       "/import": apiTarget,
       "/pricing": apiTarget,

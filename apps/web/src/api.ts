@@ -11,7 +11,7 @@ export type Cost = {
   unmeasured?: number;
 };
 
-export type SessionSource = "codex" | "claude" | "cursor" | "pi";
+export type SessionSource = "codex" | "claude" | "cursor" | "pi" | "dsh";
 
 export type PerformanceBasis = "task" | "request";
 
@@ -29,7 +29,7 @@ export type RequestPerformance = {
   ttftMs: number | null;
   durationMs: number | null;
   outputTokensPerSecond: number | null;
-  speedSource: "recorded" | "duration" | null;
+  speedSource: "recorded" | "decode" | "duration" | null;
 };
 
 export type WasteToggleId =
@@ -286,17 +286,63 @@ async function requestJson<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const external = init?.signal ?? null;
+  const onExternalAbort = () => controller.abort();
+  if (external) {
+    if (external.aborted) controller.abort();
+    else external.addEventListener("abort", onExternalAbort);
+  }
   try {
     return await parseJson<T>(
       await fetch(url, { ...init, signal: controller.signal }),
     );
   } catch (error) {
-    if (controller.signal.aborted)
+    // 外部主动取消（切范围/卸载）原样抛出 AbortError，由调用方静默忽略；
+    // 只有内部计时器触发的取消才是“请求超时”。
+    if (controller.signal.aborted && !(external && external.aborted))
       throw new Error("请求超时，请确认本地引擎正在运行后重试。");
     throw error;
   } finally {
     clearTimeout(timeout);
+    if (external) external.removeEventListener("abort", onExternalAbort);
   }
+}
+
+export type PowerSampleDto = {
+  t: number;
+  cpu: number | null;
+  gpu: number | null;
+  machine: number | null;
+};
+
+export type PowerFeed = {
+  source: "prometheus";
+  connected: boolean;
+  url?: string;
+  error?: string;
+  startMs: number;
+  endMs: number;
+  stepMs: number;
+  samples: PowerSampleDto[];
+};
+
+/** 硬件用电：读取所选范围的功率采样；采集源不可达时 connected=false。 */
+export async function getPowerFeed(
+  startMs: number,
+  endMs: number,
+  stepMs: number,
+  signal?: AbortSignal,
+): Promise<PowerFeed> {
+  const params = new URLSearchParams({
+    start: String(Math.round(startMs)),
+    end: String(Math.round(endMs)),
+    step: String(Math.round(stepMs)),
+  });
+  return requestJson<PowerFeed>(
+    `/power?${params.toString()}`,
+    { signal },
+    20000,
+  );
 }
 
 export async function listSessions(): Promise<SessionListItem[]> {
@@ -435,7 +481,7 @@ export async function importNdjson(
       throw new Error("文件超过引擎的导入上限，请选择较小的记录。");
     if (status && status < 500)
       throw new Error(
-        "无法识别会话记录，请确认文件来自 Codex、Claude Code、Cursor 或 pi，且包含有效的 JSONL 内容。",
+        "无法识别会话记录，请确认文件来自 Codex、Claude Code、Cursor、pi 或 DeepSeek Harness，且包含有效的 JSONL 内容。",
       );
     throw new Error(
       "导入结果尚未确认。请先检查会话列表，确认未导入后再重新选择文件。",

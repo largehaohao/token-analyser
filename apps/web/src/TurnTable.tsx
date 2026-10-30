@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import type { Turn } from "./api";
+import type { SessionSource, Turn } from "./api";
 import { LABEL_CHIP, treeAppearance } from "./buckets";
 import {
   formatCostTokens,
@@ -28,6 +28,8 @@ type Props = {
   highlightNonce?: number;
   resetKey: string;
   scopeLabel?: string;
+  /** Sharpens the missing-TTFT note where one source can record more. */
+  source?: SessionSource;
 };
 
 function excerpt(text: string, max: number): string {
@@ -56,6 +58,7 @@ export function TurnTable({
   highlightNonce = 0,
   resetKey,
   scopeLabel,
+  source,
 }: Props) {
   const { unit } = useUnit();
   const filtered = useMemo(
@@ -140,8 +143,8 @@ export function TurnTable({
                   <th scope="col" className="num-col">
                     {unit === "tokens" ? "Token 用量" : formatUnitSuffix(unit)}
                   </th>
-                  <th scope="col" className="turn-performance num-col" title="本次请求到首 token 的等待时间">TTFT (s)</th>
-                  <th scope="col" className="turn-performance num-col" title="本次请求的输出 token 速度">tok/s</th>
+                  <th scope="col" className="turn-performance num-col" title="本次请求发出到首 token 的等待时间">TTFT (s)</th>
+                  <th scope="col" className="turn-performance num-col" title="本次请求的输出 token 速度；有 TTFT 时按解码时长（请求时长 − TTFT）计算">tok/s</th>
                 </tr>
               </thead>
               <tbody>
@@ -155,10 +158,17 @@ export function TurnTable({
                     t.cost.uncached_input + t.cost.cached_input;
                   const ttft = formatPerformanceNumber(performance?.ttftMs == null ? null : performance.ttftMs / 1000);
                   const speed = formatPerformanceNumber(performance?.outputTokensPerSecond);
-                  const speedNote = performance?.speedSource === "duration"
-                    ? "本次请求输出 token ÷ 请求总耗时（含首 token 等待）"
-                    : performance?.speedSource === "recorded" ? "采用日志记录的本次请求输出速度"
-                      : "日志未记录本次请求的输出速度或完整耗时";
+                  const speedNote = performance?.speedSource === "decode"
+                    ? "本次请求输出 token ÷ 解码时长（请求时长 − 首 token 等待）"
+                    : performance?.speedSource === "duration"
+                      ? "本次请求输出 token ÷ 请求总耗时（含首 token 等待）"
+                      : performance?.speedSource === "recorded" ? "采用日志记录的本次请求输出速度"
+                        : "日志未记录本次请求的输出速度或完整耗时";
+                  const ttftNote = performance?.ttftMs == null
+                    ? source === "pi"
+                      ? "该 pi 会话未记录首 token 时间 · 启用 request-timing 扩展后新请求会记录"
+                      : "日志未记录本次请求的首 token 等待时间"
+                    : `${performance.ttftMs.toLocaleString("en-US")} ms`;
                   return (
                     <Fragment key={t.id}>
                       <tr
@@ -295,7 +305,7 @@ export function TurnTable({
                             ? formatCostTokens(t.cost)
                             : formatCost(t.cost, unit)}
                         </td>
-                        <td className="turn-performance num-col" title={performance?.ttftMs == null ? "日志未记录本次请求的首 token 等待时间" : `${performance.ttftMs.toLocaleString("en-US")} ms`}>
+                        <td className="turn-performance num-col" title={ttftNote}>
                           {ttft}
                         </td>
                         <td className="turn-performance num-col" title={speedNote}>{speed}</td>
@@ -311,11 +321,11 @@ export function TurnTable({
                               {t.effort ? ` · ${t.effort}` : ""}
                             </p>
                             <dl className="turn-detail-metrics" aria-label="本次 LLM 请求性能">
-                              <div><dt>TTFT</dt><dd title="本次请求到首 token 的等待时间">{ttft} s</dd></div>
+                              <div><dt>TTFT</dt><dd title={ttftNote}>{ttft} s</dd></div>
                               <div><dt>tok/s</dt><dd title={speedNote}>{speed} tok/s</dd></div>
                             </dl>
                             <p className="turn-evidence-meta">
-                              {performance?.ttftMs == null ? "日志未记录本次请求的 TTFT。" : "TTFT 为本次请求到首 token 的等待时间。"}
+                              {performance?.ttftMs == null ? "日志未记录本次请求的 TTFT。" : "TTFT 为本次请求发出到首 token 的等待时间。"}
                               {speedNote}。
                             </p>
                             <dl

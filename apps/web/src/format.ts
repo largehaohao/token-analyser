@@ -242,7 +242,13 @@ export function disclaimer(rateCardAsOf: string, apiPricesAsOf?: string): string
 }
 
 export function sourceLabel(source: SessionSource = "codex"): string {
-  return { codex: "Codex", claude: "Claude Code", cursor: "Cursor", pi: "pi" }[source];
+  return {
+    codex: "Codex",
+    claude: "Claude Code",
+    cursor: "Cursor",
+    pi: "pi",
+    dsh: "DeepSeek Harness",
+  }[source];
 }
 
 export function formatCostTokens(cost: Cost): string {

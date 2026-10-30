@@ -20,6 +20,17 @@ import {
   type WasteToggleId,
 } from "./types.ts";
 import { buildOverview, type Overview, type OverviewOptions } from "./overview.ts";
+import {
+  fileFingerprint,
+  fingerprintsMatch,
+  readStoreDump,
+  STORE_DUMP_VERSION,
+  writeStoreDump,
+  type FileFingerprint,
+} from "./store-dump.ts";
+
+/** Coalesce dump writes after ingest bursts so a crash loses at most ~2s. */
+const DUMP_DEBOUNCE_MS = 2_000;
 
 function latestActivityIso(session: SessionSnapshot): string | null {
   let best = session.lastEventAt ?? session.startedAt;
@@ -109,13 +120,45 @@ export class SessionStore {
   private sources = new Map<string, SessionSnapshot>();
   private snapshots = new Map<string, SessionSnapshot>();
   private toggles = new Map<string, Record<WasteToggleId, boolean>>();
+  /** Resolved path → fingerprint of the file used for the current source(s). */
+  private fingerprints = new Map<string, FileFingerprint>();
+  /** Resolved path → session ids (avoids O(sources) scans during refresh). */
+  private sourcesByPath = new Map<string, string[]>();
   private cacheHome?: string;
+  private dumpTimer: ReturnType<typeof setTimeout> | undefined;
+  /** True after a mutation that should be persisted to the store dump. */
+  private dumpDirty = false;
 
   constructor(opts?: SessionStoreOptions) {
     if (opts?.cacheDir) {
       this.cacheHome = path.dirname(opts.cacheDir);
     }
-    pruneStaleCache(this.cacheHome, pricingCacheContext());
+    // Prune is O(cache files × JSON parse). Defer so startup loadDump/refresh
+    // is not blocked on reading every per-file cache entry.
+    const home = this.cacheHome;
+    const context = pricingCacheContext();
+    setTimeout(() => {
+      try {
+        pruneStaleCache(home, context);
+      } catch {
+        // Best-effort cleanup; ingest still works without it.
+      }
+    }, 0).unref?.();
+  }
+
+  /** Queue a dump soon after mutations; coalesces watcher append storms. */
+  scheduleDump(): void {
+    this.dumpDirty = true;
+    if (this.dumpTimer) clearTimeout(this.dumpTimer);
+    this.dumpTimer = setTimeout(() => {
+      this.dumpTimer = undefined;
+      try {
+        this.dump();
+      } catch {
+        // Dump is best-effort; the next interval/exit still retries.
+      }
+    }, DUMP_DEBOUNCE_MS);
+    this.dumpTimer.unref?.();
   }
 
   private rebuildAll(): void {
@@ -155,6 +198,135 @@ export class SessionStore {
     this.snapshots = rebuilt;
   }
 
+  private reindexPaths(): void {
+    this.sourcesByPath.clear();
+    for (const [id, source] of this.sources) {
+      const resolved = path.resolve(source.path);
+      const ids = this.sourcesByPath.get(resolved);
+      if (ids) ids.push(id);
+      else this.sourcesByPath.set(resolved, [id]);
+    }
+  }
+
+  private sourcesForPath(resolved: string): SessionSnapshot[] {
+    const ids = this.sourcesByPath.get(resolved);
+    if (!ids || ids.length === 0) return [];
+    const out: SessionSnapshot[] = [];
+    for (const id of ids) {
+      const snap = this.sources.get(id);
+      if (snap) out.push(snap);
+    }
+    return out;
+  }
+
+  private rememberFingerprint(filePath: string): void {
+    try {
+      this.fingerprints.set(path.resolve(filePath), fileFingerprint(filePath));
+    } catch {
+      this.fingerprints.delete(path.resolve(filePath));
+    }
+  }
+
+  /**
+   * Load a previous dump of parsed sessions. Call before `refresh` so unchanged
+   * historical files can be reused without re-parsing.
+   */
+  loadDump(): number {
+    const dump = readStoreDump(this.cacheHome, pricingCacheContext());
+    if (!dump) return 0;
+    this.sources.clear();
+    this.toggles.clear();
+    this.fingerprints.clear();
+    for (const snap of dump.sources) {
+      if (!snap?.id || typeof snap.path !== "string") continue;
+      this.sources.set(snap.id, { ...snap, children: [] });
+    }
+    for (const [id, toggles] of Object.entries(dump.toggles)) {
+      if (this.sources.has(id)) this.toggles.set(id, { ...toggles });
+    }
+    for (const [filePath, fingerprint] of Object.entries(dump.fingerprints)) {
+      this.fingerprints.set(path.resolve(filePath), fingerprint);
+    }
+    this.reindexPaths();
+    this.rebuildAll();
+    return this.sources.size;
+  }
+
+  /** Persist parsed sources so the next startup can skip unchanged files. */
+  dump(opts?: { force?: boolean }): void {
+    if (this.dumpTimer) {
+      clearTimeout(this.dumpTimer);
+      this.dumpTimer = undefined;
+    }
+    if (!opts?.force && !this.dumpDirty) return;
+    const fingerprints: Record<string, FileFingerprint> = {};
+    for (const [filePath, fingerprint] of this.fingerprints) {
+      fingerprints[filePath] = fingerprint;
+    }
+    const toggles: Record<string, Record<WasteToggleId, boolean>> = {};
+    for (const [id, value] of this.toggles) {
+      toggles[id] = { ...value };
+    }
+    writeStoreDump(
+      {
+        version: STORE_DUMP_VERSION,
+        pricingContext: pricingCacheContext(),
+        sources: [...this.sources.values()].map((snap) => ({
+          ...snap,
+          children: [],
+        })),
+        toggles,
+        fingerprints,
+      },
+      this.cacheHome,
+    );
+    this.dumpDirty = false;
+  }
+
+  private keepSource(
+    snap: SessionSnapshot,
+    nextSources: Map<string, SessionSnapshot>,
+    nextToggles: Map<string, Record<WasteToggleId, boolean>>,
+    live?: boolean,
+  ): void {
+    // Prefer Cursor's state.vscdb over agent-transcript JSONL, including when
+    // the vscdb row only exists in the dump and this refresh never opens it
+    // (heavy .vscdb paths are deferred until after listen).
+    const incumbent =
+      nextSources.get(snap.id) ?? this.sources.get(snap.id);
+    if (incumbent?.path.endsWith(".vscdb") && !snap.path.endsWith(".vscdb")) {
+      return;
+    }
+    nextSources.set(snap.id, {
+      ...snap,
+      children: [],
+      ...(live != null ? { live } : {}),
+    });
+    nextToggles.set(snap.id, this.toggles.get(snap.id) ?? { ...snap.toggles });
+  }
+
+  private liveReingestPending = new Set<string>();
+  private liveReingestTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Re-read after a live→historical flip without blocking list()/get(). */
+  private scheduleLiveReingest(filePath: string): void {
+    this.liveReingestPending.add(filePath);
+    if (this.liveReingestTimer) return;
+    this.liveReingestTimer = setTimeout(() => {
+      this.liveReingestTimer = undefined;
+      const paths = [...this.liveReingestPending];
+      this.liveReingestPending.clear();
+      for (const pendingPath of paths) {
+        try {
+          this.ingestPath(pendingPath);
+        } catch {
+          // Watcher / next list will retry; never block the request path.
+        }
+      }
+    }, 250);
+    this.liveReingestTimer.unref?.();
+  }
+
   private refreshLiveFlags(): void {
     pruneInactiveLiveReadStates();
     let changed = false;
@@ -171,45 +343,103 @@ export class SessionStore {
         // Keep the previous state when a file is being replaced.
       }
       if (live !== source.live) {
+        let bytes = 0;
         try {
-          // A watcher event can be missed just before a session becomes
-          // historical. Re-read once on the transition so the final events
-          // are not stranded in an empty or partial in-memory snapshot.
-          const refreshed = ingestFile(source.path, {
-            cacheHome: this.cacheHome,
-          });
-          const currentToggles = this.toggles.get(id);
-          if (refreshed.id !== id) {
-            this.sources.delete(id);
-            this.toggles.delete(id);
-            if (currentToggles) this.toggles.set(refreshed.id, currentToggles);
-          }
-          if (!this.toggles.has(refreshed.id)) {
-            this.toggles.set(refreshed.id, { ...refreshed.toggles });
-          }
-          this.sources.set(refreshed.id, { ...refreshed, children: [] });
-          changed = true;
-          continue;
+          bytes = statSync(source.path).size;
         } catch {
-          // Keep the live transition even if a file is temporarily unreadable.
+          // Unreadable — still flip the flag below.
+        }
+        // Small files: re-read inline (covers the live→historical final-events
+        // case in tests). Large files: flip the flag now and re-parse async so
+        // /sessions is not blocked on multi-MB JSONL.
+        if (bytes > 0 && bytes < 1_000_000) {
+          try {
+            const refreshed = ingestFile(source.path, {
+              cacheHome: this.cacheHome,
+            });
+            const currentToggles = this.toggles.get(id);
+            if (refreshed.id !== id) {
+              this.sources.delete(id);
+              this.toggles.delete(id);
+              if (currentToggles) this.toggles.set(refreshed.id, currentToggles);
+            }
+            if (!this.toggles.has(refreshed.id)) {
+              this.toggles.set(refreshed.id, { ...refreshed.toggles });
+            }
+            this.sources.set(refreshed.id, { ...refreshed, children: [] });
+            this.rememberFingerprint(refreshed.path);
+            changed = true;
+            continue;
+          } catch {
+            // Keep the live transition even if a file is temporarily unreadable.
+          }
         }
         this.sources.set(id, { ...source, live });
         changed = true;
+        if (bytes >= 1_000_000) this.scheduleLiveReingest(source.path);
       }
     }
-    if (changed) this.rebuildAll();
+    if (changed) {
+      this.reindexPaths();
+      this.rebuildAll();
+    }
   }
 
   refresh(
     paths: string[],
     opts?: { onError?: (filePath: string, err: Error) => void },
   ): void {
-    const ingested: SessionSnapshot[] = [];
+    const nextSources = new Map<string, SessionSnapshot>();
+    const nextToggles = new Map<string, Record<WasteToggleId, boolean>>();
+    const nextFingerprints = new Map<string, FileFingerprint>();
+    const refreshedPaths = new Set<string>();
+    let mutated = false;
+
     for (const p of paths) {
       if (!isSessionFile(p)) continue;
+      const resolved = path.resolve(p);
+      refreshedPaths.add(resolved);
       try {
-        ingested.push(...ingestSessions(p, { cacheHome: this.cacheHome }));
+        const current = fileFingerprint(p);
+        const previous = this.sourcesForPath(resolved);
+        const recorded = this.fingerprints.get(resolved);
+        // Trust the fingerprint over the 2-minute isLive window. Cursor's
+        // state.vscdb (~GB) stays "live" whenever the app is open; requiring
+        // !isLive forced a full SQLite re-parse on every engine restart even
+        // when inode/size/mtime/WAL were unchanged since the dump.
+        // Empty previous is OK: Cursor JSONL dupes are fingerprint-only when
+        // state.vscdb already owns those session ids.
+        if (fingerprintsMatch(recorded, current)) {
+          for (const snap of previous) {
+            // vscdb live is derived from lastEventAt, not file mtime.
+            const reusedLive = snap.path.endsWith(".vscdb")
+              ? snap.lastEventAt != null && isLive(Date.parse(snap.lastEventAt))
+              : isLive(current.mtimeMs);
+            this.keepSource(snap, nextSources, nextToggles, reusedLive);
+          }
+          nextFingerprints.set(resolved, current);
+          continue;
+        }
+
+        mutated = true;
+        const ingested = ingestSessions(p, {
+          cacheHome: this.cacheHome,
+          // Live JSONL may only have grown since the dump; allow append-state
+          // when the watcher later continues the same file.
+          allowAppend: isLive(current.mtimeMs),
+        });
+        for (const snap of ingested) {
+          this.keepSource(snap, nextSources, nextToggles);
+        }
+        nextFingerprints.set(resolved, fileFingerprint(p));
       } catch (err) {
+        // Transient stat/read failure: keep dump/memory for this path instead of
+        // dropping sessions that were already restored.
+        for (const snap of this.sourcesForPath(resolved)) {
+          this.keepSource(snap, nextSources, nextToggles);
+        }
+        const recorded = this.fingerprints.get(resolved);
+        if (recorded) nextFingerprints.set(resolved, recorded);
         opts?.onError?.(
           p,
           err instanceof Error ? err : new Error(String(err)),
@@ -217,21 +447,80 @@ export class SessionStore {
       }
     }
 
-    const ids = new Set(ingested.map((snap) => snap.id));
-    for (const id of this.toggles.keys()) {
-      if (!ids.has(id)) this.toggles.delete(id);
+    // Paths not in this refresh stay loaded when their files still exist
+    // (imports after loadDump, or a partial refresh of one watch root).
+    for (const [id, source] of this.sources) {
+      if (nextSources.has(id)) continue;
+      const resolved = path.resolve(source.path);
+      if (refreshedPaths.has(resolved)) continue;
+      if (!existsSync(source.path)) {
+        mutated = true;
+        continue;
+      }
+      this.keepSource(source, nextSources, nextToggles);
+      const recorded = this.fingerprints.get(resolved);
+      if (recorded) nextFingerprints.set(resolved, recorded);
+      if (!nextToggles.has(id) && this.toggles.has(id)) {
+        nextToggles.set(id, { ...this.toggles.get(id)! });
+      }
     }
-    this.sources.clear();
-    for (const snap of ingested) {
-      if (this.sources.get(snap.id)?.path.endsWith(".vscdb") && !snap.path.endsWith(".vscdb")) continue;
-      this.sources.set(snap.id, { ...snap, children: [] });
+
+    // Fingerprint-only paths (e.g. Cursor JSONL covered by state.vscdb) must
+    // survive partial refreshes that never mention them.
+    for (const [filePath, fingerprint] of this.fingerprints) {
+      if (refreshedPaths.has(filePath)) continue;
+      if (nextFingerprints.has(filePath)) continue;
+      nextFingerprints.set(filePath, fingerprint);
+    }
+
+    // Drop sources for refreshed paths that no longer produced a snapshot.
+    for (const [id, source] of this.sources) {
+      if (nextSources.has(id)) continue;
+      if (!refreshedPaths.has(path.resolve(source.path))) continue;
+      mutated = true;
+    }
+
+    const sameMembership =
+      !mutated &&
+      nextSources.size === this.sources.size &&
+      [...nextSources.keys()].every((id) => this.sources.has(id));
+    let liveChanged = false;
+    if (sameMembership) {
+      for (const [id, snap] of nextSources) {
+        if (this.sources.get(id)?.live !== snap.live) {
+          liveChanged = true;
+          break;
+        }
+      }
+    }
+
+    let fingerprintsChanged = nextFingerprints.size !== this.fingerprints.size;
+    if (!fingerprintsChanged) {
+      for (const [filePath, fingerprint] of nextFingerprints) {
+        if (!fingerprintsMatch(this.fingerprints.get(filePath), fingerprint)) {
+          fingerprintsChanged = true;
+          break;
+        }
+      }
+    }
+
+    this.sources = nextSources;
+    this.toggles = nextToggles;
+    this.fingerprints = nextFingerprints;
+    this.reindexPaths();
+    if (sameMembership && !liveChanged) {
+      // Skip rebuildAll; still persist when fingerprints were learned/updated.
+      if (fingerprintsChanged) this.scheduleDump();
+      return;
     }
     this.rebuildAll();
+    if (!sameMembership || fingerprintsChanged) this.scheduleDump();
   }
 
   refreshPricing(): number {
     const refreshedSources = new Map<string, SessionSnapshot>();
     const refreshedToggles = new Map<string, Record<WasteToggleId, boolean>>();
+    const refreshedFingerprints = new Map<string, FileFingerprint>();
 
     for (const filePath of new Set([...this.sources.values()].map((source) => source.path))) {
       for (const refreshed of ingestSessions(filePath, { cacheHome: this.cacheHome })) {
@@ -242,11 +531,19 @@ export class SessionStore {
           this.toggles.get(refreshed.id) ?? { ...refreshed.toggles },
         );
       }
+      try {
+        refreshedFingerprints.set(path.resolve(filePath), fileFingerprint(filePath));
+      } catch {
+        // Source may have disappeared during a pricing refresh.
+      }
     }
 
     this.sources = refreshedSources;
     this.toggles = refreshedToggles;
+    this.fingerprints = refreshedFingerprints;
+    this.reindexPaths();
     this.rebuildAll();
+    this.scheduleDump();
     return refreshedSources.size;
   }
 
@@ -261,7 +558,12 @@ export class SessionStore {
       clearLiveReadState(source.path);
       removed ??= { id, parentId };
     }
-    if (removed) this.rebuildAll();
+    this.fingerprints.delete(resolved);
+    if (removed) {
+      this.reindexPaths();
+      this.rebuildAll();
+      this.scheduleDump();
+    }
     return removed;
   }
 
@@ -269,11 +571,22 @@ export class SessionStore {
     filePath: string,
     opts?: SessionIngestOptions,
   ): string | undefined {
+    const resolved = path.resolve(filePath);
+    try {
+      const current = fileFingerprint(filePath);
+      if (fingerprintsMatch(this.fingerprints.get(resolved), current)) {
+        // Unchanged since last ingest/dump — skip the (possibly multi‑MB) parse.
+        const existing = this.sourcesForPath(resolved);
+        if (opts?.skipExisting && existing[0]) return existing[0].id;
+        if (existing[0]) return existing[0].id;
+      }
+    } catch {
+      // Fall through to a real ingest attempt when stat fails.
+    }
     const snapshots = ingestSessions(filePath, {
       cacheHome: this.cacheHome,
       allowAppend: opts?.allowAppend,
     });
-    const resolved = path.resolve(filePath);
     const ids = new Set(snapshots.map((snap) => snap.id));
     for (const [id, source] of this.sources) {
       if (ids.has(id)) continue;
@@ -288,8 +601,18 @@ export class SessionStore {
       if (!this.toggles.has(snap.id)) this.toggles.set(snap.id, { ...snap.toggles });
       this.sources.set(snap.id, { ...snap, children: [] });
     }
+    this.rememberFingerprint(filePath);
+    this.reindexPaths();
     this.rebuildAll();
+    this.scheduleDump();
     return snapshots[0]?.id;
+  }
+
+  /** Root session ids without refreshLiveFlags — safe inside ingest wrappers. */
+  peekRootIds(): string[] {
+    return [...this.sources.values()]
+      .filter((snap) => snap.parentId == null || !this.sources.has(snap.parentId))
+      .map((snap) => snap.id);
   }
 
   private rootSnapshots(): SessionSnapshot[] {
@@ -331,6 +654,7 @@ export class SessionStore {
     const previous = this.toggles.get(id) ?? { ...DEFAULT_WASTE_TOGGLES };
     this.toggles.set(id, { ...previous, ...toggles });
     this.rebuildAll();
+    this.scheduleDump();
   }
 }
 

@@ -14,7 +14,7 @@ function overview(raw = 200): Overview {
       { date: "2026-10-21", cost: cost(100), flaggedCost: cost(50), unpricedRaw: 0 },
     ], slices: [], models: [],
     performance: { taskCount: 5, ttftSampleCount: 2, speedSampleCount: 1, avgTtftMs: 500, outputTokensPerSecond: 5, basis: "request" },
-    performanceDistribution: { ttft: [2, 0, 0, 0, 0], tps: [1, 0, 0, 0, 0], sampleCount: 5 },
+    performanceDistribution: { ttft: [2, 0, 0, 0, 0], tps: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sampleCount: 5 },
   };
 }
 
@@ -107,7 +107,7 @@ for (const scope of ["source", "range"] as const) {
     await expect(comparison).toContainText("0%");
     try {
       if (scope === "source") {
-        await page.getByRole("group", { name: "会话来源", exact: true }).getByRole("button", { name: "pi", exact: true }).click();
+        await page.getByRole("combobox", { name: "会话来源", exact: true }).selectOption("pi");
       } else {
         await page.getByRole("button", { name: "5小时", exact: true }).click();
       }
@@ -173,12 +173,12 @@ test("trend dates align below bars and anomaly segments retain their proportion"
   await expect(tooltip).toHaveCount(0);
 });
 
-test("the first touch opens the trend tooltip", async ({ browser }) => {
+test("the first touch opens the trend tooltip", async ({ browser, baseURL }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 900 }, hasTouch: true, isMobile: true });
   try {
     const page = await context.newPage();
     await page.route((url) => url.pathname === "/overview", (route) => route.fulfill({ json: overview() }));
-    await page.goto("http://127.0.0.1:7798/#overview");
+    await page.goto(`${baseURL}/#overview`);
     await page.locator(".trend-col").first().tap();
     await expect(page.locator(".chart-tooltip")).toBeVisible();
   } finally { await context.close(); }
@@ -207,4 +207,27 @@ test("models retain missing usage and scroll inside the disclosure at 320px", as
   expect(dimensions.scrollLeft).toBeGreaterThan(0);
   expect(dimensions.right).toBeLessThanOrEqual(dimensions.viewport);
   await page.screenshot({ path: testInfo.outputPath("models-320px.png"), fullPage: true });
+});
+
+test("output-speed histogram buckets: ≤40, 10-wide steps to 150, then >150", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const data: Overview = {
+    ...overview(),
+    performanceDistribution: { ttft: [2, 0, 0, 0, 0], tps: [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1], sampleCount: 5 },
+  };
+  await mockOverview(page, data);
+  const speed = page.locator(".hist-card").nth(1).locator(".hist");
+  await expect(speed.locator(".hb")).toHaveCount(13);
+  expect(await speed.locator(".hist-tick").allInnerTexts()).toEqual([
+    "≤40", "50", "60", "70", "80", "90", "100", "110", "120", "130", "140", "150", ">150",
+  ]);
+  // 轴只标边界，占比与完整区间名只在悬停/点按柱体时出现。
+  await expect(speed.locator(".hb").nth(1)).toHaveAttribute("title", /^40–50 tok\/s · 0 轮/);
+  await expect(speed.locator(".hb").nth(0)).toHaveAttribute("data-tip", /60%/);
+  await speed.locator(".hb").nth(0).click();
+  await expect(speed.locator(".hb.tip-on")).toHaveCount(1);
+  await expect(speed.locator(".hb > b")).toHaveCount(0);
+  await expect(page.locator(".hist-card").nth(1).locator(".hist-head .c")).toContainText(
+    "5/5 轮有记录 · 多数落在 ≤ 40 tok/s",
+  );
 });
