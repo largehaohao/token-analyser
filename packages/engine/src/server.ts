@@ -24,6 +24,7 @@ import {
 } from "./qwen-pricing.ts";
 import { SessionStore, type SessionIngestOptions } from "./store.ts";
 import { fetchPowerRange } from "./power.ts";
+import { fetchTempSnapshot, fetchTempHistory } from "./temps.ts";
 import { watchSessions } from "./watch.ts";
 import { collectSessionFiles, isSessionFile } from "./session-files.ts";
 import type { SessionSnapshot, WasteToggleId } from "./types.ts";
@@ -665,6 +666,77 @@ export async function startServer(opts?: {
           startMs,
           endMs,
           stepMs,
+          samples: [],
+        });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && parts[0] === "temps" && parts.length === 1) {
+      const config = loadUserConfig();
+      const result = await fetchTempSnapshot({ config: config.power });
+      if (result.ok) {
+        sendJson(res, 200, {
+          source: "prometheus",
+          connected: true,
+          url: result.config.prometheus_url,
+          ...result.sample,
+        });
+      } else {
+        sendJson(res, 200, {
+          source: "prometheus",
+          connected: false,
+          url: result.config.prometheus_url,
+          error: result.error,
+          timestamp: Date.now() / 1000,
+          cpu: {
+            name: "AMD Ryzen 7 7700",
+            status: "missing",
+            temperatures: {
+              tctl: { value: null },
+              tccd1: { value: null },
+            },
+          },
+          gpus: [],
+        });
+      }
+      return;
+    }
+
+    if (
+      req.method === "GET" &&
+      parts[0] === "temps" &&
+      parts[1] === "history" &&
+      parts.length === 2
+    ) {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const seconds = Number(url.searchParams.get("seconds"));
+      if (!Number.isFinite(seconds)) {
+        sendJson(res, 400, { error: "invalid_range" });
+        return;
+      }
+      const config = loadUserConfig();
+      const result = await fetchTempHistory({
+        config: config.power,
+        seconds,
+      });
+      if (result.ok) {
+        sendJson(res, 200, {
+          source: "prometheus",
+          connected: true,
+          url: result.config.prometheus_url,
+          seconds: result.seconds,
+          step: result.step,
+          samples: result.samples,
+        });
+      } else {
+        sendJson(res, 200, {
+          source: "prometheus",
+          connected: false,
+          url: result.config.prometheus_url,
+          error: result.error,
+          seconds: result.seconds,
+          step: result.step,
           samples: [],
         });
       }

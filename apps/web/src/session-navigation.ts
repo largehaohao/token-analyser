@@ -6,13 +6,16 @@ import {
 import { SESSION_PAGE_SIZE } from "./session-page";
 import { normalizeSourceFilter, type SessionSourceFilter } from "./session-source";
 
-export type SessionNavigationView = "overview" | "sessions" | "power";
+export type SessionNavigationView = "overview" | "sessions" | "hardware";
+
+export type HardwareTab = "temps" | "power";
 
 export type SessionNavigation = {
   view: SessionNavigationView;
   selectedId: string | null;
   range: SessionRangeId;
   source: SessionSourceFilter;
+  hardwareTab?: HardwareTab;
 };
 
 const STORAGE_KEY = "token-analyser.navigation.v1";
@@ -33,6 +36,38 @@ function storage(): Storage | null {
   }
 }
 
+function parseStoredView(
+  value: unknown,
+): Pick<SessionNavigation, "view" | "hardwareTab"> {
+  if (value === "sessions") return { view: "sessions" };
+  if (value === "hardware") return { view: "hardware" };
+  if (value === "power") return { view: "hardware", hardwareTab: "power" };
+  return { view: "overview" };
+}
+
+function parseHash(
+  hash: string,
+): Pick<SessionNavigation, "view" | "hardwareTab"> | null {
+  if (hash === "#overview") return { view: "overview" };
+  if (hash === "#sessions") return { view: "sessions" };
+  if (hash === "#power") return { view: "hardware", hardwareTab: "power" };
+  if (hash === "#hardware" || hash === "#hardware/temps") {
+    return { view: "hardware", hardwareTab: "temps" };
+  }
+  if (hash === "#hardware/power") {
+    return { view: "hardware", hardwareTab: "power" };
+  }
+  return null;
+}
+
+function navigationHash(navigation: SessionNavigation): string {
+  if (navigation.view === "hardware") {
+    const tab = navigation.hardwareTab ?? "temps";
+    return tab === "power" ? "#hardware/power" : "#hardware/temps";
+  }
+  return `#${navigation.view}`;
+}
+
 export function readSessionNavigation(): SessionNavigation {
   let navigation = DEFAULT_NAVIGATION;
   try {
@@ -46,11 +81,13 @@ export function readSessionNavigation(): SessionNavigation {
     const parsed = historyState ?? stored;
     if (parsed && typeof parsed === "object") {
       const record = parsed as Record<string, unknown>;
+      const fromView = parseStoredView(record.view);
+      const hardwareTab =
+        record.hardwareTab === "power" || record.hardwareTab === "temps"
+          ? record.hardwareTab
+          : fromView.hardwareTab;
       navigation = {
-        view:
-          record.view === "sessions" || record.view === "power"
-            ? record.view
-            : "overview",
+        view: fromView.view,
         selectedId:
           typeof record.selectedId === "string" && record.selectedId.length > 0
             ? record.selectedId
@@ -59,17 +96,21 @@ export function readSessionNavigation(): SessionNavigation {
           SESSION_RANGES.find((item) => item.id === record.range)?.id ??
           DEFAULT_SESSION_RANGE,
         source: normalizeSourceFilter(record.source),
+        ...(hardwareTab ? { hardwareTab } : {}),
       };
     }
   } catch {
     // Corrupt history/storage must not prevent navigation.
   }
   const hash = typeof window === "undefined" ? "" : window.location.hash;
-  if (hash === "#overview" || hash === "#sessions" || hash === "#power")
+  const fromHash = parseHash(hash);
+  if (fromHash) {
     navigation = {
       ...navigation,
-      view: hash.slice(1) as SessionNavigationView,
+      view: fromHash.view,
+      ...(fromHash.hardwareTab ? { hardwareTab: fromHash.hardwareTab } : {}),
     };
+  }
   return navigation;
 }
 
@@ -83,7 +124,7 @@ export function writeSessionNavigation(navigation: SessionNavigation): void {
     window.history.replaceState(
       { ...window.history.state, tokenAnalyser: navigation },
       "",
-      `#${navigation.view}`,
+      navigationHash(navigation),
     );
   }
 }
@@ -93,7 +134,7 @@ export function pushSessionNavigation(navigation: SessionNavigation): void {
     window.history.pushState(
       { ...window.history.state, tokenAnalyser: navigation },
       "",
-      `#${navigation.view}`,
+      navigationHash(navigation),
     );
   }
 }

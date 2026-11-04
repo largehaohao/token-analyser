@@ -22,7 +22,7 @@ import {
   type CostUnit,
 } from "./format";
 import { OverviewPage } from "./OverviewPage";
-import { HardwarePowerPage } from "./HardwarePowerPage";
+import { HardwarePage } from "./HardwarePage";
 import { RangeSwitcher } from "./RangeSwitcher";
 import { SessionList } from "./SessionList";
 import { SourceSwitcher } from "./SourceSwitcher";
@@ -47,6 +47,7 @@ import {
   pushSessionNavigation,
   writeSessionListState,
   writeSessionNavigation,
+  type HardwareTab,
   type SessionNavigationView,
 } from "./session-navigation";
 import {
@@ -72,6 +73,9 @@ function AppShell() {
   const now = useNow();
   const [initialNavigation] = useState(readSessionNavigation);
   const [view, setView] = useState<View>(initialNavigation.view);
+  const [hardwareTab, setHardwareTab] = useState<HardwareTab>(
+    initialNavigation.hardwareTab ?? "temps",
+  );
   const [unit, setUnit] = useState<CostUnit>(readUnitPref);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [previousOverview, setPreviousOverview] = useState<Overview | null>(null);
@@ -153,8 +157,14 @@ function AppShell() {
   }, [view, mobileSessionPane]);
 
   useEffect(() => {
-    writeSessionNavigation({ view, selectedId, range, source });
-  }, [selectedId, view, range, source]);
+    writeSessionNavigation({
+      view,
+      selectedId,
+      range,
+      source,
+      ...(view === "hardware" ? { hardwareTab } : {}),
+    });
+  }, [selectedId, view, range, source, hardwareTab]);
 
   useEffect(() => {
     if (previousView.current === view) return;
@@ -176,6 +186,7 @@ function AppShell() {
       const next = readSessionNavigation();
       preferredSessionIdRef.current = next.selectedId;
       setView(next.view);
+      setHardwareTab(next.hardwareTab ?? "temps");
       setSelectedId(next.selectedId);
       setRange(next.range);
       setSource(next.source);
@@ -643,14 +654,37 @@ function AppShell() {
     if (next === view) return;
     if (next === "sessions") openSessions();
     else {
-      pushSessionNavigation({ view: next, selectedId, range, source });
+      const tab = next === "hardware" ? hardwareTab : undefined;
+      pushSessionNavigation({
+        view: next,
+        selectedId,
+        range,
+        source,
+        ...(tab ? { hardwareTab: tab } : {}),
+      });
       setView(next);
     }
   }
 
+  function handleHardwareTabChange(tab: HardwareTab) {
+    if (tab === hardwareTab) return;
+    setHardwareTab(tab);
+    pushSessionNavigation({
+      view: "hardware",
+      selectedId,
+      range,
+      source,
+      hardwareTab: tab,
+    });
+  }
+
   useEffect(() => {
     const page =
-      view === "overview" ? "成本总览" : view === "sessions" ? "会话明细" : "硬件用电";
+      view === "overview"
+        ? "成本总览"
+        : view === "sessions"
+          ? "会话明细"
+          : "硬件";
     document.title = `${page}${view === "overview" && overviewState === "error" ? " · 加载失败" : ""} · Token Analyser`;
   }, [view, overviewState]);
 
@@ -697,13 +731,13 @@ function AppShell() {
                 会话明细
               </a>
               <a
-                href="#power"
-                className={view === "power" ? "active" : ""}
-                aria-current={view === "power" ? "page" : undefined}
-                onClick={(event) => navigate(event, "power")}
+                href="#hardware/temps"
+                className={view === "hardware" ? "active" : ""}
+                aria-current={view === "hardware" ? "page" : undefined}
+                onClick={(event) => navigate(event, "hardware")}
               >
                 <Icon name="power" />
-                硬件用电
+                硬件
               </a>
             </nav>
           </div>
@@ -726,7 +760,7 @@ function AppShell() {
             <span className="local-label"><Icon name="shield" /> 本地运行</span>
           </div>
         </header>
-        {view !== "power" && (
+        {view !== "hardware" && (
         <Button
           className="mobile-filter-toggle"
           emphasis="ghost"
@@ -741,7 +775,7 @@ function AppShell() {
           <span className="mobile-filter-action">筛选 <Icon name="chevron" /></span>
         </Button>
         )}
-        {view !== "power" && (
+        {view !== "hardware" && (
         <div id="workspace-filters" className="workspace-filters" data-expanded={filtersOpen}>
         <SourceSwitcher
           source={source}
@@ -811,8 +845,12 @@ function AppShell() {
           className="app-content"
           tabIndex={-1}
         >
-          {view === "power" ? (
-            <HardwarePowerPage now={now} />
+          {view === "hardware" ? (
+            <HardwarePage
+              tab={hardwareTab}
+              onTabChange={handleHardwareTabChange}
+              now={now}
+            />
           ) : view === "overview" ? (
             overviewState === "ready" && overview ? (
               <div className="layout overview-layout">

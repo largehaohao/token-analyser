@@ -14,9 +14,16 @@ export type PowerSample = {
   machine: number | null;
 };
 
+export type PowerTempsConfig = {
+  gpu: string[];
+  cpu: string[];
+  max_components_per_device: number;
+};
+
 export type PowerQueryConfig = {
   prometheus_url: string;
   queries: { cpu: string; gpu: string; machine: string };
+  temps?: PowerTempsConfig;
 };
 
 /** 常见导出器的默认表达式；写错指标名只会得到空序列，不会崩。 */
@@ -177,5 +184,22 @@ export function mergePowerConfig(
     if (typeof rawQueries[key] === "string" && (rawQueries[key] as string).length > 0)
       queries[key] = rawQueries[key] as string;
   }
-  return { prometheus_url: url, queries };
+  let temps = defaults.temps;
+  const rawTemps = record.temps;
+  if (rawTemps != null && typeof rawTemps === "object") {
+    const t = rawTemps as Record<string, unknown>;
+    const gpu = Array.isArray(t.gpu)
+      ? t.gpu.filter((q): q is string => typeof q === "string")
+      : (temps?.gpu ?? []);
+    const cpu = Array.isArray(t.cpu)
+      ? t.cpu.filter((q): q is string => typeof q === "string")
+      : (temps?.cpu ?? []);
+    const maxRaw = t.max_components_per_device;
+    const max_components_per_device =
+      typeof maxRaw === "number" && Number.isFinite(maxRaw) && maxRaw > 0
+        ? Math.floor(maxRaw)
+        : (temps?.max_components_per_device ?? 16);
+    temps = { gpu, cpu, max_components_per_device };
+  }
+  return temps != null ? { prometheus_url: url, queries, temps } : { prometheus_url: url, queries };
 }

@@ -17,6 +17,7 @@ export default defineConfig({
       "/sessions": apiTarget,
       "/overview": apiTarget,
       "/power": apiTarget,
+      "/temps": apiTarget,
       "/stream": { target: apiTarget, ws: false },
       "/import": apiTarget,
       "/pricing": apiTarget,

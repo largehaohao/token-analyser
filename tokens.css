@@ -7,7 +7,7 @@
   --color-ink: var(--text);
   --color-muted: var(--text-muted);
   --color-accent: var(--accent);
-  --color-accent-ink: var(--bg);
+  --color-accent-ink: var(--accent-ink);
   --color-focus: var(--accent);
   --font-display: var(--display);
   --font-body: var(--font);

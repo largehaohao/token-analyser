@@ -1,17 +1,17 @@
 ---
 version: alpha
 name: Token Analyser
-description: A local, terminal-inspired ledger for tracing Codex usage from totals to individual model calls.
+description: A local ledger for tracing Codex usage from totals to individual model calls.
 colors:
-  primary: "#7dffb3"
-  background: "#070a08"
-  surface: "#101612"
-  inset: "#0a0f0c"
-  border: "#2b3b31"
-  text: "#e8eee8"
-  muted: "#a4b0a8"
-  warning: "#f5c542"
-  danger: "#ff9184"
+  primary: "#1c7564"
+  background: "#f6f7f9"
+  surface: "#ffffff"
+  inset: "#eef1f5"
+  border: "#e5e9ef"
+  text: "#19212d"
+  muted: "#626d7c"
+  warning: "#955d00"
+  danger: "#bd3744"
 typography:
   body:
     fontFamily: '"Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif'
@@ -81,7 +81,7 @@ components:
 
 ## Overview
 
-The reference is an `htop` ledger: precise numeric columns, visible branches, quiet dark surfaces, and a mint trace through recorded usage. Preserve the approved terminal identity in [the product brief](docs/superpowers/specs/2026-08-27-agent-token-monitor-design.md). This is a product surface for people auditing local Codex runs, primarily on a laptop, with phone layouts for checking a run. The job is to connect a total to its evidence, not to sell an analytics service.
+The reference is an `htop` ledger: precise numeric columns, visible branches, quiet light surfaces, and a mint trace through recorded usage. That ledger structure stays as described in [the product brief](docs/superpowers/specs/2026-08-27-agent-token-monitor-design.md), drawn in the light STRATA theme. This is a product surface for people auditing local Codex runs, primarily on a laptop, with phone layouts for checking a run. The job is to connect a total to its evidence, not to sell an analytics service.
 
 ## Macrostructure family
 
@@ -99,9 +99,9 @@ The signature is the token partition: the same colors and exact numerical semant
 
 ## Colors
 
-Mint is the established selection/action accent; it is not an indication that every recorded turn is useful. Amber identifies potentially optimizable usage and data warnings, with explicit labels to distinguish them. Coral identifies request failures. Flat forest-black surfaces preserve the terminal character without a second visual brand.
+Mint is the established selection/action accent; it is not an indication that every recorded turn is useful. Amber identifies potentially optimizable usage and data warnings, with explicit labels to distinguish them. Coral identifies request failures. Cool light-gray surfaces keep the ledger quiet; mint stays the action color rather than a second brand.
 
-Text must remain readable at the compact data sizes: use `--text` for values, `--text-muted` for labels, and `--text-dim` for supporting text. Never dim a meaningful label using opacity. Cache and output keep their existing blue and violet associations. Chart labels and patterns supplement color. Only the existing dark theme is supported; forced colors use operating-system colors.
+Text must remain readable at the compact data sizes: use `--text` for values, `--text-muted` for labels, and `--text-dim` for supporting text. Never dim a meaningful label using opacity. Cache and output keep their existing blue and violet associations. Chart labels and patterns supplement color. The light theme is the supported appearance; forced colors use operating-system colors.
 
 ## Typography
 

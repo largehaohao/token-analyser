@@ -326,6 +326,77 @@ export type PowerFeed = {
   samples: PowerSampleDto[];
 };
 
+export type TempSensorReading = {
+  value: number | null;
+  limit?: number;
+};
+
+export type TempGpuDto = {
+  id: number;
+  card: string;
+  name: string;
+  status: "normal" | "warm" | "over" | "missing";
+  temperatures: {
+    edge: TempSensorReading;
+    junction: TempSensorReading;
+    memory: TempSensorReading;
+  };
+  fan_rpm: number | null;
+  power_w: number | null;
+  power_cap_w: number | null;
+  utilization: number | null;
+  vram_used_gib: number | null;
+  vram_total_gib: number | null;
+};
+
+export type TempCpuDto = {
+  name: string;
+  status: "available" | "partial" | "missing";
+  temperatures: {
+    tctl: { value: number | null };
+    tccd1: { value: number | null };
+  };
+};
+
+export type TempSampleDto = {
+  timestamp: number;
+  cpu: TempCpuDto;
+  gpus: TempGpuDto[];
+};
+
+export type TempsFeed = {
+  source: "prometheus";
+  connected: boolean;
+  url?: string;
+  error?: string;
+} & TempSampleDto;
+
+export type TempsHistoryFeed = {
+  source: "prometheus";
+  connected: boolean;
+  url?: string;
+  error?: string;
+  seconds: number;
+  step: number;
+  samples: TempSampleDto[];
+};
+
+export async function getTemps(signal?: AbortSignal): Promise<TempsFeed> {
+  return requestJson<TempsFeed>("/temps", { signal }, 12000);
+}
+
+export async function getTempsHistory(
+  seconds: number,
+  signal?: AbortSignal,
+): Promise<TempsHistoryFeed> {
+  const params = new URLSearchParams({ seconds: String(Math.round(seconds)) });
+  return requestJson<TempsHistoryFeed>(
+    `/temps/history?${params}`,
+    { signal },
+    20000,
+  );
+}
+
 /** 硬件用电：读取所选范围的功率采样；采集源不可达时 connected=false。 */
 export async function getPowerFeed(
   startMs: number,
