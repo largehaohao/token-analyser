@@ -23,7 +23,6 @@ import {
   formatTemp,
   isStale,
   mergeTempSamples,
-  meterPercent,
   readSeries,
   readingTone,
   worstGpuStatus,
@@ -34,7 +33,13 @@ import { Icon, Notice, SegmentedControl, srTable } from "./ui";
 
 const POLL_MS = 2000;
 const HISTORY_SECONDS = 3600;
-const CHART_Y_MIN = 110;
+/** 实时柱状读数与历史曲线共用同一个温度刻度顶，方便上下对照。 */
+const TEMP_SCALE_TOP = 110;
+
+function scalePercent(value: number | null): number {
+  if (value == null || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, (value / TEMP_SCALE_TOP) * 100));
+}
 
 const GPU_SENSORS = [
   { key: "edge", label: "核心", swatch: "blue" },
@@ -256,7 +261,7 @@ function chartYMax(series: ChartSeries[]): number {
       }
     }
   }
-  return Math.max(CHART_Y_MIN, Math.ceil((highest + 5) / 10) * 10);
+  return Math.max(TEMP_SCALE_TOP, Math.ceil((highest + 5) / 10) * 10);
 }
 
 function readPalette(): ChartPalette {
@@ -699,7 +704,7 @@ function GpuCard({
           </span>
         </div>
       </header>
-      <div className="temps-sensors">
+      <div className="temps-sensors temps-sensors-columns">
         {GPU_SENSORS.map((sensor) => {
           const reading = gpu?.temperatures[sensor.key] ?? null;
           const value = reading?.value ?? null;
@@ -725,25 +730,28 @@ function GpuCard({
                 className={`temps-meter temps-meter-${sensor.swatch} temps-meter-${tone}`}
                 style={
                   {
-                    "--warm-start": `${meterPercent(limit - WARM_MARGIN_C, limit)}%`,
+                    "--fill": `${scalePercent(value)}%`,
+                    "--limit": `${scalePercent(limit)}%`,
+                    "--warm-start": `${scalePercent(limit - WARM_MARGIN_C)}%`,
                   } as CSSProperties
                 }
                 role={value == null ? undefined : "meter"}
                 aria-label={value == null ? undefined : `${sensor.label}温度`}
                 aria-valuemin={value == null ? undefined : 0}
-                aria-valuemax={value == null ? undefined : limit}
+                aria-valuemax={value == null ? undefined : TEMP_SCALE_TOP}
                 aria-valuenow={
                   value == null
                     ? undefined
-                    : Math.min(limit, Math.max(0, value))
+                    : Math.min(TEMP_SCALE_TOP, Math.max(0, value))
                 }
                 aria-valuetext={
                   value == null
                     ? undefined
-                    : `${formatTemp(value, 0)} 摄氏度，停机线 ${limit} 摄氏度`
+                    : `${formatTemp(value, 0)} 摄氏度，共用刻度 0 到 ${TEMP_SCALE_TOP} 摄氏度，停机线 ${limit} 摄氏度，余量 ${marginLabel(value, limit)}`
                 }
               >
-                <span style={{ width: `${meterPercent(value, limit)}%` }} />
+                <span className="temps-meter-fill" />
+                <span className="temps-meter-limit" aria-hidden="true" />
               </div>
               <span className="temps-sensor-range">
                 <span>停机线 {limit}°C</span>
@@ -753,6 +761,9 @@ function GpuCard({
           );
         })}
       </div>
+      <p className="temps-scale-note">
+        三条共用 0–{TEMP_SCALE_TOP}°C 刻度 · 虚线是各自停机线，柱顶到虚线就是余量
+      </p>
       <dl className="temps-stats">
         <div>
           <dt>风扇转速</dt>
