@@ -79,23 +79,26 @@ export function Histogram({
 export function HistogramPair({
   ttft,
   speed,
+  noun = "轮",
 }: {
   ttft: HistogramData;
   speed: HistogramData;
+  /** 摘要里的样本单位：轮次计时是「轮」，任务计时是「次任务」。 */
+  noun?: string;
 }) {
   return (
     <div className="hist-grid">
       <div className="hist-card">
         <div className="hist-head">
           <span className="h">TTFT 分布</span>
-          <span className="c">{distributionSummary(ttft)}</span>
+          <span className="c">{distributionSummary(ttft, noun)}</span>
         </div>
         <Histogram title="TTFT" data={ttft} />
       </div>
       <div className="hist-card">
         <div className="hist-head">
           <span className="h">输出速度分布</span>
-          <span className="c">{distributionSummary(speed)}</span>
+          <span className="c">{distributionSummary(speed, noun)}</span>
         </div>
         <Histogram title="输出速度" data={speed} />
       </div>

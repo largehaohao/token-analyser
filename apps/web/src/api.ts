@@ -32,6 +32,16 @@ export type RequestPerformance = {
   speedSource: "recorded" | "decode" | "duration" | null;
 };
 
+/** One recorded agent task window (Codex task_complete), in milliseconds. */
+export type TaskTiming = {
+  id: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  durationMs: number | null;
+  ttftMs: number | null;
+  outputTokens: number | null;
+};
+
 export type WasteToggleId =
   | "poll"
   | "reread"
@@ -160,6 +170,8 @@ export type SessionSnapshot = {
   context?: ContextProfile;
   contextMeasurement?: ContextMeasurement | null;
   performance?: PerformanceSummary;
+  /** Agent-task windows this session (and its subagents) recorded. */
+  taskTimings?: TaskTiming[];
 };
 
 export type OverviewSlice = {

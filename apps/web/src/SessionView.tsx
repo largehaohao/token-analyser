@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { SessionSnapshot, Turn } from "./api";
+import type { SessionSnapshot, TaskTiming, Turn } from "./api";
 import { useUnit } from "./UnitContext";
 import {
   cacheHitRatio,
@@ -46,6 +46,14 @@ function flattenTurns(snap: SessionSnapshot): Turn[] {
   return [...snap.turns, ...(snap.children ?? []).flatMap(flattenTurns)];
 }
 
+/** 会话与其子代理记录的任务窗口；与 flattenTurns 同口径。 */
+function flattenTaskTimings(snap: SessionSnapshot): TaskTiming[] {
+  return [
+    ...(snap.taskTimings ?? []),
+    ...(snap.children ?? []).flatMap(flattenTaskTimings),
+  ];
+}
+
 export function SessionView({
   snapshot,
   selectedNodeId,
@@ -74,6 +82,10 @@ export function SessionView({
   }, [contextOpen, snapshot.id]);
 
   const turns = useMemo(() => flattenTurns(snapshot), [snapshot]);
+  const taskTimings = useMemo(
+    () => flattenTaskTimings(snapshot),
+    [snapshot],
+  );
   const selectedNode = resolveSelectedNode(snapshot.tree, selectedNodeId);
   const turnIds = useMemo(() => collectTurnIds(selectedNode), [selectedNode]);
   const hit = cacheHitRatio(snapshot.cost);
@@ -254,6 +266,7 @@ export function SessionView({
       <PerformanceMetrics
         performance={snapshot.performance}
         turns={turns}
+        tasks={taskTimings}
         source={snapshot.source}
       />
       <p className="disclaimer">{disclaimer(snapshot.rateCardAsOf)}</p>

@@ -1,4 +1,4 @@
-import type { Turn } from "./api";
+import type { TaskTiming, Turn } from "./api";
 
 /**
  * Latency histograms. The buckets are fixed so two sessions, two ranges and two
@@ -111,6 +111,38 @@ export function turnDistributions(turns: Turn[]): {
   };
 }
 
+/**
+ * The same histograms from agent-task windows (Codex task timings). These are
+ * the samples behind the session averages, so the distributions must read from
+ * the same records as the 平均 TTFT figures above them. Task speed keeps the
+ * full window: tools and waits stay in the denominator, like the engine.
+ */
+export function taskDistributions(tasks: TaskTiming[]): {
+  ttft: HistogramData;
+  speed: HistogramData;
+} {
+  const seconds = tasks
+    .map((task) => task.ttftMs)
+    .filter((value): value is number => value != null)
+    .map((ms) => ms / 1000);
+  const speeds = tasks
+    .map((task) => {
+      if (
+        task.durationMs == null ||
+        task.durationMs <= 0 ||
+        task.outputTokens == null
+      )
+        return null;
+      const speed = (task.outputTokens * 1000) / task.durationMs;
+      return Number.isFinite(speed) ? speed : null;
+    })
+    .filter((value): value is number => value != null);
+  return {
+    ttft: bucketize(seconds, TTFT_EDGES_S, TTFT_LABELS, "s", tasks.length),
+    speed: bucketize(speeds, TPS_EDGES, TPS_LABELS, " tok/s", tasks.length),
+  };
+}
+
 /** The overview aggregate arrives as fixed-count arrays from the engine. */
 export function arrayHistogram(
   labels: readonly string[],
@@ -130,8 +162,11 @@ export function arrayHistogram(
   };
 }
 
-export function distributionSummary(dist: HistogramData): string {
+export function distributionSummary(
+  dist: HistogramData,
+  noun = "轮",
+): string {
   if (dist.known === 0) return "该范围内没有来源记录的耗时";
   const mode = dist.labels[dist.counts.indexOf(Math.max(...dist.counts))];
-  return `${dist.known}/${dist.total} 轮有记录 · 多数落在 ${mode}`;
+  return `${dist.known}/${dist.total} ${noun}有记录 · 多数落在 ${mode}`;
 }
