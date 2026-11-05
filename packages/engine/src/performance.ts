@@ -309,25 +309,39 @@ export function summarizePerformance(samples: TimedSample[]): PerformanceSummary
   let ttftSampleCount = 0;
   let generationSum = 0;
   let outputSum = 0;
-  let speedSampleCount = 0;
+  let tokenSpeedCount = 0;
+  const speeds: number[] = [];
   for (const sample of samples) {
     if (sample.ttftMs != null) {
       ttftSum += sample.ttftMs;
       ttftSampleCount += 1;
     }
+    const speed = sampleSpeed(sample);
+    if (speed == null) continue;
+    speeds.push(speed);
     const generationMs = sampleGenerationMs(sample);
     if (generationMs != null && sample.outputTokens != null) {
       generationSum += generationMs;
       outputSum += sample.outputTokens;
-      speedSampleCount += 1;
+      tokenSpeedCount += 1;
     }
   }
+  const speedSampleCount = speeds.length;
+  // Prefer token-weighted average when every speed sample has tokens+duration
+  // (existing task/request ledger math). Otherwise average the same speeds the
+  // histogram uses, including source-recorded rates without output counts.
+  const outputTokensPerSecond =
+    speedSampleCount === 0
+      ? null
+      : tokenSpeedCount === speedSampleCount
+        ? outputSum * 1000 / generationSum
+        : speeds.reduce((sum, value) => sum + value, 0) / speedSampleCount;
   return {
     taskCount: samples.length,
     ttftSampleCount,
     speedSampleCount,
     avgTtftMs: ttftSampleCount > 0 ? ttftSum / ttftSampleCount : null,
-    outputTokensPerSecond: speedSampleCount > 0 ? outputSum * 1000 / generationSum : null,
+    outputTokensPerSecond,
     basis: samples.length === 0 ? null
       : samples.some((sample) => sample.basis == null || sample.basis === "task") ? "task" : "request",
   };

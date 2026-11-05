@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_PRICE_CNY_PER_KWH,
-  POWER_DEMO_ANCHOR_MS,
+  customRangePrefill,
+  isLivePowerFeed,
   POWER_RANGES,
   POWER_SERIES,
   bucketizeSamples,
@@ -143,7 +144,7 @@ export function HardwarePowerPage({
         if (requestId !== feedRequest.current) return;
         setFeed({
           loading: false,
-          connected: result.connected && result.samples.length >= 2,
+          connected: isLivePowerFeed(result.connected, result.samples.length),
           url: result.url ?? null,
           samples: result.samples,
           error: result.connected ? null : (result.error ?? null),
@@ -264,10 +265,12 @@ export function HardwarePowerPage({
   function switchRange(next: PowerQuickRangeId | "custom") {
     if (next === "custom") {
       // 切到自定义时，用当前范围预填起止时间，方便微调。
+      // Demo data cannot start before the synthetic epoch; live feeds may.
       const end = Math.min(activeWindow.endMs, now);
-      setStartDraft(toLocalDateTimeInput(Math.max(activeWindow.startMs, POWER_DEMO_ANCHOR_MS)));
-      setEndDraft(toLocalDateTimeInput(end));
-      setMode({ kind: "custom", window: { startMs: Math.max(activeWindow.startMs, POWER_DEMO_ANCHOR_MS), endMs: end, label: "自定义" } });
+      const window = customRangePrefill(activeWindow.startMs, end, live);
+      setStartDraft(toLocalDateTimeInput(window.startMs));
+      setEndDraft(toLocalDateTimeInput(window.endMs));
+      setMode({ kind: "custom", window });
       return;
     }
     setRangeErrors([]);

@@ -187,6 +187,29 @@ describe("per-request performance", () => {
       tps: [0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       sampleCount: 2,
     });
+    // Headline average must use the same recorded speeds as the histogram.
+    expect(summarizePerformance(requestTimings(turns))).toMatchObject({
+      speedSampleCount: 2,
+      outputTokensPerSecond: 70,
+    });
+  });
+
+  it("summarizes recorded speed when output tokens are missing", () => {
+    const turns = [{
+      id: "recorded-only",
+      startedAt: "2026-10-08T00:00:00Z",
+      endedAt: "2026-10-08T00:00:02Z",
+      usageRecorded: false,
+      requestPerformance: requestPerformance(null, {
+        tokens_per_second: 70,
+        duration_ms: null,
+      }),
+    } as Turn];
+    expect(performanceDistribution(requestTimings(turns)).tps[3]).toBe(1);
+    expect(summarizePerformance(requestTimings(turns))).toMatchObject({
+      speedSampleCount: 1,
+      outputTokensPerSecond: 70,
+    });
   });
 
   it("uses explicit request metadata, prefers recorded speed, and supports nested metrics", () => {
