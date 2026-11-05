@@ -9,7 +9,7 @@ colors:
   inset: "#eef1f5"
   border: "#e5e9ef"
   text: "#19212d"
-  muted: "#626d7c"
+  muted: "#545f6d"
   warning: "#955d00"
   danger: "#bd3744"
 typography:
@@ -102,6 +102,8 @@ The signature is the token partition: the same colors and exact numerical semant
 Mint is the established selection/action accent; it is not an indication that every recorded turn is useful. Amber identifies potentially optimizable usage and data warnings, with explicit labels to distinguish them. Coral identifies request failures. Cool light-gray surfaces keep the ledger quiet; mint stays the action color rather than a second brand.
 
 Text must remain readable at the compact data sizes: use `--text` for values, `--text-muted` for labels, and `--text-dim` for supporting text. Never dim a meaningful label using opacity. Cache and output keep their existing blue and violet associations. Chart labels and patterns supplement color. The light theme is the supported appearance; forced colors use operating-system colors.
+
+The 硬件 monitor pages share this one palette. Their structure follows the hardware-monitor reference — breadcrumb kicker, display-scale temperature figures, per-sensor swatches, a single guard strip — but every surface, pill, and chart line resolves through the same `:root` tokens as the overview and session views, so navigation never shifts the app's palette.
 
 ## Typography
 

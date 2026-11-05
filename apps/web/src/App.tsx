@@ -684,9 +684,11 @@ function AppShell() {
         ? "成本总览"
         : view === "sessions"
           ? "会话明细"
-          : "硬件";
+          : hardwareTab === "power"
+            ? "硬件用电"
+            : "硬件温度";
     document.title = `${page}${view === "overview" && overviewState === "error" ? " · 加载失败" : ""} · Token Analyser`;
-  }, [view, overviewState]);
+  }, [view, hardwareTab, overviewState]);
 
   return (
     <UnitProvider unit={unit} setUnit={setUnit}>
@@ -731,7 +733,7 @@ function AppShell() {
                 会话明细
               </a>
               <a
-                href="#hardware/temps"
+                href={`#hardware/${hardwareTab}`}
                 className={view === "hardware" ? "active" : ""}
                 aria-current={view === "hardware" ? "page" : undefined}
                 onClick={(event) => navigate(event, "hardware")}

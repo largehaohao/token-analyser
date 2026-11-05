@@ -121,7 +121,7 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
 
 ## Navigation and responsive behavior
 
-Top-level navigation uses real hash links with `aria-current`. Route document title policy: `成本总览 · Token Analyser`, `会话明细 · Token Analyser`, or `硬件用电 · Token Analyser`; failures use an honest route label and never leak prompts or local paths into the title. Session selection is a button action inside the current route. A skip link targets the current main region.
+Top-level navigation uses real hash links with `aria-current`. Route document title policy: `成本总览 · Token Analyser`, `会话明细 · Token Analyser`, `硬件温度 · Token Analyser`, or `硬件用电 · Token Analyser`; failures use an honest route label and never leak prompts or local paths into the title. Session selection is a button action inside the current route. A skip link targets the current main region.
 
 The document scrolls naturally. On desktop the session selector can scroll independently; on narrow screens it remains a bounded region above the detail. The turn table scrolls horizontally with an explicit cue and vertically within its own frame. Full evidence remains reachable at 360px and reduced motion. The narrow header is not sticky, so it cannot cover the focused field or evidence.
 
