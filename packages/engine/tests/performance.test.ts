@@ -170,7 +170,10 @@ describe("per-request performance", () => {
     expect(performanceDistribution(requestTimings(turns))).toEqual({
       ttft: [1, 1, 1, 1, 0],
       // 10 / 25 / 40 全落 ≤ 40（边界含内），60 落 50–60。
-      tps: [3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      tps: [
+        3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      ],
       sampleCount: 5,
     });
   });
@@ -184,9 +187,23 @@ describe("per-request performance", () => {
     expect(performanceDistribution(requestTimings(turns))).toEqual({
       ttft: [0, 0, 0, 0, 0],
       // 70 tok/s 落 60–70 桶（上边界含内）。
-      tps: [0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      tps: [
+        0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      ],
       sampleCount: 2,
     });
+  });
+
+  it("splits fast requests in 10 tok/s steps up to 250, then keeps > 250 open", () => {
+    const turns = [150, 160, 170, 250, 251].map((speed, index) => ({
+      id: String(index), startedAt: "2026-10-08T00:00:00Z", endedAt: "2026-10-08T00:00:10Z",
+      requestPerformance: requestPerformance(null, { tokens_per_second: speed }),
+    } as Turn));
+    const { tps } = performanceDistribution(requestTimings(turns));
+    expect(tps).toHaveLength(23);
+    // 150 → 140–150，160 → 150–160，170 → 160–170，250 → 240–250，251 → > 250。
+    expect(tps.slice(11)).toEqual([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1]);
   });
 
   it("uses explicit request metadata, prefers recorded speed, and supports nested metrics", () => {

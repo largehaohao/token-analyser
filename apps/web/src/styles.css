@@ -4715,7 +4715,7 @@ button.ledger-item:focus-visible {
 .hist-tick-open-end {
   text-align: left;
 }
-/* 13 个桶的直方图：轴标签只写单边界，并把字号压到 8.5px。 */
+/* 桶多的直方图：轴标签只写单边界，并把字号压到 8.5px。 */
 .hist.dense .hist-bars,
 .hist.dense .hist-axis {
   gap: 3px;
@@ -4723,9 +4723,25 @@ button.ledger-item:focus-visible {
 .hist.dense .hist-tick {
   font-size: 8.5px;
 }
-/* 390px 下 13 个桶只剩 16px 一列：轴隔一个标，读轴不靠挤。 */
+/* 23 个桶的输出速度直方图：再压一档间距，让三位数边界能探到相邻的空位，
+ * 也尽量在宽屏下给每根柱留出 24px 的可点区域（WCAG 2.2 target-size）。 */
+.hist.very-dense .hist-bars,
+.hist.very-dense .hist-axis {
+  gap: 1px;
+}
+.hist.very-dense .hist-tick {
+  font-size: 8px;
+  overflow: visible;
+}
+/* 390px 下密集直方图一列只剩十几 px：轴隔一个标，读轴不靠挤。 */
 @media (max-width: 430px) {
   .hist.dense .hist-tick:nth-child(even) {
+    visibility: hidden;
+  }
+}
+/* 23 个桶在 560px 以下就开始挤：隔一个标，但首桶与末桶始终可见。 */
+@media (max-width: 560px) {
+  .hist.very-dense .hist-tick:nth-child(even):not(:last-child) {
     visibility: hidden;
   }
 }
@@ -5175,7 +5191,7 @@ button.ledger-item:focus-visible {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-/* 13 个桶的输出速度直方图：轴需要更宽，总览的性能卡片里改成上下叠放。 */
+/* 23 个桶的输出速度直方图：轴需要更宽，总览的性能卡片里改成上下叠放。 */
 @media (max-width: 1500px) {
   .perf-card .hist-grid {
     grid-template-columns: minmax(0, 1fr);

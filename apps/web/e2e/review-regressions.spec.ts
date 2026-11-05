@@ -5,6 +5,13 @@ function cost(raw: number): Cost {
   return { raw, uncached_input: raw / 4, cached_input: raw / 4, output: raw / 2, credits: raw / 100, usd: raw / 1000 };
 }
 
+/** 输出速度固定 23 个桶：≤40、每 10 tok/s 到 250、>250。 */
+function tpsBuckets(...counts: [index: number, count: number][]): number[] {
+  const buckets = Array<number>(23).fill(0);
+  for (const [index, count] of counts) buckets[index] = count;
+  return buckets;
+}
+
 function overview(raw = 200): Overview {
   return {
     sessionCount: 1, turnCount: 5, live: false, collecting: false, watchPath: "/tmp/review",
@@ -14,7 +21,7 @@ function overview(raw = 200): Overview {
       { date: "2026-10-21", cost: cost(100), flaggedCost: cost(50), unpricedRaw: 0 },
     ], slices: [], models: [],
     performance: { taskCount: 5, ttftSampleCount: 2, speedSampleCount: 1, avgTtftMs: 500, outputTokensPerSecond: 5, basis: "request" },
-    performanceDistribution: { ttft: [2, 0, 0, 0, 0], tps: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], sampleCount: 5 },
+    performanceDistribution: { ttft: [2, 0, 0, 0, 0], tps: tpsBuckets([0, 1]), sampleCount: 5 },
   };
 }
 
@@ -209,25 +216,39 @@ test("models retain missing usage and scroll inside the disclosure at 320px", as
   await page.screenshot({ path: testInfo.outputPath("models-320px.png"), fullPage: true });
 });
 
-test("output-speed histogram buckets: ≤40, 10-wide steps to 150, then >150", async ({ page }) => {
+test("output-speed histogram buckets: ≤40, 10-wide steps to 250, then >250", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const data: Overview = {
     ...overview(),
-    performanceDistribution: { ttft: [2, 0, 0, 0, 0], tps: [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1], sampleCount: 5 },
+    performanceDistribution: {
+      ttft: [2, 0, 0, 0, 0],
+      tps: tpsBuckets([0, 3], [21, 1], [22, 1]),
+      sampleCount: 5,
+    },
   };
   await mockOverview(page, data);
   const speed = page.locator(".hist-card").nth(1).locator(".hist");
-  await expect(speed.locator(".hb")).toHaveCount(13);
+  await expect(speed.locator(".hb")).toHaveCount(23);
   expect(await speed.locator(".hist-tick").allInnerTexts()).toEqual([
-    "≤40", "50", "60", "70", "80", "90", "100", "110", "120", "130", "140", "150", ">150",
+    "≤40", "50", "60", "70", "80", "90", "100", "110", "120", "130", "140",
+    "150", "160", "170", "180", "190", "200", "210", "220", "230", "240",
+    "250", ">250",
   ]);
   // 轴只标边界，占比与完整区间名只在悬停/点按柱体时出现。
   await expect(speed.locator(".hb").nth(1)).toHaveAttribute("title", /^40–50 tok\/s · 0 轮/);
-  await expect(speed.locator(".hb").nth(0)).toHaveAttribute("data-tip", /60%/);
-  await speed.locator(".hb").nth(0).click();
+  await expect(speed.locator(".hb").nth(21)).toHaveAttribute("title", /^240–250 tok\/s · 1 轮/);
+  await expect(speed.locator(".hb").nth(22)).toHaveAttribute("title", /^> 250 tok\/s · 1 轮/);
+  await expect(speed.locator(".hb").nth(0)).toHaveAttribute("data-tip", /60\.0%/);
+  // 直接派发 click（不移动指针，避免 hover 先置位后被 click 切换掉），验证点按也能出提示。
+  await speed.locator(".hb").nth(0).dispatchEvent("click", { bubbles: true });
   await expect(speed.locator(".hb.tip-on")).toHaveCount(1);
   await expect(speed.locator(".hb > b")).toHaveCount(0);
   await expect(page.locator(".hist-card").nth(1).locator(".hist-head .c")).toContainText(
     "5/5 轮有记录 · 多数落在 ≤ 40 tok/s",
   );
+  // 窄屏隔一个标，但首桶与末桶必须留着。
+  await page.setViewportSize({ width: 390, height: 900 });
+  await expect(speed.locator(".hist-tick").first()).toBeVisible();
+  await expect(speed.locator(".hist-tick").last()).toBeVisible();
+  await expect(speed.locator(".hist-tick").nth(1)).toBeHidden();
 });

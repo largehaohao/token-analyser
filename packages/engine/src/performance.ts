@@ -234,8 +234,8 @@ export type TimedSample = TaskTiming & {
 
 /** Fixed display buckets for the response-performance histograms. The upper
  * edge of each bucket is the axis label; the last bucket is open-ended.
- * 输出速度在 40 tok/s 以上细分：≤ 40，随后 40–50 … 140–150 每 10 tok/s 一档，
- * 最后 > 150；快模型的分布不再挤在一个桶里。 */
+ * 输出速度在 40 tok/s 以上细分：≤ 40，随后 40–50 … 240–250 每 10 tok/s 一档，
+ * 最后 > 250；快模型的分布不再挤在一个桶里。UI 的 TPS_EDGES 必须与此一致。 */
 export const TTFT_EDGES_MS = [1_000, 2_000, 3_000, 5_000] as const;
 export const TPS_EDGES = [
   40,
@@ -250,6 +250,16 @@ export const TPS_EDGES = [
   130,
   140,
   150,
+  160,
+  170,
+  180,
+  190,
+  200,
+  210,
+  220,
+  230,
+  240,
+  250,
 ] as const;
 
 export type PerformanceDistribution = {
