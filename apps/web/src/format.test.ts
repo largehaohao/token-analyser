@@ -7,6 +7,7 @@ import {
   disclaimer,
   formatCost,
   formatCostTitle,
+  formatPerformanceDuration,
   companionMoneyUnit,
   formatPercent,
   formatRelativeTime,
@@ -27,6 +28,16 @@ function cost(partial: Partial<Cost> & { raw: number }): Cost {
     ...partial,
   };
 }
+
+describe("formatPerformanceDuration", () => {
+  it("stays in seconds below a minute, then minutes, then hours", () => {
+    expect(formatPerformanceDuration(null)).toEqual({ value: "—", unit: "s" });
+    expect(formatPerformanceDuration(0)).toEqual({ value: "0.00", unit: "s" });
+    expect(formatPerformanceDuration(12_340)).toEqual({ value: "12.34", unit: "s" });
+    expect(formatPerformanceDuration(90_000)).toEqual({ value: "1.50", unit: "min" });
+    expect(formatPerformanceDuration(3_600_000)).toEqual({ value: "1.00", unit: "h" });
+  });
+});
 
 describe("allocatePercents", () => {
   it("keeps zeros at zero and sums to 100 at 1 decimal", () => {

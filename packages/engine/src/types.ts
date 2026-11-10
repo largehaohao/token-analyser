@@ -56,6 +56,16 @@ export type PerformanceSummary = {
   speedSampleCount: number;
   avgTtftMs: number | null;
   outputTokensPerSecond: number | null;
+  /** Sum of the same generation windows tok/s uses; null when none were recorded. */
+  totalDurationMs: number | null;
+  /** Sum of each model request's full durationMs, not the tok/s decode window. */
+  requestDurationMs: number | null;
+  /** How many requests contributed to requestDurationMs. */
+  requestDurationCount: number;
+  /** Sum of completed agent-task windows, or request-only session span. */
+  taskDurationMs: number | null;
+  /** How many task windows or session spans contributed to taskDurationMs. */
+  taskDurationCount: number;
   /** "task": whole agent tasks; "request": single model requests; null: no samples. */
   basis: PerformanceBasis | null;
 };

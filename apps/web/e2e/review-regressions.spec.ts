@@ -5,9 +5,9 @@ function cost(raw: number): Cost {
   return { raw, uncached_input: raw / 4, cached_input: raw / 4, output: raw / 2, credits: raw / 100, usd: raw / 1000 };
 }
 
-/** 输出速度固定 23 个桶：≤40、每 10 tok/s 到 250、>250。 */
+/** 输出速度固定 28 个桶：≤40、每 10 tok/s 到 300、>300。 */
 function tpsBuckets(...counts: [index: number, count: number][]): number[] {
-  const buckets = Array<number>(23).fill(0);
+  const buckets = Array<number>(28).fill(0);
   for (const [index, count] of counts) buckets[index] = count;
   return buckets;
 }
@@ -20,7 +20,11 @@ function overview(raw = 200): Overview {
       { date: "2026-10-20", cost: cost(200), flaggedCost: cost(100), unpricedRaw: 0 },
       { date: "2026-10-21", cost: cost(100), flaggedCost: cost(50), unpricedRaw: 0 },
     ], slices: [], models: [],
-    performance: { taskCount: 5, ttftSampleCount: 2, speedSampleCount: 1, avgTtftMs: 500, outputTokensPerSecond: 5, basis: "request" },
+    performance: {
+      taskCount: 5, ttftSampleCount: 2, speedSampleCount: 1, avgTtftMs: 500, outputTokensPerSecond: 5,
+      totalDurationMs: 2000, requestDurationMs: 3500, requestDurationCount: 5,
+      taskDurationMs: 8000, taskDurationCount: 1, basis: "request",
+    },
     performanceDistribution: { ttft: [2, 0, 0, 0, 0], tps: tpsBuckets([0, 1]), sampleCount: 5 },
   };
 }
@@ -216,28 +220,30 @@ test("models retain missing usage and scroll inside the disclosure at 320px", as
   await page.screenshot({ path: testInfo.outputPath("models-320px.png"), fullPage: true });
 });
 
-test("output-speed histogram buckets: ≤40, 10-wide steps to 250, then >250", async ({ page }) => {
+test("output-speed histogram buckets: ≤40, 10-wide steps to 300, then >300", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const data: Overview = {
     ...overview(),
     performanceDistribution: {
       ttft: [2, 0, 0, 0, 0],
-      tps: tpsBuckets([0, 3], [21, 1], [22, 1]),
+      tps: tpsBuckets([0, 3], [21, 1], [27, 1]),
       sampleCount: 5,
     },
   };
   await mockOverview(page, data);
   const speed = page.locator(".hist-card").nth(1).locator(".hist");
-  await expect(speed.locator(".hb")).toHaveCount(23);
+  await expect(speed.locator(".hb")).toHaveCount(28);
   expect(await speed.locator(".hist-tick").allInnerTexts()).toEqual([
     "≤40", "50", "60", "70", "80", "90", "100", "110", "120", "130", "140",
     "150", "160", "170", "180", "190", "200", "210", "220", "230", "240",
-    "250", ">250",
+    "250", "260", "270", "280", "290", "300", ">300",
   ]);
   // 轴只标边界，占比与完整区间名只在悬停/点按柱体时出现。
   await expect(speed.locator(".hb").nth(1)).toHaveAttribute("title", /^40–50 tok\/s · 0 轮/);
   await expect(speed.locator(".hb").nth(21)).toHaveAttribute("title", /^240–250 tok\/s · 1 轮/);
-  await expect(speed.locator(".hb").nth(22)).toHaveAttribute("title", /^> 250 tok\/s · 1 轮/);
+  await expect(speed.locator(".hb").nth(22)).toHaveAttribute("title", /^250–260 tok\/s · 0 轮/);
+  await expect(speed.locator(".hb").nth(26)).toHaveAttribute("title", /^290–300 tok\/s · 0 轮/);
+  await expect(speed.locator(".hb").nth(27)).toHaveAttribute("title", /^> 300 tok\/s · 1 轮/);
   await expect(speed.locator(".hb").nth(0)).toHaveAttribute("data-tip", /60\.0%/);
   // 直接派发 click（不移动指针，避免 hover 先置位后被 click 切换掉），验证点按也能出提示。
   await speed.locator(".hb").nth(0).dispatchEvent("click", { bubbles: true });
@@ -251,4 +257,50 @@ test("output-speed histogram buckets: ≤40, 10-wide steps to 250, then >250", a
   await expect(speed.locator(".hist-tick").first()).toBeVisible();
   await expect(speed.locator(".hist-tick").last()).toBeVisible();
   await expect(speed.locator(".hist-tick").nth(1)).toBeHidden();
+});
+
+test("session detail keeps total, input and output inside one card", async ({ page }) => {
+  await page.goto("/#overview");
+  await page.getByRole("button", { name: "全部", exact: true }).click();
+  const rank = page.locator(".rail-rank").first();
+  await expect(rank).toBeVisible();
+  await rank.click();
+  await expect(page.locator(".session-view")).toBeVisible();
+  const sessionId = await page.locator(".session-reference").getAttribute("title");
+  const snapshot: SessionSnapshot = await (
+    await page.request.get(`/sessions/${encodeURIComponent(sessionId!)}`)
+  ).json();
+  await page.route(
+    (url) => decodeURIComponent(url.pathname) === `/sessions/${sessionId}`,
+    (route) => route.fulfill({ json: {
+      ...snapshot,
+      cost: {
+        ...snapshot.cost,
+        raw: 1_000_000,
+        uncached_input: 600_000,
+        cached_input: 150_000,
+        output: 250_000,
+        unmeasured: 0,
+      },
+    } }),
+  );
+  await page.reload();
+  // 总用量、输入、输出同卡；输入含已缓存部分：600K + 150K，输出 250K，合计 1M raw。
+  await expect(page.locator(".headline-row")).toHaveCount(5);
+  const totalCard = page.locator(".headline-row").first();
+  await expect(totalCard).toContainText("总用量");
+  await expect(totalCard.getByTestId("usage-breakdown")).toBeVisible();
+  await expect(page.getByTestId("input-headline")).toContainText("750.0K");
+  await expect(page.getByTestId("output-headline")).toContainText("250.0K");
+  await expect(page.getByTestId("input-headline")).toHaveAttribute(
+    "title",
+    /^输入 750,000 tokens · 未缓存 600,000 \+ 已缓存 150,000/,
+  );
+  await expect(page.getByTestId("output-headline")).toHaveAttribute(
+    "title",
+    /^输出 250,000 tokens/,
+  );
+  await expect(page.getByTestId("usage-breakdown")).toContainText(
+    "占总量 75.0% / 25.0%",
+  );
 });

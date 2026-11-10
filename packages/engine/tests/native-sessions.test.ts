@@ -68,7 +68,9 @@ describe("native session adapters", () => {
       ttftMs: 500, durationMs: 1700, outputTokensPerSecond: 20 * 1000 / 1200, speedSource: "decode",
     });
     expect(snap.performance).toMatchObject({
-      basis: "request", avgTtftMs: 500, ttftSampleCount: 1, outputTokensPerSecond: 20 * 1000 / 1200,
+      basis: "request", avgTtftMs: 500, ttftSampleCount: 1,
+      outputTokensPerSecond: 20 * 1000 / 1200, totalDurationMs: 1200,
+      requestDurationMs: 1700, requestDurationCount: 1,
     });
     expect(snap.cost.raw).toBe(170);
   });
@@ -86,7 +88,9 @@ describe("native session adapters", () => {
     expect(snap.cost.credits).toBeNull(); expect(snap.turns[0].pricing).toBeNull();
     expect(snap.turns[0].tools[0].outputPreview).toBe("Demo README");
     expect(snap.turns[0].requestPerformance?.durationMs).toBe(2000);
-    expect(snap.performance).toMatchObject({ basis: "request", avgTtftMs: null, ttftSampleCount: 0, outputTokensPerSecond: 5 });
+    expect(snap.performance).toMatchObject({
+      basis: "request", avgTtftMs: null, ttftSampleCount: 0, outputTokensPerSecond: 5, totalDurationMs: 4000,
+    });
   });
 
   it("times pi requests from the request-timing extension and reports the decode rate", () => {
@@ -124,6 +128,9 @@ describe("native session adapters", () => {
       basis: "request", ttftSampleCount: 4, avgTtftMs: (4720 + 598 + 1200 + 800) / 4,
       speedSampleCount: 4,
       outputTokensPerSecond: (63 + 46 + 12 + 20) * 1000 / (622 + 517 + 1200 + 4000),
+      totalDurationMs: 622 + 517 + 1200 + 4000,
+      requestDurationMs: 5342 + 1115 + 1000 + 2000 + 4000,
+      requestDurationCount: 5,
     });
     // Performance figures never leak into the token ledger: usage and recorded
     // USD come from the assistant entries alone.

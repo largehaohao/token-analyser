@@ -8,7 +8,7 @@
  *   before_provider_request   t0  (payload assembled, request about to send)
  *   after_provider_response   t1  (response headers: TTFB)
  *   provider_stream_event     t2  (first raw chunk)
- *   message_update            t3  (first normalized output delta = first token)
+ *   message_update            t3  (first event that already contains output)
  *
  * `ttft_ms` is t3 − t0 and is written as a `request_timing` session entry
  * joined to the assistant entry by `turn_end.messageEntryId` (secondary key:
@@ -22,12 +22,31 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const ENTRY_TYPE = "request_timing";
 const STATUS_KEY = "request-timing";
 
-/** Normalized stream events that carry model output. `start` alone does not. */
-const DELTA_EVENTS = new Set([
-  "text_start", "text_delta",
-  "thinking_start", "thinking_delta",
-  "toolcall_start", "toolcall_delta",
-]);
+/**
+ * True when this normalized event already carries model output.
+ *
+ * pi opens a block with `text_start` / `thinking_start` before any tokens, and
+ * the block is empty at that point. A `reasoning_details` chunk can open a
+ * thinking block with no text at all. Those are not the first token. A tool
+ * name is output even when its argument delta is still empty.
+ */
+function carriesOutput(event: Record<string, unknown>): boolean {
+  const kind = event.type;
+  const delta = event.delta;
+  if ((kind === "text_delta" || kind === "thinking_delta" || kind === "toolcall_delta")
+    && typeof delta === "string" && delta.length > 0) return true;
+  const content = record(event.partial).content;
+  const index = event.contentIndex;
+  const block = Array.isArray(content) && typeof index === "number" ? record(content[index]) : {};
+  if (kind === "text_start") return typeof block.text === "string" && block.text.length > 0;
+  if (kind === "thinking_start") {
+    return block.redacted === true || (typeof block.thinking === "string" && block.thinking.length > 0);
+  }
+  if (kind === "toolcall_start" || kind === "toolcall_delta") {
+    return typeof block.name === "string" && block.name.length > 0;
+  }
+  return false;
+}
 
 interface Attempt {
   t0: number;
@@ -174,15 +193,16 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_provider_request", () => {
     if (!enabled) { pending = null; return; }
-    // Retries restart the clock: the attempt that yields the message is the
-    // one whose TTFT is recorded, and the count keeps the retries visible.
+    // A new provider call restarts the clock. HTTP retries inside one call do
+    // not emit this event, so they stay inside the attempt that was sent.
+    // The attempt that yields the message is the one whose TTFT is recorded.
     if (ready) write(null);
     const turn = pending;
     const previous = turn?.attempts ?? [];
     const gap = turnStartedAt == null ? null : Math.round(Math.max(0, now() - turnStartedAt));
     pending = {
       turnIndex,
-      harnessGapMs: turn ? null : gap,
+      harnessGapMs: turn?.harnessGapMs ?? gap,
       attempts: [...previous],
       model: turn?.model ?? null,
       provider: turn?.provider ?? null,
@@ -209,8 +229,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("message_update", (event) => {
     const attempt = current();
     if (!attempt || attempt.firstDeltaMs != null) return;
-    const kind = record(event.assistantMessageEvent).type;
-    if (typeof kind !== "string" || !DELTA_EVENTS.has(kind)) return;
+    if (!carriesOutput(record(event.assistantMessageEvent))) return;
     attempt.firstDeltaMs = Math.max(0, Math.round(now() - attempt.t0));
   });
 

@@ -161,12 +161,17 @@ export const demoPowerAdapter: PowerDataAdapter = {
 /* ------------------------------------------------------------------ */
 
 export const POWER_RANGES = [
+  { id: "10m", label: "近10分钟", ms: 10 * MINUTE },
   { id: "1h", label: "近1小时", ms: HOUR },
-  { id: "24h", label: "近24小时", ms: 24 * HOUR },
+  { id: "12h", label: "近12小时", ms: 12 * HOUR },
+  { id: "1d", label: "近1天", ms: DAY },
   { id: "7d", label: "近7天", ms: 7 * DAY },
+  { id: "30d", label: "近30天", ms: 30 * DAY },
 ] as const;
 
 export type PowerQuickRangeId = (typeof POWER_RANGES)[number]["id"];
+/** 默认看最近一小时：1 分钟级采样下曲线可读，终点贴着当前时刻。 */
+export const DEFAULT_POWER_RANGE_ID: PowerQuickRangeId = "1h";
 
 export type PowerWindow = { startMs: number; endMs: number; label: string };
 
@@ -184,7 +189,8 @@ export function resolveQuickWindow(
 
 /**
  * 采集与展示分两层：采样网格（sampleStepMs）决定用电量、平均功率与峰值的精度，
- * 积分直接跑网格上的原始采样（24 小时 1 分钟，1 小时 15 秒，7 天 5 分钟）；
+ * 积分直接跑网格上的原始采样（10 分钟 / 1 小时 15 秒，12 小时 30 秒，
+ * 1 天 1 分钟，7 天 10 分钟，30 天 30 分钟）；
  * 展示分桶（chartBucketMs）只把原始采样聚成可读的图表列均值与悬停峰值，
  * 不参与积分，因此曲线看起来多粗都不再限制采集精度。
  */

@@ -6,7 +6,7 @@ import type { TaskTiming, Turn } from "./api";
  * the overview aggregate, and the labels below are shared by both surfaces.
  */
 export const TTFT_EDGES_S = [1, 2, 3, 5] as const;
-/** 输出速度：≤ 40，随后每 10 tok/s 一档到 250，最后 > 250。 */
+/** 输出速度：≤ 40，随后每 10 tok/s 一档到 300，最后 > 300。 */
 export const TPS_EDGES = [
   40,
   50,
@@ -30,6 +30,11 @@ export const TPS_EDGES = [
   230,
   240,
   250,
+  260,
+  270,
+  280,
+  290,
+  300,
 ] as const;
 
 export type HistogramData = {
@@ -57,8 +62,8 @@ export const TTFT_LABELS = bucketLabels(TTFT_EDGES_S, "s");
 export const TPS_LABELS = bucketLabels(TPS_EDGES, " tok/s");
 
 /**
- * 轴上只标上边界：首桶 “≤ 40”、末桶 “> 250”，中间的桶只写自己的上界，
- * 23 个桶也能在卡片里读得下。完整区间名（“40–50 tok/s”）用于悬停与摘要。
+ * 轴上只标上边界：首桶 “≤ 40”、末桶 “> 300”，中间的桶只写自己的上界，
+ * 28 个桶也能在卡片里读得下。完整区间名（“40–50 tok/s”）用于悬停与摘要。
  */
 function bucketTicks(edges: readonly number[]): string[] {
   return Array.from({ length: edges.length + 1 }, (_, index) => {

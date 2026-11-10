@@ -8,6 +8,20 @@ import type {
   Turn,
 } from "./types.ts";
 
+export type DurationClocks = {
+  requestDurationMs: number | null;
+  requestDurationCount: number;
+  taskDurationMs: number | null;
+  taskDurationCount: number;
+};
+
+const EMPTY_DURATION_CLOCKS: DurationClocks = {
+  requestDurationMs: null,
+  requestDurationCount: 0,
+  taskDurationMs: null,
+  taskDurationCount: 0,
+};
+
 function record(value: unknown): Record<string, unknown> | null {
   return value != null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -43,18 +57,9 @@ export function requestPerformance(
   const recordedSpeed = field("output_tokens_per_second", "tokens_per_second", "outputTokensPerSecond");
   const output = nonnegative(outputTokens);
   // Decode rate: the first-token wait is not generation, so a request that
-  // records TTFT divides its output by (duration − TTFT). A first-token
-  // measurement stays valid when the logged duration is shorter than it — the
-  // decode window is what becomes unknown, not the measurement. Requests that
-  // only log a total duration (pi before the request-timing extension) keep
-  // the full window, which is labelled separately as "duration".
-  const generationMs = durationMs == null
-    ? null
-    : ttftMs == null
-      ? durationMs
-      : ttftMs < durationMs
-        ? durationMs - ttftMs
-        : null;
+  // records TTFT divides its output by (duration − TTFT). See
+  // `requestGenerationMs` for the windows that are not a decode interval.
+  const generationMs = requestGenerationMs(durationMs, ttftMs, output);
   const calculatedSpeed =
     generationMs != null && generationMs > 0 && output != null
       ? output * 1000 / generationMs
@@ -222,7 +227,123 @@ export function performanceSamples(
 
 export function summarizeSessions(sessions: SessionSnapshot[]): PerformanceSummary {
   const { basis, samples } = performanceSamples(sessions);
-  return { ...summarizePerformance(samples), basis };
+  return { ...summarizePerformance(samples), ...durationClocks(sessions), basis };
+}
+
+function positiveMs(value: number | null | undefined): number | null {
+  return value != null && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function parseIsoMs(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function spanMs(
+  starts: Array<string | null | undefined>,
+  ends: Array<string | null | undefined>,
+): number | null {
+  let first: number | null = null;
+  let last: number | null = null;
+  for (const iso of starts) {
+    const ms = parseIsoMs(iso);
+    if (ms != null) first = first == null ? ms : Math.min(first, ms);
+  }
+  for (const iso of ends) {
+    const ms = parseIsoMs(iso);
+    if (ms != null) last = last == null ? ms : Math.max(last, ms);
+  }
+  return first != null && last != null && last > first ? last - first : null;
+}
+
+function endedAtInRange(
+  endedAt: string | null | undefined,
+  sinceMs?: number,
+  untilMs?: number,
+): boolean {
+  if (sinceMs == null && untilMs == null) return true;
+  const ms = parseIsoMs(endedAt);
+  if (ms == null) return false;
+  if (sinceMs != null && ms < sinceMs) return false;
+  if (untilMs != null && ms >= untilMs) return false;
+  return true;
+}
+
+function turnInClockRange(
+  turn: Turn,
+  sinceMs?: number,
+  untilMs?: number,
+): boolean {
+  return endedAtInRange(turn.endedAt || turn.startedAt, sinceMs, untilMs);
+}
+
+/**
+ * Two clocks distinct from the tok/s denominator:
+ * requestDurationMs sums each request's full durationMs;
+ * taskDurationMs sums completed agent-task windows, or a request-only
+ * session's first-request-start → last-request-end (else startedAt→lastEventAt).
+ */
+export function durationClocks(
+  sessions: SessionSnapshot[],
+  opts?: {
+    sinceMs?: number;
+    untilMs?: number;
+    turnFilter?: (turn: Turn) => boolean;
+    requestOnly?: boolean;
+  },
+): DurationClocks {
+  let requestSum = 0;
+  let requestCount = 0;
+  let taskSum = 0;
+  let taskCount = 0;
+  const sinceMs = opts?.sinceMs;
+  const untilMs = opts?.untilMs;
+  const ranged = sinceMs != null || untilMs != null;
+
+  function visit(session: SessionSnapshot): void {
+    const turns = session.turns.filter((turn) => {
+      if (!turnInClockRange(turn, sinceMs, untilMs)) return false;
+      return opts?.turnFilter == null || opts.turnFilter(turn);
+    });
+    for (const sample of requestTimings(turns)) {
+      const ms = positiveMs(sample.durationMs);
+      if (ms == null) continue;
+      requestSum += ms;
+      requestCount += 1;
+    }
+
+    const ownTasks = session.taskTimings ?? [];
+    if (!opts?.requestOnly && ownTasks.length > 0) {
+      for (const task of ownTasks) {
+        if (!endedAtInRange(task.endedAt, sinceMs, untilMs)) continue;
+        const ms = positiveMs(task.durationMs);
+        if (ms == null) continue;
+        taskSum += ms;
+        taskCount += 1;
+      }
+    } else {
+      const span = spanMs(
+        turns.map((turn) => turn.startedAt),
+        turns.map((turn) => turn.endedAt),
+      ) ?? (!ranged && !opts?.requestOnly
+        ? spanMs([session.startedAt], [session.lastEventAt])
+        : null);
+      if (span != null) {
+        taskSum += span;
+        taskCount += 1;
+      }
+    }
+    for (const child of session.children) visit(child);
+  }
+
+  for (const session of sessions) visit(session);
+  return {
+    requestDurationMs: requestCount > 0 ? requestSum : null,
+    requestDurationCount: requestCount,
+    taskDurationMs: taskCount > 0 ? taskSum : null,
+    taskDurationCount: taskCount,
+  };
 }
 
 /** A timing sample plus the unit it measured: an agent task or one request. */
@@ -234,8 +355,8 @@ export type TimedSample = TaskTiming & {
 
 /** Fixed display buckets for the response-performance histograms. The upper
  * edge of each bucket is the axis label; the last bucket is open-ended.
- * 输出速度在 40 tok/s 以上细分：≤ 40，随后 40–50 … 240–250 每 10 tok/s 一档，
- * 最后 > 250；快模型的分布不再挤在一个桶里。UI 的 TPS_EDGES 必须与此一致。 */
+ * 输出速度在 40 tok/s 以上细分：≤ 40，随后 40–50 … 290–300 每 10 tok/s 一档，
+ * 最后 > 300；快模型的分布不再挤在一个桶里。UI 的 TPS_EDGES 必须与此一致。 */
 export const TTFT_EDGES_MS = [1_000, 2_000, 3_000, 5_000] as const;
 export const TPS_EDGES = [
   40,
@@ -260,6 +381,11 @@ export const TPS_EDGES = [
   230,
   240,
   250,
+  260,
+  270,
+  280,
+  290,
+  300,
 ] as const;
 
 export type PerformanceDistribution = {
@@ -294,15 +420,37 @@ export function performanceDistribution(
   return { ttft, tps, sampleCount: samples.length };
 }
 
-/** Generation/decode window for tok/s. Request samples exclude TTFT when known;
- * a request whose TTFT reaches the end of the logged window has no decode
- * window at all and reports no speed. Task samples keep the full window
- * (tools and waits stay in the denominator). */
+/**
+ * Generation window for one model request, in ms.
+ *
+ * No TTFT: the whole duration (a log that never recorded the first token).
+ * TTFT at or past the end: the measurement stands, but there is no decode
+ * interval. A tail of 20ms or less that contains more tokens than
+ * milliseconds is one buffered flush — the body arrived already formed, so
+ * dividing by that tail reports a drain rate, not a decode rate. Zero output
+ * and no first token means the request never generated anything (auth failure,
+ * connection error, engine crash); its duration is not decode time.
+ */
+export function requestGenerationMs(
+  durationMs: number | null,
+  ttftMs: number | null,
+  outputTokens: number | null,
+): number | null {
+  if (durationMs == null || durationMs <= 0) return null;
+  if (ttftMs == null) return outputTokens === 0 ? null : durationMs;
+  if (ttftMs >= durationMs) return null;
+  const window = durationMs - ttftMs;
+  if (window <= 20 && outputTokens != null && outputTokens > window) return null;
+  return window;
+}
+
+/** Generation/decode window for tok/s. Request samples use `requestGenerationMs`.
+ * Task samples keep the full window (tools and waits stay in the denominator). */
 function sampleGenerationMs(sample: TimedSample): number | null {
-  if (sample.durationMs == null || sample.durationMs <= 0) return null;
-  if (sample.basis === "request" && sample.ttftMs != null) {
-    return sample.ttftMs < sample.durationMs ? sample.durationMs - sample.ttftMs : null;
+  if (sample.basis === "request") {
+    return requestGenerationMs(sample.durationMs, sample.ttftMs, sample.outputTokens ?? null);
   }
+  if (sample.durationMs == null || sample.durationMs <= 0) return null;
   return sample.durationMs;
 }
 
@@ -338,6 +486,8 @@ export function summarizePerformance(samples: TimedSample[]): PerformanceSummary
     speedSampleCount,
     avgTtftMs: ttftSampleCount > 0 ? ttftSum / ttftSampleCount : null,
     outputTokensPerSecond: speedSampleCount > 0 ? outputSum * 1000 / generationSum : null,
+    totalDurationMs: speedSampleCount > 0 ? generationSum : null,
+    ...EMPTY_DURATION_CLOCKS,
     basis: samples.length === 0 ? null
       : samples.some((sample) => sample.basis == null || sample.basis === "task") ? "task" : "request",
   };

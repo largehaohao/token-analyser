@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  durationClocks,
   extractTaskTimings,
   performanceDistribution,
   requestPerformance,
@@ -7,6 +8,11 @@ import {
   summarizePerformance,
   summarizeSessions,
 } from "../src/performance.ts";
+
+const noClocks = {
+  requestDurationMs: null, requestDurationCount: 0,
+  taskDurationMs: null, taskDurationCount: 0,
+};
 import { analyseSession } from "../src/snapshot.ts";
 import { buildOverview } from "../src/overview.ts";
 import { emptyCost, type RolloutLine, type SessionSnapshot, type Turn } from "../src/types.ts";
@@ -52,7 +58,8 @@ describe("task performance", () => {
     });
     expect(summarizePerformance(samples)).toEqual({
       taskCount: 1, ttftSampleCount: 1, speedSampleCount: 1,
-      avgTtftMs: 1200, outputTokensPerSecond: 50, basis: "task",
+      avgTtftMs: 1200, outputTokensPerSecond: 50, totalDurationMs: 10_000, basis: "task",
+      ...noClocks,
     });
   });
 
@@ -64,7 +71,7 @@ describe("task performance", () => {
     expect(samples.map((sample) => sample.durationMs)).toEqual([10_000, 2000]);
     expect(summarizePerformance(samples)).toMatchObject({
       taskCount: 2, ttftSampleCount: 0, avgTtftMs: null,
-      speedSampleCount: 2, outputTokensPerSecond: 12.5,
+      speedSampleCount: 2, outputTokensPerSecond: 12.5, totalDurationMs: 12_000,
     });
   });
 
@@ -90,7 +97,9 @@ describe("task performance", () => {
     expect(summarizePerformance(samples)).toMatchObject({
       ttftSampleCount: 1, avgTtftMs: 0, speedSampleCount: 1, outputTokensPerSecond: 100,
     });
-    expect(summarizePerformance([])).toMatchObject({ avgTtftMs: null, outputTokensPerSecond: null });
+    expect(summarizePerformance([])).toMatchObject({
+      avgTtftMs: null, outputTokensPerSecond: null, totalDurationMs: null,
+    });
   });
 
   it("aggregates child tasks once and filters overview measurements by completion time", () => {
@@ -102,11 +111,15 @@ describe("task performance", () => {
       events: [start(0), count(1, 100), complete(10, "t1", { duration_ms: 10_000, time_to_first_token_ms: 1000 })],
       path: "/tmp/root.jsonl", sessionId: "root", children: [child],
     });
-    expect(root.performance).toMatchObject({ taskCount: 2, avgTtftMs: 1500, outputTokensPerSecond: 500 / 30 });
+    expect(root.performance).toMatchObject({
+      taskCount: 2, avgTtftMs: 1500, outputTokensPerSecond: 500 / 30, totalDurationMs: 30_000,
+    });
     const overview = buildOverview([root], { watchPath: "/tmp", sinceMs: base + 15_000, now: "2026-10-08T00:01:00Z" });
     expect(overview.performance).toEqual({
       taskCount: 1, ttftSampleCount: 1, speedSampleCount: 1,
-      avgTtftMs: 2000, outputTokensPerSecond: 20, basis: "task",
+      avgTtftMs: 2000, outputTokensPerSecond: 20, totalDurationMs: 20_000, basis: "task",
+      requestDurationMs: null, requestDurationCount: 0,
+      taskDurationMs: 20_000, taskDurationCount: 1,
     });
   });
 });
@@ -142,7 +155,54 @@ describe("session performance basis", () => {
     });
     expect(summarizeSessions([pi])).toEqual({
       taskCount: 1, ttftSampleCount: 0, speedSampleCount: 1,
-      avgTtftMs: null, outputTokensPerSecond: 5, basis: "request",
+      avgTtftMs: null, outputTokensPerSecond: 5, totalDurationMs: 2000, basis: "request",
+      requestDurationMs: 2000, requestDurationCount: 1,
+      taskDurationMs: 2000, taskDurationCount: 1,
+    });
+  });
+
+  it("lists full request duration and task-completion time as distinct clocks", () => {
+    const withTtft = requestTurn("codex:1:r1", 10, 2000, 500);
+    const later = requestTurn("codex:1:r2", 10, 3000, 1000);
+    later.startedAt = "2026-10-08T00:00:08.000Z";
+    later.endedAt = "2026-10-08T00:00:12.000Z";
+    const codex = snapshot("codex:1", {
+      taskTimings: [{
+        id: "t1", startedAt: "2026-10-08T00:00:00.000Z", endedAt: "2026-10-08T00:00:10.000Z",
+        durationMs: 10_000, ttftMs: 1000, outputTokens: 500,
+      }],
+      turns: [withTtft, later],
+    });
+    expect(summarizeSessions([codex])).toMatchObject({
+      basis: "task",
+      totalDurationMs: 10_000,
+      requestDurationMs: 5000,
+      requestDurationCount: 2,
+      taskDurationMs: 10_000,
+      taskDurationCount: 1,
+    });
+    // tok/s decode window (2000−500 + 3000−1000 = 3500) is not the request clock.
+    expect(durationClocks([codex]).requestDurationMs).toBe(5000);
+
+    const first = requestTurn("pi:1:r1", 10, 2000, 400);
+    const second = requestTurn("pi:1:r2", 20, 3000, 500);
+    second.startedAt = "2026-10-08T00:00:05.000Z";
+    second.endedAt = "2026-10-08T00:00:09.000Z";
+    const pi = snapshot("pi:1", {
+      source: "pi",
+      startedAt: "2026-10-08T00:00:00.000Z",
+      lastEventAt: "2026-10-08T00:00:09.000Z",
+      turns: [first, second],
+      taskTimings: [],
+    });
+    expect(summarizeSessions([pi])).toMatchObject({
+      basis: "request",
+      // tok/s uses decode windows: (2000−400) + (3000−500) = 4100.
+      totalDurationMs: 4100,
+      requestDurationMs: 5000,
+      requestDurationCount: 2,
+      taskDurationMs: 9000,
+      taskDurationCount: 1,
     });
   });
 
@@ -172,7 +232,7 @@ describe("per-request performance", () => {
       // 10 / 25 / 40 全落 ≤ 40（边界含内），60 落 50–60。
       tps: [
         3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       ],
       sampleCount: 5,
     });
@@ -189,21 +249,22 @@ describe("per-request performance", () => {
       // 70 tok/s 落 60–70 桶（上边界含内）。
       tps: [
         0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       ],
       sampleCount: 2,
     });
   });
 
-  it("splits fast requests in 10 tok/s steps up to 250, then keeps > 250 open", () => {
-    const turns = [150, 160, 170, 250, 251].map((speed, index) => ({
+  it("splits fast requests in 10 tok/s steps up to 300, then keeps > 300 open", () => {
+    const turns = [150, 160, 170, 250, 251, 300, 301].map((speed, index) => ({
       id: String(index), startedAt: "2026-10-08T00:00:00Z", endedAt: "2026-10-08T00:00:10Z",
       requestPerformance: requestPerformance(null, { tokens_per_second: speed }),
     } as Turn));
     const { tps } = performanceDistribution(requestTimings(turns));
-    expect(tps).toHaveLength(23);
-    // 150 → 140–150，160 → 150–160，170 → 160–170，250 → 240–250，251 → > 250。
-    expect(tps.slice(11)).toEqual([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1]);
+    expect(tps).toHaveLength(28);
+    // 150 → 140–150，160 → 150–160，170 → 160–170，250 → 240–250，
+    // 251 → 250–260，300 → 290–300，301 → > 300。
+    expect(tps.slice(11)).toEqual([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1]);
   });
 
   it("uses explicit request metadata, prefers recorded speed, and supports nested metrics", () => {
@@ -218,6 +279,28 @@ describe("per-request performance", () => {
       ttftMs: null, durationMs: 2000, outputTokensPerSecond: 50, speedSource: "duration",
     });
   });
+  it("drops a buffered flush and a token-less failure from the decode rate", () => {
+    // 199 tokens in the last 15ms: the body was flushed. TTFT stays; speed does not.
+    expect(requestPerformance(199, { ttft_ms: 1355, duration_ms: 1370 })).toMatchObject({
+      ttftMs: 1355, durationMs: 1370, outputTokensPerSecond: null, speedSource: null,
+    });
+    // Auth failure / engine crash: duration with zero output and no first token.
+    expect(requestPerformance(0, { duration_ms: 67_244 })).toMatchObject({
+      ttftMs: null, durationMs: 67_244, outputTokensPerSecond: null, speedSource: null,
+    });
+    const samples = [
+      { id: "ok", startedAt: null, endedAt: "", durationMs: 2000, ttftMs: 500, outputTokens: 150, basis: "request" as const },
+      { id: "flush", startedAt: null, endedAt: "", durationMs: 1370, ttftMs: 1355, outputTokens: 199, basis: "request" as const },
+      { id: "err", startedAt: null, endedAt: "", durationMs: 67_244, ttftMs: null, outputTokens: 0, basis: "request" as const },
+    ];
+    expect(summarizePerformance(samples)).toMatchObject({
+      ttftSampleCount: 2,
+      speedSampleCount: 1,
+      outputTokensPerSecond: 150 * 1000 / 1500,
+      totalDurationMs: 1500,
+    });
+  });
+
   it("preserves real zeros and leaves missing or invalid measurements unknown", () => {
     expect(requestPerformance(0, { ttft_ms: 0, duration_ms: 1000 })).toMatchObject({ ttftMs: 0, outputTokensPerSecond: 0 });
     expect(requestPerformance(null, { duration_ms: 1000 })).toMatchObject({ outputTokensPerSecond: null, speedSource: null });

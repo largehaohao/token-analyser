@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_POWER_RANGE_ID,
   DEFAULT_PRICE_CNY_PER_KWH,
   POWER_DEMO_ANCHOR_MS,
   POWER_RANGES,
@@ -92,7 +93,10 @@ export function HardwarePowerPage({
   now: number;
   adapter?: PowerDataAdapter;
 }) {
-  const [mode, setMode] = useState<RangeMode>({ kind: "quick", id: "24h" });
+  const [mode, setMode] = useState<RangeMode>({
+    kind: "quick",
+    id: DEFAULT_POWER_RANGE_ID,
+  });
   const [startDraft, setStartDraft] = useState("");
   const [endDraft, setEndDraft] = useState("");
   const [rangeErrors, setRangeErrors] = useState<
@@ -101,6 +105,7 @@ export function HardwarePowerPage({
   const [priceRaw, setPriceRaw] = useState(String(DEFAULT_PRICE_CNY_PER_KWH));
   const [tipIndex, setTipIndex] = useState<number | null>(null);
   const [tipPos, setTipPos] = useState({ left: 8, top: 8 });
+  const chartScrollRef = useRef<HTMLDivElement>(null);
 
   const price = parsePrice(priceRaw);
 
@@ -296,20 +301,31 @@ export function HardwarePowerPage({
 
   const n = buckets.length;
   const chartWidth = Math.max(680, PLOT_LEFT + n * COL_W);
+  const rangeKey =
+    mode.kind === "quick"
+      ? mode.id
+      : `${mode.window.startMs}:${mode.window.endMs}`;
+  // 宽曲线默认停在最新一端；只在切换窗口或列数变化时复位，避免 now 刷新抢走横向浏览。
+  useLayoutEffect(() => {
+    const el = chartScrollRef.current;
+    if (!el || n < 2) return;
+    const snapToLatest = () => {
+      el.scrollLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+    };
+    snapToLatest();
+    const frame = requestAnimationFrame(snapToLatest);
+    return () => cancelAnimationFrame(frame);
+  }, [rangeKey, n, chartWidth]);
+  // 曲线只画分桶均值，纵轴也只按均值定标并留 8% 余量；桶内峰值仍由悬停与
+  // 明细表给出，避免偶发尖峰把整条曲线压到图底。
   const yMax = niceMaxW(
-    Math.max(
-      0,
-      ...buckets.flatMap((b) =>
-        [
-          b.cpu,
-          b.gpu,
-          b.machine,
-          b.peak.cpu,
-          b.peak.gpu,
-          b.peak.machine,
-        ].filter((v): v is number => v != null),
+    1.08 *
+      Math.max(
+        0,
+        ...buckets.flatMap((b) =>
+          [b.cpu, b.gpu, b.machine].filter((v): v is number => v != null),
+        ),
       ),
-    ),
   );
   const x = (i: number) => PLOT_LEFT + i * COL_W + COL_W / 2;
   const y = (w: number) => PLOT_TOP + PLOT_H - (PLOT_H * w) / yMax;
@@ -356,6 +372,29 @@ export function HardwarePowerPage({
   const rangeSub =
     mode.kind === "quick" ? activeWindow.label : "自定义范围";
 
+  // 整机用电量 = CPU + GPU + 其他硬件（同一采样上的差值），可直接拆成占比。
+  const energyParts = [
+    { key: "cpu", label: "CPU", integral: integrals.cpu },
+    { key: "gpu", label: "GPU", integral: integrals.gpu },
+    { key: "other", label: "其他硬件", integral: integrals.other },
+  ];
+  const energySharePct = (kwh: number | null): number | null => {
+    const total = integrals.machine.kwh;
+    if (kwh == null || total == null || total <= 0) return null;
+    return (100 * kwh) / total;
+  };
+  const energyShare = (kwh: number | null) => {
+    const pct = energySharePct(kwh);
+    return pct == null ? "—" : `${pct.toFixed(1)}%`;
+  };
+  const loadScaleW = Math.max(current.machine ?? 0, integrals.machine.peakW ?? 0, 1);
+  const loadNowPct =
+    current.machine == null ? 0 : Math.min(100, (100 * current.machine) / loadScaleW);
+  const loadPeakPct =
+    integrals.machine.peakW == null
+      ? 0
+      : Math.min(100, (100 * integrals.machine.peakW) / loadScaleW);
+
   return (
     <main className="overview power-page" data-testid="power-page">
       <header className="page-heading">
@@ -366,31 +405,7 @@ export function HardwarePowerPage({
               {formatWindowRange(activeWindow)} · {rangeSub}
             </span>
           </div>
-          <p>
-            查看 CPU、GPU 与整机的当前功率，以及所选时间段的用电量和电费。
-          </p>
-          <p className="power-heading-summary" data-testid="power-summary">
-            <span className="power-heading-figure">
-              <span className="power-heading-figure-label">{rangeSub}用电量</span>
-              <span className="power-heading-figure-value">
-                {formatKwh(integrals.machine)}
-                <span className="power-heading-figure-unit"> kWh</span>
-              </span>
-            </span>
-            <span className="power-heading-figure">
-              <span className="power-heading-figure-label">
-                {live ? "电费" : "演示电费"}
-              </span>
-              <span className="power-heading-figure-value">
-                {formatCny(cost(integrals.machine), integrals.machine.complete)}
-              </span>
-            </span>
-            <span className="power-heading-figure-note">
-              电价{" "}
-              {price.error ? "—" : formatPricePerKwh(price.value)}{" "}
-              元/kWh · {formatWindowRange(activeWindow)}
-            </span>
-          </p>
+          <p>整机用电量、电费与当前功率；分项来自 CPU、GPU 与其他硬件。</p>
         </div>
       </header>
 
@@ -409,74 +424,128 @@ export function HardwarePowerPage({
         </Notice>
       )}
 
+      <section
+        className="chart-card power-energy-hero"
+        aria-label="所选范围累计用电与电费"
+        data-testid="power-energy-hero"
+      >
+        <p className="power-heading-summary" data-testid="power-summary">
+          <span className="power-heading-kicker">
+            {rangeSub}用电量 · 整机口径
+          </span>
+          <span className="power-heading-note">
+            电价 {price.error ? "—" : formatPricePerKwh(price.value)} 元/kWh ·{" "}
+            {formatWindowRange(activeWindow)}
+          </span>
+        </p>
+        <div className="power-energy-top">
+          <div className="power-energy-primary">
+            <span className="ledger-label">整机用电量</span>
+            <span className="ledger-value power-hero-value">
+              {formatKwh(integrals.machine)}
+              <span className="ledger-unit"> kWh</span>
+            </span>
+            <span className="ledger-delta">
+              {integrals.machine.kwh == null
+                ? `${rangeSub}无整机采样`
+                : `覆盖 ${formatCoverage(integrals.machine)} · 含其他硬件`}
+            </span>
+          </div>
+          <div className="power-energy-cost">
+            <span className="ledger-label">
+              {live ? "估算电费" : "演示电费"}
+            </span>
+            <span className="ledger-value power-hero-value power-hero-cost">
+              {formatCny(cost(integrals.machine), integrals.machine.complete)}
+            </span>
+            <span className="ledger-delta">
+              {price.error
+                ? "电价无效，电费显示 —"
+                : integrals.machine.kwh == null
+                  ? `${rangeSub}无整机采样`
+                  : `电价 ${formatPricePerKwh(price.value)} 元/kWh · ${live ? "本地估算，不计入 Token 成本" : "演示值，不计入 Token 成本"}`}
+            </span>
+          </div>
+        </div>
+        <dl className="power-energy-stats">
+          <div>
+            <dt>区间平均</dt>
+            <dd>{formatWatts(integrals.machine.avgW)}</dd>
+            <span className="power-stat-hint">整机口径</span>
+          </div>
+          <div>
+            <dt>区间峰值</dt>
+            <dd>{formatWatts(integrals.machine.peakW)}</dd>
+            <span className="power-stat-hint">原始采样</span>
+          </div>
+          <div className="power-stat-now">
+            <dt>当前功率</dt>
+            <dd>{formatWatts(current.machine)}</dd>
+            <span className="power-stat-hint">
+              {current.machine == null
+                ? "当前时刻无采样"
+                : `采样于 ${formatClock(current.t)}`}
+            </span>
+            {current.machine != null && integrals.machine.peakW != null && (
+              <div
+                className="power-load-track"
+                aria-hidden="true"
+                title={`当前相对区间峰值 ${Math.round(loadNowPct)}%`}
+              >
+                <i className="power-load-fill" style={{ width: `${loadNowPct}%` }} />
+                <i className="power-load-peak" style={{ left: `${loadPeakPct}%` }} />
+              </div>
+            )}
+          </div>
+          <div>
+            <dt>统计窗口</dt>
+            <dd>{formatDuration(spanMs)}</dd>
+            <span className="power-stat-hint">{formatWindowRange(activeWindow)}</span>
+          </div>
+        </dl>
+        <div className="power-energy-breakdown">
+          <div className="power-energy-breakdown-head">
+            <span>用电构成</span>
+            <span>整机 = CPU + GPU + 其他硬件</span>
+          </div>
+          <div className="power-energy-bar" aria-hidden="true">
+            {energyParts.map((part) => {
+              const pct = energySharePct(part.integral.kwh);
+              return (
+                <span
+                  key={part.key}
+                  className={`power-energy-seg ${part.key}`}
+                  style={{ flex: `${Math.max(pct ?? 0.1, 0.1)} 1 0%` }}
+                >
+                  {pct != null && pct >= 14
+                    ? `${part.label} ${pct.toFixed(0)}%`
+                    : ""}
+                </span>
+              );
+            })}
+          </div>
+          <div className="power-energy-legend">
+            {energyParts.map((part) => (
+              <span key={part.key}>
+                <i className={`power-energy-dot ${part.key}`} aria-hidden="true" />
+                {part.label} <b>{formatKwh(part.integral)} kWh</b>
+                <em>{energyShare(part.integral.kwh)}</em>
+              </span>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className="chart-card power-controls" aria-label="统计范围与电价">
         <div className="chart-head">
           <div>
             <h2 className="chart-title">统计范围与电价</h2>
             <p className="chart-desc">
-              时间范围作用于趋势、用电量和电费；当前功率不受范围影响。采样粒度越细，
-              用电量与峰值越接近真实用电曲线；曲线只按分桶均值展示。
+              时间范围在功率趋势中选择，用电量与电费跟同一窗口；当前功率不受范围影响。
             </p>
           </div>
         </div>
         <div className="power-controls-grid">
-          <div className="filter-field">
-            <span className="filter-label" id="power-range-label">
-              时间范围
-            </span>
-            <SegmentedControl
-              className="power-range-switch"
-              label="时间范围"
-              value={mode.kind === "quick" ? mode.id : "custom"}
-              options={RANGE_OPTIONS}
-              onChange={switchRange}
-            />
-          </div>
-          {mode.kind === "custom" && <form className="power-custom-form" noValidate onSubmit={applyCustom}>
-            <div className="power-field">
-              <label htmlFor="power-start">开始时间</label>
-              <input
-                id="power-start"
-                className="power-input"
-                type="datetime-local"
-                value={startDraft}
-                onInput={(e) => setStartDraft(e.currentTarget.value)}
-                onChange={(e) => setStartDraft(e.target.value)}
-                aria-invalid={rangeErrors.some((err) => err.field === "start")}
-                aria-describedby={rangeErrors.some((err) => err.field === "start") ? "power-start-error" : undefined}
-              />
-              {rangeErrors
-                .filter((err) => err.field === "start")
-                .map((err) => (
-                  <p key={err.message} id="power-start-error" className="power-error" role="alert">
-                    {err.message}
-                  </p>
-                ))}
-            </div>
-            <div className="power-field">
-              <label htmlFor="power-end">结束时间</label>
-              <input
-                id="power-end"
-                className="power-input"
-                type="datetime-local"
-                value={endDraft}
-                onInput={(e) => setEndDraft(e.currentTarget.value)}
-                onChange={(e) => setEndDraft(e.target.value)}
-                aria-invalid={rangeErrors.some((err) => err.field === "end")}
-                aria-describedby={rangeErrors.some((err) => err.field === "end") ? "power-end-error" : undefined}
-              />
-              {rangeErrors
-                .filter((err) => err.field === "end")
-                .map((err) => (
-                  <p key={err.message} id="power-end-error" className="power-error" role="alert">
-                    {err.message}
-                  </p>
-                ))}
-            </div>
-            <Button type="submit" className="power-apply">
-              应用自定义范围
-            </Button>
-          </form>}
           <div className="power-field">
             <label htmlFor="power-price">电价（元/kWh）</label>
             <input
@@ -497,7 +566,7 @@ export function HardwarePowerPage({
               </p>
             )}
             <p className="power-note">
-              默认电价 {formatPricePerKwh(DEFAULT_PRICE_CNY_PER_KWH)} 元/kWh，可调整；电费 = 范围用电量 × 电价，仅为演示。
+              默认 {formatPricePerKwh(DEFAULT_PRICE_CNY_PER_KWH)} 元/kWh；电费 = 用电量 × 电价，不计入 Token 成本。
             </p>
           </div>
         </div>
@@ -510,100 +579,155 @@ export function HardwarePowerPage({
       </section>
 
       <section className="ledger power-ledger-now" aria-label="当前瞬时功率">
-        {(["cpu", "gpu", "machine"] as const).map((key) => {
+        {(["machine", "cpu", "gpu"] as const).map((key) => {
           const meta = POWER_SERIES.find((s) => s.key === key)!;
           const v = current[key];
+          const isTotal = key === "machine";
           return (
-            <div className="ledger-item" key={key}>
+            <div
+              className={`ledger-item${isTotal ? " power-now-total" : ""}`}
+              key={key}
+            >
               <span className="ledger-label">
-                {key === "machine" ? "整机" : meta.label} 当前功率
+                {isTotal ? "整机当前功率" : `${meta.label} 当前功率`}
               </span>
-              <span className="ledger-value">
+              <span className="ledger-value power-now-value">
                 {v == null ? "—" : Math.round(v).toLocaleString("zh-CN")}
                 <span className="ledger-unit"> W</span>
               </span>
               <span className="ledger-delta">
                 {v == null
                   ? "当前时刻无采样"
-                  : `瞬时功率 · 当前值 · 采样于 ${formatClock(current.t)}`}
-                {key === "machine" && v != null ? " · 含其他硬件" : ""}
+                  : `采样于 ${formatClock(current.t)}`}
+                {isTotal && v != null ? " · 含其他硬件" : ""}
               </span>
+              {isTotal && v != null && (
+                <>
+                  <div
+                    className="power-now-split"
+                    aria-hidden="true"
+                  >
+                    {[
+                      { key: "cpu", value: current.cpu ?? 0 },
+                      { key: "gpu", value: current.gpu ?? 0 },
+                      { key: "other", value: otherNow ?? 0 },
+                    ].map((part) => (
+                      <i
+                        key={part.key}
+                        className={`power-now-seg ${part.key}`}
+                        style={{ flex: Math.max(part.value, 1) }}
+                      />
+                    ))}
+                  </div>
+                  <span className="power-now-split-note">
+                    CPU {formatWatts(current.cpu)} · GPU {formatWatts(current.gpu)} ·
+                    其他 {formatWatts(otherNow)}
+                  </span>
+                </>
+              )}
             </div>
           );
         })}
       </section>
 
-      <section
-        className="ledger power-ledger-range power-energy-hero"
-        aria-label="所选范围累计用电与电费"
-        data-testid="power-energy-hero"
-      >
-        <div className="ledger-item power-hero-item">
-          <span className="ledger-label">整机 用电量（{rangeSub}）</span>
-          <span className="ledger-value power-hero-value">
-            {formatKwh(integrals.machine)}
-            <span className="ledger-unit"> kWh</span>
-          </span>
-          <span className="ledger-delta">
-            {integrals.machine.kwh == null
-              ? `${rangeSub}无整机采样`
-              : `${formatWindowRange(activeWindow)} · 覆盖 ${formatCoverage(integrals.machine)}`}
-          </span>
-        </div>
-        <div className="ledger-item power-hero-item">
-          <span className="ledger-label">
-            整机 {live ? "电费" : "演示电费"}（{rangeSub}）
-          </span>
-          <span className="ledger-value power-hero-value">
-            {formatCny(cost(integrals.machine), integrals.machine.complete)}
-          </span>
-          <span className="ledger-delta">
-            {price.error
-              ? "电价无效，电费显示 —"
-              : integrals.machine.kwh == null
-                ? `${rangeSub}无整机采样`
-                : `电价 ${formatPricePerKwh(price.value)} 元/kWh · ${live ? "本地估算，不计入 Token 成本" : "演示值，不计入 Token 成本"}`}
-          </span>
-        </div>
-      </section>
-
-      <section className="chart-card" data-testid="power-trend" aria-label="功率趋势">
-        <div className="chart-head">
+      <section className="chart-card power-trend" data-testid="power-trend" aria-label="功率趋势">
+        <div className="chart-head power-trend-head">
           <div>
             <h2 className="chart-title">功率趋势</h2>
             <p className="chart-desc">
-              {formatWindowRange(activeWindow)} · {rangeSub} · 采集粒度每{" "}
-              {formatDuration(stepMs)}（{samples.length} 个采样），曲线每{" "}
-              {formatDuration(bucketMs)} 取一列均值（{n} 列），桶内峰值见悬停与明细表。
-              颜色与线型区分设备，断开表示缺失。左右滚动查看完整范围，聚焦数据列查看数值，Esc 关闭。
+              {formatWindowRange(activeWindow)} · {rangeSub}
             </p>
           </div>
-          <div className="chart-legend power-legend" aria-hidden="true">
-            {POWER_SERIES.map((s) => (
-              <span key={s.key}>
-                <svg width="22" height="8" viewBox="0 0 22 8" aria-hidden="true">
-                  <line
-                    x1="1"
-                    y1="4"
-                    x2="21"
-                    y2="4"
-                    stroke={s.color}
-                    strokeWidth="2"
-                    strokeDasharray={s.dash === "none" ? undefined : s.dash}
-                  />
-                </svg>
-                {s.key === "machine" ? (live ? "整机（墙插估算）" : "整机（总量）") : s.label}
-              </span>
-            ))}
-            <span>断开 = 缺失（—）</span>
-            <span>曲线 = {formatDuration(bucketMs)} 均值 · 峰值见悬停</span>
-          </div>
+          <SegmentedControl
+            className="power-range-switch power-trend-ranges"
+            label="时间范围"
+            value={mode.kind === "quick" ? mode.id : "custom"}
+            options={RANGE_OPTIONS}
+            onChange={switchRange}
+          />
+        </div>
+        {mode.kind === "custom" && (
+          <form className="power-custom-form" noValidate onSubmit={applyCustom}>
+            <div className="power-field">
+              <label htmlFor="power-start">开始时间</label>
+              <input
+                id="power-start"
+                className="power-input"
+                type="datetime-local"
+                value={startDraft}
+                onInput={(e) => setStartDraft(e.currentTarget.value)}
+                onChange={(e) => setStartDraft(e.target.value)}
+                aria-invalid={rangeErrors.some((err) => err.field === "start")}
+                aria-describedby={
+                  rangeErrors.some((err) => err.field === "start")
+                    ? "power-start-error"
+                    : undefined
+                }
+              />
+              {rangeErrors
+                .filter((err) => err.field === "start")
+                .map((err) => (
+                  <p key={err.message} id="power-start-error" className="power-error" role="alert">
+                    {err.message}
+                  </p>
+                ))}
+            </div>
+            <div className="power-field">
+              <label htmlFor="power-end">结束时间</label>
+              <input
+                id="power-end"
+                className="power-input"
+                type="datetime-local"
+                value={endDraft}
+                onInput={(e) => setEndDraft(e.currentTarget.value)}
+                onChange={(e) => setEndDraft(e.target.value)}
+                aria-invalid={rangeErrors.some((err) => err.field === "end")}
+                aria-describedby={
+                  rangeErrors.some((err) => err.field === "end") ? "power-end-error" : undefined
+                }
+              />
+              {rangeErrors
+                .filter((err) => err.field === "end")
+                .map((err) => (
+                  <p key={err.message} id="power-end-error" className="power-error" role="alert">
+                    {err.message}
+                  </p>
+                ))}
+            </div>
+            <Button type="submit" className="power-apply">
+              应用自定义范围
+            </Button>
+          </form>
+        )}
+        <div className="chart-legend power-legend" aria-hidden="true">
+          {POWER_SERIES.map((s) => (
+            <span key={s.key}>
+              <svg width="22" height="8" viewBox="0 0 22 8" aria-hidden="true">
+                <line
+                  x1="1"
+                  y1="4"
+                  x2="21"
+                  y2="4"
+                  stroke={s.color}
+                  strokeWidth="2"
+                  strokeDasharray={s.dash === "none" ? undefined : s.dash}
+                />
+              </svg>
+              {s.key === "machine" ? (live ? "整机（墙插估算）" : "整机（总量）") : s.label}
+            </span>
+          ))}
+          <span>断开 = 缺失（—）</span>
+          <span>曲线 = {formatDuration(bucketMs)} 均值 · 峰值见悬停</span>
         </div>
         {n < 2 ? (
           <p className="empty-inline">该时间范围内没有采样。</p>
         ) : (
           <>
-            <div className="power-chart-scroll">
+            <div
+              className="power-chart-scroll"
+              ref={chartScrollRef}
+              data-testid="power-chart-scroll"
+            >
               <div className="power-plot" style={{ width: chartWidth }}>
                 <svg
                   className="power-svg"

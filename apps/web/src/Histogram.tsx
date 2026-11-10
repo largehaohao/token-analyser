@@ -18,7 +18,7 @@ export function Histogram({
   const max = Math.max(...data.counts, 1);
   // 桶多时卡片里挤不下每份轴标签：字号压小，窄屏再隔一个标。
   const dense = data.labels.length > 6;
-  // 输出速度已到 23 个桶，比 TTFT 更密：再压一档间距，窄屏只留隔一个的标签。
+  // 输出速度已到 28 个桶，比 TTFT 更密：再压一档间距，窄屏只留隔一个的标签。
   const veryDense = data.labels.length > 16;
   const [activeTip, setActiveTip] = useState<string | null>(null);
   return (

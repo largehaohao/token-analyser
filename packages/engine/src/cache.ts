@@ -17,8 +17,8 @@ import {
   writeCacheRow,
 } from "./store-db.ts";
 
-// v14 preserves quota event timestamps for comparisons across sessions/windows.
-export const CACHE_VERSION = 14;
+// v16 splits duration clocks: requestDurationMs vs taskDurationMs.
+export const CACHE_VERSION = 16;
 
 export function cacheDir(home?: string): string {
   return legacyCacheDir(home ?? tokenAnalyserHome());

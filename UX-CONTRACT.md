@@ -38,8 +38,11 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
   summary uses Codex agent-task windows, `统计口径：单次模型请求` when it uses
   per-request timing. Request-level and task-level samples are never mixed, and
   the tok/s heading follows the basis (`任务平均 tok/s` / `请求平均 tok/s`).
-- Timing is only ever read from recorded fields. Gaps between log timestamps are
-  never presented as duration, TTFT, or speed.
+- Timing is only ever read from recorded fields for TTFT, tok/s, and 模型请求总时间.
+  Gaps between log timestamps are never presented as those figures. 任务完成总时间
+  is a separate clock: completed agent-task windows when they exist, otherwise the
+  request-only session span (first request start → last request end, else
+  startedAt→lastEventAt). It is never mixed with the tok/s decode window.
 - Timing a source does not log is added at the source, never reconstructed here:
   pi's `request_timing` entries are measured inside the provider request by
   `integrations/pi/request-timing.ts`, so they enter the request-basis summary
@@ -50,7 +53,9 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
   `解码时长（请求时长 − 首 token 等待）`; a request that logged only a duration
   divides by the whole window and is labelled `请求总耗时（含首 token 等待）`; a
   source-recorded speed says `采用日志记录的本次请求输出速度`. The two
-  denominators are never presented as one measurement.
+  denominators are never presented as one measurement. The duration card lists
+  two clocks: `模型请求总时间` (sum of each request's full duration) and
+  `任务完成总时间` (task windows, or the request-only session span).
 - A missing measurement keeps its `—` value and states why
   (`日志未记录首 token 时间`, `该来源未记录请求时长或输出 Token 数`).
   `0.00` is shown only for a recorded zero. A recorded first-token time that

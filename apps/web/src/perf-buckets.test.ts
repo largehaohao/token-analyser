@@ -33,26 +33,28 @@ describe("latency buckets", () => {
     expect(TTFT_LABELS[TTFT_LABELS.length - 1]).toBe("> 5s");
   });
 
-  it("splits output speed below 40, every 10 tok/s to 250, then above 250", () => {
+  it("splits output speed below 40, every 10 tok/s to 300, then above 300", () => {
     expect(TPS_EDGES).toEqual([
       40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150,
       160, 170, 180, 190, 200, 210, 220, 230, 240, 250,
+      260, 270, 280, 290, 300,
     ]);
-    expect(TPS_LABELS).toHaveLength(23);
+    expect(TPS_LABELS).toHaveLength(28);
     expect(TPS_LABELS[0]).toBe("≤ 40 tok/s");
     expect(TPS_LABELS[1]).toBe("40–50 tok/s");
     expect(TPS_LABELS[12]).toBe("150–160 tok/s");
-    expect(TPS_LABELS[TPS_LABELS.length - 2]).toBe("240–250 tok/s");
-    expect(TPS_LABELS[TPS_LABELS.length - 1]).toBe("> 250 tok/s");
+    expect(TPS_LABELS[TPS_LABELS.length - 3]).toBe("280–290 tok/s");
+    expect(TPS_LABELS[TPS_LABELS.length - 2]).toBe("290–300 tok/s");
+    expect(TPS_LABELS[TPS_LABELS.length - 1]).toBe("> 300 tok/s");
     expect(TPS_TICKS).toEqual([
       "≤40", "50", "60", "70", "80", "90", "100", "110", "120", "130", "140",
       "150", "160", "170", "180", "190", "200", "210", "220", "230", "240",
-      "250", ">250",
+      "250", "260", "270", "280", "290", "300", ">300",
     ]);
     expect(TPS_TICKS).toHaveLength(TPS_LABELS.length);
   });
 
-  it("keeps edges inclusive from 150 through 250, with 251 in the open bucket", () => {
+  it("keeps edges inclusive from 150 through 300, with 301 in the open bucket", () => {
     const { speed } = turnDistributions([
       turn(null, 40),
       turn(null, 41),
@@ -60,15 +62,19 @@ describe("latency buckets", () => {
       turn(null, 160),
       turn(null, 250),
       turn(null, 251),
+      turn(null, 300),
+      turn(null, 301),
     ]);
     expect(speed.counts).toEqual([
       1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
-      0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
+      0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1,
     ]);
     expect(speed.labels[11]).toBe("140–150 tok/s");
     expect(speed.labels[12]).toBe("150–160 tok/s");
     expect(speed.labels[21]).toBe("240–250 tok/s");
-    expect(speed.labels[22]).toBe("> 250 tok/s");
+    expect(speed.labels[22]).toBe("250–260 tok/s");
+    expect(speed.labels[26]).toBe("290–300 tok/s");
+    expect(speed.labels[27]).toBe("> 300 tok/s");
   });
 
   it("reads turn TTFT in milliseconds and buckets it on the second scale", () => {
@@ -95,7 +101,7 @@ describe("latency buckets", () => {
     expect(ttft.known).toBe(2);
     expect(speed.counts).toEqual([
       2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ]);
   });
 

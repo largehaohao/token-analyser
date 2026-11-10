@@ -13,6 +13,7 @@ import { loadRateCard } from "./rate-card.ts";
 import { loadApiPrices } from "./native-pricing.ts";
 import {
   collectTaskTimings,
+  durationClocks,
   performanceDistribution,
   requestTimings,
   summarizePerformance,
@@ -571,7 +572,17 @@ export function buildOverview(
         unpricedRaw: entry.unpricedRaw,
       }))
       .sort((a, b) => b.cost.raw - a.cost.raw || a.model.localeCompare(b.model)),
-    performance: summarizePerformance(timedSamples),
+    performance: {
+      ...summarizePerformance(timedSamples),
+      ...durationClocks(included, {
+        sinceMs: opts.sinceMs,
+        untilMs: opts.untilMs,
+        turnFilter: modelFilter
+          ? (turn) => turnMatchesModel(turn, modelFilter)
+          : undefined,
+        requestOnly: Boolean(modelFilter),
+      }),
+    },
     performanceDistribution: performanceDistribution(timedSamples),
     rateLimits: latestRateLimits(matchingSource, opts.sinceMs, opts.untilMs),
   };

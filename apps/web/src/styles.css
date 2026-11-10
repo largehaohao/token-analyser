@@ -2405,10 +2405,18 @@ button:not(:disabled):active,
     forced-color-adjust: none;
   }
   .power-energy-hero,
-  .power-energy-hero .power-hero-item,
-  .power-heading-figure {
+  .power-ledger-now .power-now-total,
+  .power-energy-stats > div,
+  .power-mt tbody tr:nth-child(3) {
     background: Canvas;
     border-color: CanvasText;
+  }
+  .power-energy-seg,
+  .power-energy-dot,
+  .power-now-seg,
+  .power-load-fill,
+  .power-load-peak {
+    forced-color-adjust: none;
   }
 }
 
@@ -2915,7 +2923,7 @@ button:not(:disabled):active,
 
 .performance-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
   border: 1px solid var(--border);
   background: var(--border);
@@ -2953,6 +2961,49 @@ button:not(:disabled):active,
   color: var(--text-muted);
   font-size: 12.5px;
   line-height: 1.6;
+}
+
+.performance-card-duration {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.7rem;
+}
+
+.performance-duration-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.performance-duration-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+}
+
+.performance-duration-row + .performance-duration-row {
+  border-top: 1px solid var(--border);
+  padding-top: 0.7rem;
+}
+
+.performance-duration-row h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.performance-duration-row p {
+  grid-column: 1;
+}
+
+.performance-duration-row .performance-value {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  margin: 0;
+  font-size: clamp(1.15rem, 2.2vw, 1.55rem);
 }
 
 .performance-note {
@@ -3610,6 +3661,10 @@ button:not(:disabled):active,
 .performance-card h2 { font-size: 12px; color: var(--text-muted); }
 .performance-card .performance-value { grid-column: 2; grid-row: 1 / 3; margin: 0; font-size: 22px; letter-spacing: -0.04em; }
 .performance-card p { grid-column: 1; font-size: 12.5px; }
+.performance-card.performance-card-duration { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.performance-duration-row { gap: 2px 16px; }
+.performance-duration-row h3 { font-size: 12.5px; }
+.performance-card-duration .performance-value { grid-column: 2; grid-row: 1 / 3; margin: 0; font-size: 20px; letter-spacing: -0.04em; }
 .performance-note { margin: 8px 0 0; font-size: 12.5px; }
 .overview .detail-stack { margin-top: 24px; gap: 12px; background: transparent; border: 0; align-items: start; }
 .overview .detail-section { border: 1px solid var(--border); border-radius: var(--radius); overflow: clip; }
@@ -3660,8 +3715,11 @@ button:not(:disabled):active,
   .allocation-list > div { display: block; padding: 0; border: 0; }
   .allocation-list dd { justify-content: space-between; margin-top: 8px; }
   .allocation-note { padding-top: 16px; }
+  .performance-grid { grid-template-columns: minmax(0, 1fr); }
   .performance-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
   .performance-card .performance-value { font-size: 24px; }
+  .performance-card.performance-card-duration { align-items: stretch; }
+  .performance-card-duration .performance-value { font-size: 22px; }
   .local-label { display: none; }
 }
 @media (max-width: 780px) {
@@ -3726,6 +3784,8 @@ button:not(:disabled):active,
   .performance-grid { grid-template-columns: minmax(0, 1fr); }
   .performance-card { display: grid; gap: 4px 12px; padding: 16px; }
   .performance-card .performance-value { font-size: 20px; }
+  .performance-card.performance-card-duration { display: flex; flex-direction: column; align-items: stretch; }
+  .performance-card-duration .performance-value { font-size: 20px; }
   .detail-section > summary { padding: 16px; gap: 8px; }
   .detail-section-action > span:not(.detail-section-chevron) { display: none; }
   .detail-section-body { padding: 16px; }
@@ -4723,7 +4783,7 @@ button.ledger-item:focus-visible {
 .hist.dense .hist-tick {
   font-size: 8.5px;
 }
-/* 23 个桶的输出速度直方图：再压一档间距，让三位数边界能探到相邻的空位，
+/* 28 个桶的输出速度直方图：再压一档间距，让三位数边界能探到相邻的空位，
  * 也尽量在宽屏下给每根柱留出 24px 的可点区域（WCAG 2.2 target-size）。 */
 .hist.very-dense .hist-bars,
 .hist.very-dense .hist-axis {
@@ -4739,8 +4799,8 @@ button.ledger-item:focus-visible {
     visibility: hidden;
   }
 }
-/* 23 个桶在 560px 以下就开始挤：隔一个标，但首桶与末桶始终可见。 */
-@media (max-width: 560px) {
+/* 28 个桶在 720px 以下就开始挤：隔一个标，但首桶与末桶始终可见。 */
+@media (max-width: 720px) {
   .hist.very-dense .hist-tick:nth-child(even):not(:last-child) {
     visibility: hidden;
   }
@@ -5069,13 +5129,129 @@ button.ledger-item:focus-visible {
 }
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* 领头卡跨两列：总用量 + 4 张指标卡正好一行。 */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 1px;
   margin: 4px 0 0;
   padding: 1px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--border);
+}
+/* 旧版给 :nth-child(3) / :last-child 的整行、内边距、边线规则在这里统一收口，
+ * 否则窄屏会出现半行的空位；只有领头卡的跨列是刻意保留的。 */
+.sess-head .session-metrics.stat-row {
+  gap: 1px;
+}
+.sess-head .stat-row .headline-row {
+  grid-column: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 11px 13px;
+  border: 0;
+}
+.sess-head .stat-row .headline-row:not(.headline-total) {
+  justify-content: space-between;
+}
+.sess-head .stat-row .headline-total {
+  grid-column: span 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  background: var(--bg-inset);
+}
+.headline-total-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.sess-head .headline-total .headline-value {
+  font-size: 22px;
+}
+/* 输入 / 输出：比例条 + 色块图例，和主数值同卡但各自成组。 */
+.headline-split {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.headline-split-heading {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.headline-split-bar {
+  display: flex;
+  gap: 1px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-raised);
+}
+.headline-split-seg {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+}
+.headline-split-seg.input {
+  background: var(--chart-blue);
+}
+.headline-split-seg.output {
+  background: var(--chart-violet);
+}
+.headline-split-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.headline-split-rows > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.headline-split-rows .swatch {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+.headline-split b {
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.sess-head .headline-split small {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+/* 平板及以下：领头卡独占一行，其余四张两列两行，避免六列挤成一团。 */
+@media (max-width: 1180px) {
+  .sess-head .session-metrics.stat-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sess-head .stat-row .headline-total {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 540px) {
+  .sess-head .stat-row .headline-total {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .sess-head .headline-split {
+    padding: 8px 0 0;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
 }
 .stat {
   display: flex;
@@ -5179,9 +5355,6 @@ button.ledger-item:focus-visible {
   .ledger {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .stat-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 @media (max-width: 1180px) {
   .panel-grid {
@@ -5191,7 +5364,7 @@ button.ledger-item:focus-visible {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-/* 23 个桶的输出速度直方图：轴需要更宽，总览的性能卡片里改成上下叠放。 */
+/* 28 个桶的输出速度直方图：轴需要更宽，总览的性能卡片里改成上下叠放。 */
 @media (max-width: 1500px) {
   .perf-card .hist-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -5255,6 +5428,9 @@ button.ledger-item:focus-visible {
 .power-page .page-heading {
   margin-bottom: 20px;
 }
+.power-controls {
+  gap: 10px;
+}
 .power-controls-grid {
   display: flex;
   flex-wrap: wrap;
@@ -5317,7 +5493,7 @@ button.ledger-item:focus-visible {
   font-size: 12px;
 }
 .power-ledger-now {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.25fr) repeat(2, minmax(0, 1fr));
   margin: 0 0 14px;
 }
 .power-ledger-range {
@@ -5329,8 +5505,31 @@ button.ledger-item:focus-visible {
 }
 .power-chart-scroll {
   overflow-x: auto;
+  overflow-anchor: none;
   overscroll-behavior-x: contain;
   scrollbar-gutter: stable;
+}
+.power-trend-head {
+  align-items: center;
+  gap: 12px 16px;
+}
+.power-trend-ranges {
+  flex: 1 1 22rem;
+  min-width: 0;
+  justify-content: flex-end;
+}
+.power-trend .power-legend {
+  margin: 8px 0 12px;
+}
+.power-trend .power-custom-form {
+  margin: 4px 0 10px;
+}
+.power-range-switch {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.power-range-switch button {
+  flex: 1 1 auto;
 }
 .power-plot {
   position: relative;
@@ -5471,7 +5670,7 @@ button.ledger-item:focus-visible {
 
 @media (max-width: 1360px) {
   .power-ledger-now {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr));
   }
 }
 @media (max-width: 900px) {
@@ -5489,8 +5688,16 @@ button.ledger-item:focus-visible {
     width: 100%;
   }
   .power-range-switch button {
-    flex: 1 1 auto;
+    flex: 1 1 calc(33.33% - 4px);
     min-height: 40px;
+    padding-inline: 0.4rem;
+  }
+  .power-trend-head {
+    align-items: stretch;
+  }
+  .power-trend-ranges {
+    flex: 1 1 auto;
+    justify-content: stretch;
   }
   .power-custom-form {
     align-items: stretch;
@@ -5516,82 +5723,354 @@ button.ledger-item:focus-visible {
 
 /* Page headings keep their description below the title, including narrow screens. */
 .power-page .chart-head > div:first-child { display: block; min-width: 0; }
-.power-page .ledger-value { font-size: clamp(1.5rem, 2vw, 2rem); }
 
-/* 用电量与电费是本页的主读数：面板加重、字号拉高，页标题下另留一行摘要。 */
-.power-energy-hero {
-  gap: 2px;
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
-  background: color-mix(in srgb, var(--accent) 36%, var(--border));
-}
-.power-energy-hero .power-hero-item {
-  gap: 6px;
-  padding: 18px 20px 16px;
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-raised));
-}
-.power-energy-hero .ledger-label {
-  font-size: 11.5px;
-}
-.power-energy-hero .power-hero-value {
-  font-size: clamp(2.1rem, 4.4vw, 3.4rem);
-  line-height: 1.04;
-  letter-spacing: -0.025em;
-}
-.power-energy-hero .power-hero-value .ledger-unit {
-  font-size: 0.3em;
-  letter-spacing: 0.08em;
-}
-.power-energy-hero .ledger-delta {
-  font-size: 11.5px;
-  white-space: normal;
-}
+/* ============================================================
+ * 硬件用电 · 仪表读数层级
+ * 整机 kWh / 电费先入眼；平均、峰值、当前、窗口做次级刻度；
+ * 构成条解释来源。当前功率条退到主卡之后，不再与主读数抢字号。
+ * ============================================================ */
+
 .power-heading-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px 14px;
-  margin: 12px 0 0;
-}
-.power-heading-figure {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--bg-raised);
-}
-.power-heading-figure-label {
-  color: var(--text-muted);
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  white-space: normal;
-}
-.power-heading-figure-value {
-  color: var(--accent);
-  font-family: var(--display);
-  font-size: 20px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.power-heading-figure-unit {
-  color: var(--text-muted);
-  font-family: var(--mono);
-  font-size: 10.5px;
-}
-.power-heading-figure-note {
+  gap: 4px 12px;
+  margin: 0;
   color: var(--text-dim);
   font-family: var(--mono);
   font-size: 11px;
 }
+.power-heading-kicker {
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.power-heading-note {
+  color: var(--text-muted);
+}
+
+.power-ledger-now .ledger-item {
+  padding: 10px 12px;
+}
+.power-ledger-now .power-now-value {
+  font-size: 1.2rem;
+  color: var(--text);
+}
+.power-ledger-now .power-now-total {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-raised));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+.power-ledger-now .power-now-total .ledger-label {
+  color: var(--accent);
+}
+.power-ledger-now .power-now-total .power-now-value {
+  color: var(--accent);
+  font-size: clamp(1.45rem, 2.2vw, 1.85rem);
+  font-weight: 600;
+  line-height: 1.1;
+}
+.power-now-split {
+  display: flex;
+  gap: 2px;
+  height: 5px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-inset);
+}
+.power-now-seg {
+  display: block;
+  min-width: 2px;
+  height: 100%;
+}
+.power-now-seg.cpu { background: var(--chart-blue); }
+.power-now-seg.gpu { background: var(--chart-violet); }
+.power-now-seg.other { background: var(--chart-cyan); }
+.power-now-split-note {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: normal;
+}
+
+/* 主卡：左侧仪表刻度条，kWh 最大，电费次之，四格刻度 + 构成带。 */
+.power-energy-hero {
+  gap: 16px;
+  padding: 16px 18px 18px 20px;
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  box-shadow: inset 3px 0 0 var(--accent), var(--shadow);
+  background: var(--bg-raised);
+}
+.power-energy-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 16px 24px;
+  align-items: start;
+}
+.power-energy-primary,
+.power-energy-cost {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.power-energy-cost {
+  padding-left: 20px;
+  border-left: 1px solid var(--border);
+}
+.power-energy-hero .ledger-label {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+.power-energy-hero .ledger-delta {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+}
+.power-energy-hero .power-hero-value {
+  color: var(--accent);
+  font-family: var(--display);
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(2.6rem, 4.6vw, 3.75rem);
+  font-weight: 600;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+}
+.power-energy-hero .power-hero-value .ledger-unit {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 0.32em;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+.power-energy-hero .power-hero-cost {
+  color: var(--text);
+  font-size: clamp(1.7rem, 2.8vw, 2.35rem);
+  letter-spacing: -0.03em;
+}
+
+.power-energy-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: 2px 0 0;
+  padding: 1px;
+  border-radius: 10px;
+  background: var(--border);
+}
+.power-energy-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 12px 11px;
+  background: var(--bg-inset);
+}
+.power-energy-stats > div:first-child {
+  border-radius: 9px 0 0 9px;
+}
+.power-energy-stats > div:last-child {
+  border-radius: 0 9px 9px 0;
+}
+.power-energy-stats dt {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+.power-energy-stats dd {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--display);
+  font-size: clamp(1.05rem, 1.6vw, 1.28rem);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.power-stat-hint {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.power-stat-now dd {
+  color: var(--accent);
+}
+.power-load-track {
+  position: relative;
+  height: 5px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-raised));
+}
+.power-load-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.power-load-peak {
+  position: absolute;
+  top: -1px;
+  width: 2px;
+  height: 7px;
+  margin-left: -1px;
+  background: var(--text);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .power-load-fill {
+    transition: width 180ms ease-out;
+  }
+}
+
+.power-energy-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.power-energy-breakdown-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+}
+.power-energy-breakdown-head span:first-child {
+  color: var(--text);
+  font-weight: 600;
+}
+.power-energy-bar {
+  display: flex;
+  gap: 3px;
+  height: 22px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--bg-inset);
+}
+.power-energy-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3px;
+  height: 100%;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.power-energy-seg.cpu,
+.power-energy-dot.cpu { background: var(--chart-blue); }
+.power-energy-seg.gpu,
+.power-energy-dot.gpu { background: var(--chart-violet); }
+.power-energy-seg.other,
+.power-energy-dot.other { background: var(--chart-cyan); }
+.power-energy-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.power-energy-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.power-energy-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+.power-energy-legend b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.power-energy-legend em {
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+/* 明细表：整机（总量）行与用电量列加重。 */
+.power-mt tbody tr:nth-child(3) {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.power-mt tbody tr:nth-child(3) th,
+.power-mt tbody tr:nth-child(3) td { font-weight: 600; }
+.power-mt td:nth-child(3) {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 900px) {
   .power-energy-hero .power-hero-value {
-    font-size: clamp(2.4rem, 11vw, 3rem);
+    font-size: clamp(2.5rem, 8vw, 3.2rem);
   }
-  .power-energy-hero .power-hero-item {
-    padding: 16px;
+  .power-energy-hero .power-hero-cost {
+    font-size: clamp(1.55rem, 5vw, 2.1rem);
+  }
+  .power-energy-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .power-energy-stats > div:first-child {
+    border-radius: 9px 0 0 0;
+  }
+  .power-energy-stats > div:nth-child(2) {
+    border-radius: 0 9px 0 0;
+  }
+  .power-energy-stats > div:nth-child(3) {
+    border-radius: 0 0 0 9px;
+  }
+  .power-energy-stats > div:last-child {
+    border-radius: 0 0 9px 0;
+  }
+  .power-energy-breakdown-head {
+    flex-direction: column;
+    gap: 3px;
+  }
+  .power-energy-seg {
+    font-size: 9px;
+  }
+}
+@media (max-width: 540px) {
+  .power-energy-top {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    align-items: stretch;
+  }
+  .power-energy-cost {
+    padding: 12px 0 0;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+  .power-energy-hero .power-hero-value {
+    font-size: clamp(2.4rem, 11vw, 3.1rem);
+  }
+  .power-energy-hero .power-hero-cost {
+    font-size: clamp(1.7rem, 7vw, 2.2rem);
   }
 }
 .power-table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

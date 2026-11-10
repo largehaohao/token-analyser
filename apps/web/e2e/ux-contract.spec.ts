@@ -112,14 +112,25 @@ test("TTFT and tok/s render on overview and session details", async ({ page }, t
       ...data,
       performance: measured ? {
         taskCount: 2, ttftSampleCount: 2, speedSampleCount: 2,
-        avgTtftMs: 1250, outputTokensPerSecond: 42.5,
-      } : { taskCount: 0, ttftSampleCount: 0, speedSampleCount: 0, avgTtftMs: null, outputTokensPerSecond: null },
+        avgTtftMs: 1250, outputTokensPerSecond: 42.5, totalDurationMs: 4000,
+        requestDurationMs: 4000, requestDurationCount: 2,
+        taskDurationMs: 90_000, taskDurationCount: 1,
+      } : {
+        taskCount: 0, ttftSampleCount: 0, speedSampleCount: 0,
+        avgTtftMs: null, outputTokensPerSecond: null, totalDurationMs: null,
+        requestDurationMs: null, requestDurationCount: 0,
+        taskDurationMs: null, taskDurationCount: 0,
+      },
     } });
   });
   await page.goto("/");
   await expect(page.getByTestId("ttft-value")).toHaveText("1.25 s");
   await expect(page.getByTestId("token-speed-value")).toHaveText("42.50 tok/s");
+  await expect(page.getByTestId("request-duration-value")).toHaveText("4.00 s");
+  await expect(page.getByTestId("task-duration-value")).toHaveText("1.50 min");
   await expect(page.getByLabel("响应性能", { exact: true })).toContainText("包含思考、工具执行与等待");
+  await expect(page.getByLabel("响应性能", { exact: true })).toContainText("模型请求总时间");
+  await expect(page.getByLabel("响应性能", { exact: true })).toContainText("任务完成总时间");
   await page.getByLabel("响应性能", { exact: true }).screenshot({ path: testInfo.outputPath("performance-desktop.png") });
   await page.setViewportSize({ width: 375, height: 812 });
   const panel = await page.getByLabel("响应性能", { exact: true }).boundingBox();
@@ -129,6 +140,8 @@ test("TTFT and tok/s render on overview and session details", async ({ page }, t
   await page.reload();
   await expect(page.getByTestId("ttft-value")).toHaveText("— s");
   await expect(page.getByTestId("token-speed-value")).toHaveText("— tok/s");
+  await expect(page.getByTestId("request-duration-value")).toHaveText("— s");
+  await expect(page.getByTestId("task-duration-value")).toHaveText("— s");
   await expect(page.getByText("日志未记录首 token 时间")).toBeVisible();
 
   await page.route("**/sessions/s-poll", async (route) => {
@@ -137,13 +150,17 @@ test("TTFT and tok/s render on overview and session details", async ({ page }, t
       ...await response.json(),
       performance: {
         taskCount: 1, ttftSampleCount: 1, speedSampleCount: 1,
-        avgTtftMs: 0, outputTokensPerSecond: 0,
+        avgTtftMs: 0, outputTokensPerSecond: 0, totalDurationMs: 0,
+        requestDurationMs: 0, requestDurationCount: 1,
+        taskDurationMs: 0, taskDurationCount: 1,
       },
     } });
   });
   await openSessions(page);
   await expect(page.getByTestId("ttft-value")).toHaveText("0.00 s");
   await expect(page.getByTestId("token-speed-value")).toHaveText("0.00 tok/s");
+  await expect(page.getByTestId("request-duration-value")).toHaveText("0.00 s");
+  await expect(page.getByTestId("task-duration-value")).toHaveText("0.00 s");
 });
 
 test("overview updates model pricing with visible loading and success states", async ({

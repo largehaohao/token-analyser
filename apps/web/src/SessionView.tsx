@@ -4,7 +4,9 @@ import { useUnit } from "./UnitContext";
 import {
   cacheHitRatio,
   disclaimer,
+  formatCompactTokens,
   formatCostTokens,
+  formatExactTokens,
   sourceLabel,
   usageNote,
   formatCost,
@@ -94,6 +96,34 @@ export function SessionView({
   const suggestions = snapshot.suggestions.slice(0, 3);
   const unpriced = unpricedNote(unpricedRawFromTurns(turns));
   const identity = tokenIdentity(snapshot.cost);
+  // 输入含已缓存部分，与总览「Token 构成」同口径；未记录用量的轮次是下界。
+  const inputTokens = snapshot.cost.uncached_input + snapshot.cost.cached_input;
+  const outputTokens = snapshot.cost.output;
+  const noRecordedUsage =
+    Boolean(snapshot.cost.unmeasured) && snapshot.cost.raw === 0;
+  const usagePrefix = snapshot.cost.unmeasured ? "≥ " : "";
+  const usageShare = (value: number) =>
+    snapshot.cost.raw > 0
+      ? formatPercent((100 * value) / snapshot.cost.raw)
+      : "—";
+  const inputDisplay = noRecordedUsage
+    ? "—"
+    : `${usagePrefix}${formatCompactTokens(inputTokens)}`;
+  const outputDisplay = noRecordedUsage
+    ? "—"
+    : `${usagePrefix}${formatCompactTokens(outputTokens)}`;
+  const usageDetail =
+    snapshot.cost.raw <= 0
+      ? "无用量记录"
+      : // 金额/积分视图里「总用量」是钱，占比会被误读成费用占比。
+        unit === "tokens"
+        ? `占总量 ${usageShare(inputTokens)} / ${usageShare(outputTokens)}`
+        : "按 token 计量";
+  const unmeasuredSuffix = snapshot.cost.unmeasured
+    ? `，另有 ${snapshot.cost.unmeasured.toLocaleString("en-US")} 次调用用量未记录`
+    : "";
+  const inputTitle = `输入 ${formatExactTokens(inputTokens)} tokens · 未缓存 ${formatExactTokens(snapshot.cost.uncached_input)} + 已缓存 ${formatExactTokens(snapshot.cost.cached_input)}${unmeasuredSuffix}`;
+  const outputTitle = `输出 ${formatExactTokens(outputTokens)} tokens · 模型生成与思考${unmeasuredSuffix}`;
   const selectedAppearance = treeAppearance(
     selectedNode.label,
     selectedNode.kind,
@@ -174,21 +204,49 @@ export function SessionView({
         ) : null}
 
         <div className="session-metrics stat-row headline-main">
-          <div className="headline-row stat">
-            <span className="headline-label">
-              {unit === "tokens" ? "总用量" : "预估总费用"}
-            </span>
-            <span
-              className="headline-value"
-              title={formatCostTitle(snapshot.cost, unit)}
-            >
-              {unit === "tokens"
-                ? formatCostTokens(snapshot.cost)
-                : formatCost(snapshot.cost, unit)}
-            </span>
-            <small>
-              {formatUnitSuffix(unit)} · {turns.length.toLocaleString("en-US")} 轮调用
-            </small>
+          <div className="headline-row stat headline-total">
+            <div className="headline-total-main">
+              <span className="headline-label">
+                {unit === "tokens" ? "总用量" : "预估总费用"}
+              </span>
+              <span
+                className="headline-value"
+                title={formatCostTitle(snapshot.cost, unit)}
+              >
+                {unit === "tokens"
+                  ? formatCostTokens(snapshot.cost)
+                  : formatCost(snapshot.cost, unit)}
+              </span>
+              <small>
+                {formatUnitSuffix(unit)} · {turns.length.toLocaleString("en-US")} 轮调用
+              </small>
+            </div>
+            <div className="headline-split" data-testid="usage-breakdown">
+              <span className="headline-split-heading">输入 / 输出</span>
+              {snapshot.cost.raw > 0 && (
+                <div className="headline-split-bar" aria-hidden="true">
+                  <i
+                    className="headline-split-seg input"
+                    style={{ flex: Math.max(inputTokens, 1) }}
+                  />
+                  <i
+                    className="headline-split-seg output"
+                    style={{ flex: Math.max(outputTokens, 1) }}
+                  />
+                </div>
+              )}
+              <div className="headline-split-rows">
+                <span data-testid="input-headline" title={inputTitle}>
+                  <i className="swatch cached" aria-hidden="true" /> 输入{" "}
+                  <b>{inputDisplay}</b>
+                </span>
+                <span data-testid="output-headline" title={outputTitle}>
+                  <i className="swatch output" aria-hidden="true" /> 输出{" "}
+                  <b>{outputDisplay}</b>
+                </span>
+              </div>
+              <small>{usageDetail}</small>
+            </div>
           </div>
           <div className="headline-row stat">
             <span className="headline-label">疑似可优化</span>

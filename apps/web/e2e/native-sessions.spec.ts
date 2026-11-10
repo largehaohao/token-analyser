@@ -40,6 +40,9 @@ test("Claude, pi and Cursor imports show source, response, pricing basis and mis
     if (source === "cursor") {
       await expect(page.locator(".session-view .banner")).toContainText("token 用量未记录");
       await expect(page.locator(".headline-main .headline-value").first()).toHaveText("—");
+      await expect(page.getByTestId("input-headline")).toContainText("—");
+      await expect(page.getByTestId("output-headline")).toContainText("—");
+      await expect(page.getByTestId("usage-breakdown")).toContainText("无用量记录");
     } else {
       await expect(page.locator(".headline-main .headline-value").first()).toHaveText("360");
     }
@@ -89,6 +92,8 @@ test("pi times model requests and Cursor shows the context meter it records", as
   await expect(page.locator("#import-feedback")).toContainText("已导入 pi.jsonl");
   await expect(page.getByTestId("token-speed-value")).toHaveText("5.00 tok/s");
   await expect(page.getByTestId("ttft-value")).toHaveText("— s");
+  await expect(page.getByTestId("request-duration-value")).toHaveText("2.00 s");
+  await expect(page.getByTestId("task-duration-value")).toHaveText("2.00 s");
   await expect(page.getByTestId("performance-basis")).toContainText("统计口径：单次模型请求");
   await expect(page.locator(".performance-card").first()).toContainText("request-timing");
 
@@ -102,6 +107,8 @@ test("pi times model requests and Cursor shows the context meter it records", as
   await expect(page.locator("#import-feedback")).toContainText("已导入 pi-request-timing.jsonl");
   await expect(page.getByTestId("ttft-value")).toHaveText("1.83 s");
   await expect(page.getByTestId("token-speed-value")).toHaveText("22.24 tok/s");
+  await expect(page.getByTestId("request-duration-value")).toHaveText("13.46 s");
+  await expect(page.getByTestId("task-duration-value")).not.toHaveText("— s");
   await expect(page.getByTestId("performance-basis")).toContainText("解码速率");
   const piRows = page.locator(".turn-table tbody tr");
   // The request recorded while the extension was off keeps the full window.
@@ -119,6 +126,7 @@ test("pi times model requests and Cursor shows the context meter it records", as
   await page.locator("summary").filter({ hasText: "上下文与会话信息" }).click();
   await expect(page.getByTestId("context-meter-value")).toContainText("24,556 / 200,000");
   await expect(page.getByTestId("token-speed-value")).toHaveText("— tok/s");
+  await expect(page.getByTestId("request-duration-value")).toHaveText("— s");
   const overview = await (await page.request.get("/overview?range=all")).json();
   expect(overview.performance.basis).not.toBe("task");
 });

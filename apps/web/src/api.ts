@@ -21,6 +21,16 @@ export type PerformanceSummary = {
   speedSampleCount: number;
   avgTtftMs: number | null;
   outputTokensPerSecond: number | null;
+  /** Sum of the same generation windows tok/s uses; null when none were recorded. */
+  totalDurationMs: number | null;
+  /** Sum of each model request's full durationMs, not the tok/s decode window. */
+  requestDurationMs: number | null;
+  /** How many requests contributed to requestDurationMs. */
+  requestDurationCount: number;
+  /** Sum of completed agent-task windows, or request-only session span. */
+  taskDurationMs: number | null;
+  /** How many task windows or session spans contributed to taskDurationMs. */
+  taskDurationCount: number;
   /** "task": whole agent tasks; "request": single model requests; null: no samples. */
   basis: PerformanceBasis | null;
 };
@@ -201,7 +211,7 @@ export type OverviewDay = {
 export type PerformanceDistribution = {
   /** Sample counts: ≤1s, (1,2]s, (2,3]s, (3,5]s, >5s. */
   ttft: number[];
-  /** Sample counts: ≤10, (10,25], (25,40], (40,60], >60 tok/s. */
+  /** Sample counts: ≤40, then every 10 tok/s through 300, then >300. */
   tps: number[];
   sampleCount: number;
 };

@@ -8,6 +8,19 @@ export function formatPerformanceNumber(value: number | null | undefined): strin
   return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+export type PerformanceDurationUnit = "s" | "min" | "h";
+
+/** Same two-decimal style as TTFT / tok/s, with a unit that stays readable. */
+export function formatPerformanceDuration(ms: number | null | undefined): {
+  value: string;
+  unit: PerformanceDurationUnit;
+} {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return { value: "—", unit: "s" };
+  if (ms < 60_000) return { value: formatPerformanceNumber(ms / 1000), unit: "s" };
+  if (ms < 3_600_000) return { value: formatPerformanceNumber(ms / 60_000), unit: "min" };
+  return { value: formatPerformanceNumber(ms / 3_600_000), unit: "h" };
+}
+
 const relativeFormatter = new Intl.RelativeTimeFormat("zh-CN", {
   numeric: "auto",
 });

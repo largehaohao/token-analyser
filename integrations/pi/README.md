@@ -24,7 +24,7 @@ assistant entry it describes:
 
 | Field | Meaning |
 | --- | --- |
-| `ttft_ms` | provider request sent → first output delta (text, thinking, or tool call) |
+| `ttft_ms` | provider request sent → first event that already contains output (text, thinking, or a tool name). An empty block open is not a token |
 | `headersMs` | request sent → response headers (TTFB) |
 | `firstRawStreamMs` | request sent → first raw stream chunk |
 | `piDurationMs` | pi's own `durationMs`, kept under this name so the analyser still reads pi's value for the duration |
@@ -56,7 +56,12 @@ only a duration keeps the full-window rate and is labelled `请求总耗时`, so
 session recorded with the extension off is never read as the same measurement.
 A `ttft_ms` at or past the end of the logged window is reported as TTFT, and
 that request's tok/s stays `—` — the two recorded numbers leave no decode
-window, and nothing is inferred to fill it.
+window, and nothing is inferred to fill it. The same is true when the whole
+completion arrives in the last 20ms and that tail holds more tokens than
+milliseconds: the body was flushed, not streamed, so there is no per-token
+interval. A request that records neither a first token nor any output tokens
+(an auth failure, a connection error, an engine crash) is not a speed sample;
+its duration is not decode time.
 
 ## Controls
 

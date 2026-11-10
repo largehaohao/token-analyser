@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_POWER_RANGE_ID,
   DEFAULT_PRICE_CNY_PER_KWH,
   MAX_POWER_COLUMNS,
   POWER_DEMO_ANCHOR_MS,
@@ -171,8 +172,28 @@ describe("范围解析与边界", () => {
     expect(w.startMs).toBe(now - HOUR);
     expect(w.endMs).toBe(now);
     expect(w.label).toBe("近1小时");
+    expect(resolveQuickWindow("10m", now).startMs).toBe(now - 10 * MINUTE);
+    expect(resolveQuickWindow("12h", now).startMs).toBe(now - 12 * HOUR);
+    expect(resolveQuickWindow("1d", now).startMs).toBe(now - 86_400_000);
     expect(resolveQuickWindow("7d", now).startMs).toBe(now - 7 * 86_400_000);
-    expect(POWER_RANGES.map((r) => r.id)).toEqual(["1h", "24h", "7d"]);
+    expect(resolveQuickWindow("30d", now).startMs).toBe(now - 30 * 86_400_000);
+    expect(POWER_RANGES.map((r) => r.id)).toEqual([
+      "10m",
+      "1h",
+      "12h",
+      "1d",
+      "7d",
+      "30d",
+    ]);
+    expect(DEFAULT_POWER_RANGE_ID).toBe("1h");
+    expect(POWER_RANGES.map((r) => r.label)).toEqual([
+      "近10分钟",
+      "近1小时",
+      "近12小时",
+      "近1天",
+      "近7天",
+      "近30天",
+    ]);
   });
 
   it("accepts a valid custom range", () => {
@@ -215,21 +236,41 @@ describe("范围解析与边界", () => {
   });
 
   it("samples far finer than the old 15-minute grid and stays under the point cap", () => {
+    expect(sampleStepMs(10 * MINUTE)).toBe(15_000);
     expect(sampleStepMs(HOUR)).toBe(15_000);
+    expect(sampleStepMs(12 * HOUR)).toBe(30_000);
     expect(sampleStepMs(24 * HOUR)).toBe(MINUTE);
     expect(sampleStepMs(7 * 86_400_000)).toBe(10 * MINUTE);
+    expect(sampleStepMs(30 * 86_400_000)).toBe(30 * MINUTE);
     expect(sampleStepMs(31 * 86_400_000)).toBe(30 * MINUTE);
-    for (const span of [HOUR, 24 * HOUR, 7 * 86_400_000, 31 * 86_400_000])
+    for (const span of [
+      10 * MINUTE,
+      HOUR,
+      12 * HOUR,
+      24 * HOUR,
+      7 * 86_400_000,
+      30 * 86_400_000,
+      31 * 86_400_000,
+    ])
       expect(span / sampleStepMs(span)).toBeLessThanOrEqual(2100);
   });
 
   it("keeps chart columns bounded and never finer than the sampling grid", () => {
-    for (const span of [HOUR, 24 * HOUR, 7 * 86_400_000, 31 * 86_400_000]) {
+    for (const span of [
+      10 * MINUTE,
+      HOUR,
+      12 * HOUR,
+      24 * HOUR,
+      7 * 86_400_000,
+      30 * 86_400_000,
+      31 * 86_400_000,
+    ]) {
       const step = sampleStepMs(span);
       const bucket = chartBucketMs(span, step);
       expect(bucket).toBeGreaterThanOrEqual(step);
       expect(span / bucket).toBeLessThanOrEqual(MAX_POWER_COLUMNS);
     }
+    expect(chartBucketMs(10 * MINUTE, 15_000)).toBe(15_000);
     expect(chartBucketMs(24 * HOUR, MINUTE)).toBe(10 * MINUTE);
   });
 });
