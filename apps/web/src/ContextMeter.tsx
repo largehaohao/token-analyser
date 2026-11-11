@@ -1,5 +1,6 @@
 import type { ContextMeasurement } from "./api";
 import { formatExactTokens, formatPercent } from "./format";
+import { Panel } from "./ui";
 
 type Props = { measurement: ContextMeasurement };
 
@@ -18,7 +19,7 @@ export function ContextMeter({ measurement }: Props) {
       : "—";
   const top = [...categories].sort((a, b) => b.tokens - a.tokens).slice(0, 4);
   return (
-    <section className="context-meter chart-card" aria-label="来源记录的上下文占用">
+    <Panel role="region" className="context-meter chart-card" aria-label="来源记录的上下文占用">
       <div className="chart-head">
         <h3 className="chart-title">上下文占用（来源记录）</h3>
         <span className="context-meter-value" data-testid="context-meter-value">
@@ -49,6 +50,6 @@ export function ContextMeter({ measurement }: Props) {
           ))}
         </ul>
       )}
-    </section>
+    </Panel>
   );
 }

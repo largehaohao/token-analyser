@@ -1,5 +1,6 @@
 import { formatWindow, parseRateLimits, resetIso } from "./rate-limits";
 import { RelativeTime } from "./RelativeTime";
+import { Panel } from "./ui";
 
 function level(percent: number): "ok" | "warn" | "hot" {
   if (percent >= 80) return "hot";
@@ -15,19 +16,19 @@ export function RateLimits({ raw }: { raw: unknown }) {
   const gauges = parseRateLimits(raw);
   if (gauges.length === 0) {
     return (
-      <aside className="rate-limits chart-card">
+      <Panel role="complementary" className="rate-limits chart-card">
         <h3>用量限额</h3>
         <p className="chart-desc">未识别到 used_percent 结构，原始快照可展开核对。</p>
         <details>
           <summary>查看原始数据</summary>
           <pre>{JSON.stringify(raw, null, 2)}</pre>
         </details>
-      </aside>
+      </Panel>
     );
   }
 
   return (
-    <aside className="rate-limits chart-card">
+    <Panel role="complementary" className="rate-limits chart-card">
       <h3>用量限额</h3>
       <p className="chart-desc">来自最近一次 token_count 快照，不覆盖分轮账本。</p>
       {gauges.map((gauge) => {
@@ -68,6 +69,6 @@ export function RateLimits({ raw }: { raw: unknown }) {
           </div>
         );
       })}
-    </aside>
+    </Panel>
   );
 }

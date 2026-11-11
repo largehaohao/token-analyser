@@ -34,6 +34,8 @@ import { RelativeTime } from "./RelativeTime";
 import { treeAppearance } from "./buckets";
 import { DetailSection } from "./DetailSection";
 import { PerformanceMetrics } from "./PerformanceMetrics";
+import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
+import { BareButton, Panel } from "./ui";
 
 type Props = {
   snapshot: SessionSnapshot;
@@ -170,18 +172,18 @@ export function SessionView({
       <header className="page-heading session-page-heading sess-head">
         <div className="page-heading-copy">
           <div className="sess-title">
-            <span className="badge">{sourceLabel(snapshot.source)}</span>
+            <Badge variant="outline" className="badge">{sourceLabel(snapshot.source)}</Badge>
             <h1 tabIndex={-1}>{snapshot.nickname ?? "会话明细"}</h1>
-            {snapshot.live && <span className="badge live">LIVE</span>}
+            {snapshot.live && <Badge variant="outline" className="badge live">LIVE</Badge>}
             {snapshot.fastMode && (
-              <span
+              <Badge variant="outline"
                 className="badge fast"
                 title="最新日志记录使用 Fast；展开轮次可查看该轮倍率与 token 单价"
               >
                 Fast
-              </span>
+              </Badge>
             )}
-            {snapshot.parentId && <span className="badge child">子会话</span>}
+            {snapshot.parentId && <Badge variant="outline" className="badge child">子会话</Badge>}
           </div>
           <p className="source-path sess-path" title={snapshot.cwd ?? undefined}>
             {snapshot.cwd ?? "本地会话"} · {snapshot.model ?? "未知模型"}
@@ -330,14 +332,14 @@ export function SessionView({
       <p className="disclaimer">{disclaimer(snapshot.rateCardAsOf)}</p>
 
       <div className="session-body two">
-        <div className="session-left tree-panel">
+        <Panel className="session-left tree-panel">
           <CostTree
             key={snapshot.id}
             tree={snapshot.tree}
             selectedNodeId={selectedNodeId}
             onSelect={onSelectNode}
           />
-        </div>
+        </Panel>
         <TurnTable
           turns={turns}
           turnIds={turnIds}
@@ -356,22 +358,22 @@ export function SessionView({
         >
           <WasteToggles snapshot={snapshot} onUpdate={onUpdate} />
           {suggestions.length > 0 && (
-            <div className="suggestions chart-card">
+            <Panel className="suggestions chart-card">
               <h3>建议</h3>
               <ul>
                 {suggestions.map((s) => (
                   <li key={s.id}>
-                    <button
+                    <BareButton
                       type="button"
                       onClick={() => handleSuggestionClick(s.turnIds)}
                     >
                       <strong>{s.title}</strong>
                       <span>{s.body}</span>
-                    </button>
+                    </BareButton>
                   </li>
                 ))}
               </ul>
-            </div>
+            </Panel>
           )}
         </DetailSection>
         <div ref={contextRef} className="detail-anchor">

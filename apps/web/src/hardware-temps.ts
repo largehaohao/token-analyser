@@ -7,7 +7,13 @@ export const TEMP_PERIODS = [
   { id: 600, label: "最近 10 分钟" },
   { id: 1800, label: "最近 30 分钟" },
   { id: 3600, label: "最近 60 分钟" },
+  { id: 43200, label: "最近 12 小时" },
+  { id: 86400, label: "最近 1 天" },
+  { id: 604800, label: "最近 7 天" },
 ] as const;
+
+/** 与引擎 clampHistorySeconds 的上限保持一致。 */
+export const MAX_TEMP_PERIOD_SEC = 604800;
 
 export type TempPeriodId = (typeof TEMP_PERIODS)[number]["id"];
 

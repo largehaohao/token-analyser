@@ -31,7 +31,18 @@ import {
   type SeriesPoint,
 } from "./hardware-power";
 import { getPowerFeed } from "./api";
-import { Button, Notice, SegmentedControl, srTable } from "./ui";
+import { Button, Notice, Panel, SegmentedControl, srTable } from "./ui";
+import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
 
 type RangeMode =
   | { kind: "quick"; id: PowerQuickRangeId }
@@ -401,9 +412,9 @@ export function HardwarePowerPage({
         <div className="page-heading-copy">
           <div className="heading-title-row">
             <h1 tabIndex={-1}>硬件用电</h1>
-            <span className="page-range">
+            <Badge variant="outline" className="page-range">
               {formatWindowRange(activeWindow)} · {rangeSub}
-            </span>
+            </Badge>
           </div>
           <p>整机用电量、电费与当前功率；分项来自 CPU、GPU 与其他硬件。</p>
         </div>
@@ -424,7 +435,7 @@ export function HardwarePowerPage({
         </Notice>
       )}
 
-      <section
+      <Panel role="region"
         className="chart-card power-energy-hero"
         aria-label="所选范围累计用电与电费"
         data-testid="power-energy-hero"
@@ -534,9 +545,9 @@ export function HardwarePowerPage({
             ))}
           </div>
         </div>
-      </section>
+      </Panel>
 
-      <section className="chart-card power-controls" aria-label="统计范围与电价">
+      <Panel role="region" className="chart-card power-controls" aria-label="统计范围与电价">
         <div className="chart-head">
           <div>
             <h2 className="chart-title">统计范围与电价</h2>
@@ -547,8 +558,8 @@ export function HardwarePowerPage({
         </div>
         <div className="power-controls-grid">
           <div className="power-field">
-            <label htmlFor="power-price">电价（元/kWh）</label>
-            <input
+            <Label htmlFor="power-price">电价（元/kWh）</Label>
+            <Input
               id="power-price"
               className="power-input power-price-input"
               type="number"
@@ -576,9 +587,9 @@ export function HardwarePowerPage({
           趋势、用电量与电费均来自这一范围：采集粒度每 {formatDuration(stepMs)}（共{" "}
           {samples.length} 个采样），曲线均值粒度每 {formatDuration(bucketMs)}。
         </p>
-      </section>
+      </Panel>
 
-      <section className="ledger power-ledger-now" aria-label="当前瞬时功率">
+      <Panel role="region" className="ledger power-ledger-now" aria-label="当前瞬时功率">
         {(["machine", "cpu", "gpu"] as const).map((key) => {
           const meta = POWER_SERIES.find((s) => s.key === key)!;
           const v = current[key];
@@ -628,9 +639,9 @@ export function HardwarePowerPage({
             </div>
           );
         })}
-      </section>
+      </Panel>
 
-      <section className="chart-card power-trend" data-testid="power-trend" aria-label="功率趋势">
+      <Panel role="region" className="chart-card power-trend" data-testid="power-trend" aria-label="功率趋势">
         <div className="chart-head power-trend-head">
           <div>
             <h2 className="chart-title">功率趋势</h2>
@@ -649,8 +660,8 @@ export function HardwarePowerPage({
         {mode.kind === "custom" && (
           <form className="power-custom-form" noValidate onSubmit={applyCustom}>
             <div className="power-field">
-              <label htmlFor="power-start">开始时间</label>
-              <input
+              <Label htmlFor="power-start">开始时间</Label>
+              <Input
                 id="power-start"
                 className="power-input"
                 type="datetime-local"
@@ -673,8 +684,8 @@ export function HardwarePowerPage({
                 ))}
             </div>
             <div className="power-field">
-              <label htmlFor="power-end">结束时间</label>
-              <input
+              <Label htmlFor="power-end">结束时间</Label>
+              <Input
                 id="power-end"
                 className="power-input"
                 type="datetime-local"
@@ -832,9 +843,9 @@ export function HardwarePowerPage({
             )}</div>
           </>
         )}
-      </section>
+      </Panel>
 
-      <section className="chart-card" aria-label="区间统计明细">
+      <Panel role="region" className="chart-card" aria-label="区间统计明细">
         <div className="chart-head">
           <div>
             <h2 className="chart-title">区间统计明细（{rangeSub}）</h2>
@@ -848,57 +859,57 @@ export function HardwarePowerPage({
         </div>
         <div className="power-table-scroll" tabIndex={0} role="region" aria-label="区间统计表，可左右滚动">
           <table className="mt power-mt">
-            <thead>
-              <tr>
-                <th scope="col">设备</th>
-                <th scope="col">瞬时功率（当前）</th>
-                <th scope="col">区间用电量 kWh</th>
-                <th scope="col">区间电费</th>
-                <th scope="col">平均功率</th>
-                <th scope="col">峰值功率</th>
-                <th scope="col">数据覆盖</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">CPU（分项）</th>
-                <td className="num">{formatWatts(current.cpu)}</td>
-                <td className="num">{formatKwh(integrals.cpu)}</td>
-                <td className="num">{formatCny(cost(integrals.cpu), integrals.cpu.complete)}</td>
-                <td className="num">{formatWatts(integrals.cpu.avgW)}</td>
-                <td className="num">{formatWatts(integrals.cpu.peakW)}</td>
-                <td>{formatCoverage(integrals.cpu)}</td>
-              </tr>
-              <tr>
-                <th scope="row">GPU（分项）</th>
-                <td className="num">{formatWatts(current.gpu)}</td>
-                <td className="num">{formatKwh(integrals.gpu)}</td>
-                <td className="num">{formatCny(cost(integrals.gpu), integrals.gpu.complete)}</td>
-                <td className="num">{formatWatts(integrals.gpu.avgW)}</td>
-                <td className="num">{formatWatts(integrals.gpu.peakW)}</td>
-                <td>{formatCoverage(integrals.gpu)}</td>
-              </tr>
-              <tr>
-                <th scope="row">整机（总量，含其他硬件）</th>
-                <td className="num">{formatWatts(current.machine)}</td>
-                <td className="num">{formatKwh(integrals.machine)}</td>
-                <td className="num">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">设备</TableHead>
+                <TableHead scope="col">瞬时功率（当前）</TableHead>
+                <TableHead scope="col">区间用电量 kWh</TableHead>
+                <TableHead scope="col">区间电费</TableHead>
+                <TableHead scope="col">平均功率</TableHead>
+                <TableHead scope="col">峰值功率</TableHead>
+                <TableHead scope="col">数据覆盖</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow>
+                <TableHead scope="row">CPU（分项）</TableHead>
+                <TableCell className="num">{formatWatts(current.cpu)}</TableCell>
+                <TableCell className="num">{formatKwh(integrals.cpu)}</TableCell>
+                <TableCell className="num">{formatCny(cost(integrals.cpu), integrals.cpu.complete)}</TableCell>
+                <TableCell className="num">{formatWatts(integrals.cpu.avgW)}</TableCell>
+                <TableCell className="num">{formatWatts(integrals.cpu.peakW)}</TableCell>
+                <TableCell>{formatCoverage(integrals.cpu)}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableHead scope="row">GPU（分项）</TableHead>
+                <TableCell className="num">{formatWatts(current.gpu)}</TableCell>
+                <TableCell className="num">{formatKwh(integrals.gpu)}</TableCell>
+                <TableCell className="num">{formatCny(cost(integrals.gpu), integrals.gpu.complete)}</TableCell>
+                <TableCell className="num">{formatWatts(integrals.gpu.avgW)}</TableCell>
+                <TableCell className="num">{formatWatts(integrals.gpu.peakW)}</TableCell>
+                <TableCell>{formatCoverage(integrals.gpu)}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableHead scope="row">整机（总量，含其他硬件）</TableHead>
+                <TableCell className="num">{formatWatts(current.machine)}</TableCell>
+                <TableCell className="num">{formatKwh(integrals.machine)}</TableCell>
+                <TableCell className="num">
                   {formatCny(cost(integrals.machine), integrals.machine.complete)}
-                </td>
-                <td className="num">{formatWatts(integrals.machine.avgW)}</td>
-                <td className="num">{formatWatts(integrals.machine.peakW)}</td>
-                <td>{formatCoverage(integrals.machine)}</td>
-              </tr>
-              <tr>
-                <th scope="row">其他硬件（整机 − CPU − GPU，推算）</th>
-                <td className="num">{formatWatts(otherNow)}</td>
-                <td className="num">{formatKwh(integrals.other)}</td>
-                <td className="num">{formatCny(cost(integrals.other), integrals.other.complete)}</td>
-                <td className="num">{formatWatts(integrals.other.avgW)}</td>
-                <td className="num">—</td>
-                <td>{formatCoverage(integrals.other)}</td>
-              </tr>
-            </tbody>
+                </TableCell>
+                <TableCell className="num">{formatWatts(integrals.machine.avgW)}</TableCell>
+                <TableCell className="num">{formatWatts(integrals.machine.peakW)}</TableCell>
+                <TableCell>{formatCoverage(integrals.machine)}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableHead scope="row">其他硬件（整机 − CPU − GPU，推算）</TableHead>
+                <TableCell className="num">{formatWatts(otherNow)}</TableCell>
+                <TableCell className="num">{formatKwh(integrals.other)}</TableCell>
+                <TableCell className="num">{formatCny(cost(integrals.other), integrals.other.complete)}</TableCell>
+                <TableCell className="num">{formatWatts(integrals.other.avgW)}</TableCell>
+                <TableCell className="num">—</TableCell>
+                <TableCell>{formatCoverage(integrals.other)}</TableCell>
+              </TableRow>
+            </TableBody>
           </table>
         </div>
         <p className="power-note">
@@ -906,7 +917,7 @@ export function HardwarePowerPage({
           任一序列缺失时无法推算，显示 —；其余各行的用电量都来自各自序列的独立积分。
           {live ? "电费" : "演示电费"}不会加入成本总览的 Token 成本。
         </p>
-      </section>
+      </Panel>
     </main>
   );
 }

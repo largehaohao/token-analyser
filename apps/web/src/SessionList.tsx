@@ -30,7 +30,8 @@ import {
   readSessionListState,
   writeSessionListState,
 } from "./session-navigation";
-import { Button, Icon, SearchField, StatePanel } from "./ui";
+import { BareButton, Button, Icon, Panel, SearchField, StatePanel } from "./ui";
+import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
 import { sourceEmptyCopy, type SessionSourceFilter } from "./session-source";
 
 const EMPTY_RANGE_COPY = "该时间范围内没有会话";
@@ -362,8 +363,8 @@ export function SessionList({
                     .filter(Boolean)
                     .join(" ")}
                 >
-                  <div className="session-card">
-                    <button
+                  <Panel className="session-card">
+                    <BareButton
                       type="button"
                       className="session-main"
                       aria-pressed={selectedId === s.id}
@@ -371,16 +372,16 @@ export function SessionList({
                       onClick={() => onSelect(s.id)}
                     >
                       <div className="row-top">
-                        <span className="badge">{sourceLabel(s.source)}</span>
+                        <Badge variant="outline" className="badge">{sourceLabel(s.source)}</Badge>
                         <span className="session-id" title={s.id}>
                           {s.nickname ?? s.id}
                         </span>
-                        {s.live && <span className="badge live">LIVE</span>}
+                        {s.live && <Badge variant="outline" className="badge live">LIVE</Badge>}
                         {s.parentId && (
-                          <span className="badge child">子会话</span>
+                          <Badge variant="outline" className="badge child">子会话</Badge>
                         )}
                         {s.ledger_warning && (
-                          <span className="badge warn">账本</span>
+                          <Badge variant="outline" className="badge warn">账本</Badge>
                         )}
                       </div>
                       <div className="session-meta" title={s.cwd ?? undefined}>
@@ -453,10 +454,10 @@ export function SessionList({
                           offset {s.parse_error_offset}: {s.parse_error_message}
                         </div>
                       )}
-                    </button>
+                    </BareButton>
                     {selectedId === s.id && (
                       <div className="session-context-meta">
-                        <button
+                        <BareButton
                           type="button"
                           className={
                             selectedId === s.id && contextOpen === "skills"
@@ -470,8 +471,8 @@ export function SessionList({
                           {(s.skillsCount ?? 0) > 0
                             ? ` · ${s.skillsCount}`
                             : ""}
-                        </button>
-                        <button
+                        </BareButton>
+                        <BareButton
                           type="button"
                           className={
                             selectedId === s.id && contextOpen === "tools"
@@ -483,10 +484,10 @@ export function SessionList({
                         >
                           工具 {formatCompactTokens(s.toolsChars ?? 0)}
                           {(s.toolsCount ?? 0) > 0 ? ` · ${s.toolsCount}` : ""}
-                        </button>
+                        </BareButton>
                       </div>
                     )}
-                  </div>
+                  </Panel>
                 </li>
               );
             })}

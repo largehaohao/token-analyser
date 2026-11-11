@@ -10,6 +10,7 @@ import {
   formatUnitSuffix,
   type CostUnit,
 } from "./format";
+import { BareButton, Panel } from "./ui";
 
 type Props = {
   overview: Overview;
@@ -54,7 +55,7 @@ export function LedgerStrip({
     ? "usd" : companionMoneyUnit(unit);
 
   return (
-    <section className="ledger" data-testid="ledger-strip" aria-label="当前统计范围概览">
+    <Panel role="region" className="ledger" data-testid="ledger-strip" aria-label="当前统计范围概览">
       <div className="ledger-item">
         <span className="ledger-label">总支出（{unit}）</span>
         <span
@@ -99,7 +100,7 @@ export function LedgerStrip({
           </span>
         </div>
       )}
-      <button
+      <BareButton
         type="button"
         className="ledger-item ledger-action"
         onClick={onOpenSessions}
@@ -116,7 +117,7 @@ export function LedgerStrip({
           {overview.live ? "有实时会话" : "静态账本"} ·{" "}
           {overview.collecting ? "采集中" : "未开启采集"}
         </span>
-      </button>
+      </BareButton>
       <div className="ledger-item">
         <span className="ledger-label">缓存命中</span>
         <span className="ledger-value">
@@ -169,6 +170,6 @@ export function LedgerStrip({
             : ""}
         </span>
       </div>
-    </section>
+    </Panel>
   );
 }

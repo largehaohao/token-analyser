@@ -1,3 +1,7 @@
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
 import { ALL_MODELS, modelOptions } from "./model-filter";
 import type { OverviewModel } from "./api";
 
@@ -23,7 +27,7 @@ export function ModelFilterSelect({
   return (
     <label className="model-filter" htmlFor={id}>
       <span className="model-filter-label">模型选择</span>
-      <select
+      <NativeSelect
         id={id}
         data-testid={id}
         value={value}
@@ -31,13 +35,13 @@ export function ModelFilterSelect({
         aria-label="模型选择"
         onChange={(event) => onChange(event.target.value)}
       >
-        <option value={ALL_MODELS}>全部模型</option>
+        <NativeSelectOption value={ALL_MODELS}>全部模型</NativeSelectOption>
         {options.map((model) => (
-          <option key={model} value={model}>
+          <NativeSelectOption key={model} value={model}>
             {model}
-          </option>
+          </NativeSelectOption>
         ))}
-      </select>
+      </NativeSelect>
     </label>
   );
 }

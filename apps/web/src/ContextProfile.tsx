@@ -1,5 +1,6 @@
 import type { ContextBucket, ContextProfile as Profile } from "./api";
 import { formatCompactTokens } from "./format";
+import { BareButton, Panel } from "./ui";
 
 export type ContextBucketId = "tools" | "skills";
 
@@ -32,7 +33,7 @@ function BucketPanel({
 }) {
   return (
     <div className={`context-bucket ${open ? "open" : ""}`}>
-      <button
+      <BareButton
         type="button"
         className="context-bucket-head"
         aria-expanded={open}
@@ -42,7 +43,7 @@ function BucketPanel({
         <span className="context-bucket-size">
           {bucket.items.length} 项 · {formatCompactTokens(bucket.chars)} 字符
         </span>
-      </button>
+      </BareButton>
       {open &&
         (bucket.items.length === 0 ? (
           <p className="context-empty">{EMPTY[id]}</p>
@@ -76,7 +77,7 @@ export function ContextProfileCard({ profile, open, onOpen }: Props) {
   }
 
   return (
-    <section className="chart-card context-card" data-testid="context-card">
+    <Panel role="region" className="chart-card context-card" data-testid="context-card">
       <h3>上下文组成</h3>
       <p className="chart-desc">
         点击工具或技能，查看注入上下文由哪些条目组成。长度为字符数，不是账单
@@ -96,6 +97,6 @@ export function ContextProfileCard({ profile, open, onOpen }: Props) {
           onToggle={() => toggle("skills")}
         />
       </div>
-    </section>
+    </Panel>
   );
 }

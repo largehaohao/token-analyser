@@ -41,7 +41,17 @@ import { SESSION_PAGE_SIZE, resolveSelectedSession } from "./session-page";
 import { readDroppedFile, type ImportStatus } from "./import-file";
 import { pricingUpdateNotice as buildPricingUpdateNotice } from "./pricing-notice";
 import { overviewDisplayState } from "./overview-state";
-import { Button, Icon, LedgerMark, Notice, StatePanel } from "./ui";
+import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  BareButton,
+  Button,
+  Icon,
+  LedgerMark,
+  Notice,
+  Panel,
+  StatePanel,
+} from "./ui";
 import {
   readSessionNavigation,
   pushSessionNavigation,
@@ -714,43 +724,51 @@ function AppShell() {
               </div>
             </div>
             <nav className="nav-pills primary-nav" aria-label="视图">
-              <a
-                href="#overview"
-                className={view === "overview" ? "active" : ""}
-                aria-current={view === "overview" ? "page" : undefined}
-                onClick={(event) => navigate(event, "overview")}
-              >
-                <Icon name="overview" />
-                成本总览
-              </a>
-              <a
-                href="#sessions"
-                className={view === "sessions" ? "active" : ""}
-                aria-current={view === "sessions" ? "page" : undefined}
-                onClick={(event) => navigate(event, "sessions")}
-              >
-                <Icon name="sessions" />
-                会话明细
-              </a>
-              <a
-                href={`#hardware/${hardwareTab}`}
-                className={view === "hardware" ? "active" : ""}
-                aria-current={view === "hardware" ? "page" : undefined}
-                onClick={(event) => navigate(event, "hardware")}
-              >
-                <Icon name="power" />
-                硬件
-              </a>
+              <BareButton asChild>
+                <a
+                  href="#overview"
+                  className={view === "overview" ? "active" : ""}
+                  aria-current={view === "overview" ? "page" : undefined}
+                  onClick={(event) => navigate(event, "overview")}
+                >
+                  <Icon name="overview" />
+                  成本总览
+                </a>
+              </BareButton>
+              <BareButton asChild>
+                <a
+                  href="#sessions"
+                  className={view === "sessions" ? "active" : ""}
+                  aria-current={view === "sessions" ? "page" : undefined}
+                  onClick={(event) => navigate(event, "sessions")}
+                >
+                  <Icon name="sessions" />
+                  会话明细
+                </a>
+              </BareButton>
+              <BareButton asChild>
+                <a
+                  href={`#hardware/${hardwareTab}`}
+                  className={view === "hardware" ? "active" : ""}
+                  aria-current={view === "hardware" ? "page" : undefined}
+                  onClick={(event) => navigate(event, "hardware")}
+                >
+                  <Icon name="power" />
+                  硬件
+                </a>
+              </BareButton>
             </nav>
           </div>
           <div className="header-right app-tools">
             <div className="status-pills" role="status" aria-live="polite">
-              <span>
-                <i
-                  className={`dot ${streamStatus === "open" ? "live" : streamStatus === "error" ? "err" : "idle"}`}
-                />
-                {STREAM_LABEL[streamStatus]}
-              </span>
+              <Badge asChild variant="outline">
+                <span>
+                  <i
+                    className={`dot ${streamStatus === "open" ? "live" : streamStatus === "error" ? "err" : "idle"}`}
+                  />
+                  {STREAM_LABEL[streamStatus]}
+                </span>
+              </Badge>
             </div>
             <Button
               className="refresh-button"
@@ -1074,7 +1092,7 @@ function OverviewRail({
   const max = Math.max(...topSessions.map((session) => session.cost.raw), 1);
   return (
     <aside className="rail overview-rail" aria-label="总览侧栏" tabIndex={-1}>
-      <div className="rail-panel">
+      <Panel className="rail-panel">
         <h2 className="rail-title">账本状态</h2>
         <div className="dq-list">
           <div className={`dq ${overview.unpricedRaw > 0 ? "warn" : "ok"}`}>
@@ -1115,15 +1133,15 @@ function OverviewRail({
             </div>
           </div>
         </div>
-      </div>
-      <div className="rail-panel">
+      </Panel>
+      <Panel className="rail-panel">
         <h2 className="rail-title">范围 Top 会话</h2>
         {topSessions.length === 0 ? (
           <p className="empty-copy">该范围内没有会话。</p>
         ) : (
           <div className="rail-ranks">
             {topSessions.map((session, index) => (
-              <button
+              <BareButton
                 type="button"
                 className="rail-rank"
                 key={session.id}
@@ -1150,30 +1168,32 @@ function OverviewRail({
                     />
                   </span>
                 </span>
-              </button>
+              </BareButton>
             ))}
           </div>
         )}
         <Button className="rail-more" onClick={onOpenSessions}>
           查看全部会话 <Icon name="arrow" />
         </Button>
-      </div>
-      <div className="rail-panel">
+      </Panel>
+      <Panel className="rail-panel">
         <h2 className="rail-title">数据源</h2>
         <p className="rail-meta">采集目录：{watchPath}</p>
         <p className="rail-meta">
           时区：{Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区"}
         </p>
         <p className="rail-meta">价格快照：{overview.rateCardAsOf}</p>
-      </div>
+      </Panel>
     </aside>
   );
 }
 
 export function App() {
   return (
-    <NowProvider>
-      <AppShell />
-    </NowProvider>
+    <TooltipProvider>
+      <NowProvider>
+        <AppShell />
+      </NowProvider>
+    </TooltipProvider>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { formatPercent } from "./format";
 import { distributionSummary, type HistogramData } from "./perf-buckets";
+import { Panel } from "./ui";
 
 /**
  * A fixed-bucket histogram. Bars are drawn as blocks, not lines, so a bucket with
@@ -90,20 +91,20 @@ export function HistogramPair({
 }) {
   return (
     <div className="hist-grid">
-      <div className="hist-card">
+      <Panel className="hist-card">
         <div className="hist-head">
           <span className="h">TTFT 分布</span>
           <span className="c">{distributionSummary(ttft, noun)}</span>
         </div>
         <Histogram title="TTFT" data={ttft} />
-      </div>
-      <div className="hist-card">
+      </Panel>
+      <Panel className="hist-card">
         <div className="hist-head">
           <span className="h">输出速度分布</span>
           <span className="c">{distributionSummary(speed, noun)}</span>
         </div>
         <Histogram title="输出速度" data={speed} />
-      </div>
+      </Panel>
     </div>
   );
 }

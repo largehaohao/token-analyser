@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_HISTORY_SECONDS,
   TEMP_LIMITS,
+  clampHistorySeconds,
   fetchTempSnapshot,
   fetchTempHistory,
   gpuStatus,
+  historyStepSec,
   type FetchLike,
 } from "../src/temps.ts";
 
@@ -295,6 +298,23 @@ describe("fetchTempSnapshot", () => {
   });
 });
 
+describe("history window sizing", () => {
+  it("allows up to seven days and keeps the ~300 sample grid", () => {
+    expect(clampHistorySeconds(30)).toBe(60);
+    expect(clampHistorySeconds(3600)).toBe(3600);
+    expect(clampHistorySeconds(43200)).toBe(43200);
+    expect(clampHistorySeconds(86400)).toBe(86400);
+    expect(clampHistorySeconds(MAX_HISTORY_SECONDS)).toBe(604800);
+    expect(clampHistorySeconds(99_999_999)).toBe(604800);
+    // 短窗口沿用原来的秒级步长；长窗口自动放粗，避免拉回海量点。
+    expect(historyStepSec(300)).toBe(2);
+    expect(historyStepSec(3600)).toBe(12);
+    expect(historyStepSec(43200)).toBe(144);
+    expect(historyStepSec(86400)).toBe(288);
+    expect(historyStepSec(604800)).toBe(2016);
+  });
+});
+
 describe("fetchTempHistory", () => {
   it("builds timestamp-aligned samples and clamps seconds", async () => {
     const impl: FetchLike = async (url) => {
@@ -415,13 +435,13 @@ describe("fetchTempHistory", () => {
         queries: { cpu: "x", gpu: "y", machine: "z" },
         temps: { gpu: [], cpu: [], max_components_per_device: 16 },
       },
-      seconds: 99999,
+      seconds: 99_999_999,
       fetchImpl: impl,
       nowMs: (T0 + 15) * 1000,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.seconds).toBe(3600);
+    expect(result.seconds).toBe(604800);
     expect(result.samples.length).toBeGreaterThanOrEqual(2);
     expect(result.samples[0]!.gpus[0]!.temperatures.edge.value).toBe(40);
   });

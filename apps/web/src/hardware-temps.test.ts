@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_TEMP_PERIOD_SEC,
   TEMP_DISPLAY_LIMITS,
   TEMP_PERIODS,
   filterSamplesByWindow,
@@ -14,14 +15,22 @@ import {
 } from "./hardware-temps";
 
 describe("TEMP_PERIODS", () => {
-  it("offers 5, 10, 30, and 60 minute windows", () => {
-    expect(TEMP_PERIODS.map((period) => period.id)).toEqual([300, 600, 1800, 3600]);
+  it("offers minute windows plus 12 hours, 1 day and 7 days", () => {
+    expect(TEMP_PERIODS.map((period) => period.id)).toEqual([
+      300, 600, 1800, 3600, 43200, 86400, 604800,
+    ]);
     expect(TEMP_PERIODS.map((period) => period.label)).toEqual([
       "最近 5 分钟",
       "最近 10 分钟",
       "最近 30 分钟",
       "最近 60 分钟",
+      "最近 12 小时",
+      "最近 1 天",
+      "最近 7 天",
     ]);
+    expect(Math.max(...TEMP_PERIODS.map((period) => period.id))).toBe(
+      MAX_TEMP_PERIOD_SEC,
+    );
   });
 });
 

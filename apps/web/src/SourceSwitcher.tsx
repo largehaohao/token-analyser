@@ -1,4 +1,8 @@
 import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
+import {
   SESSION_SOURCES,
   sourceEmptyCopy,
   type SessionSourceFilter,
@@ -29,7 +33,7 @@ export function SourceSwitcher({
     <section className="source-toolbar" aria-label="会话来源筛选">
       <label className="filter-field source-filter-field">
         <span className="filter-label">来源</span>
-        <select
+        <NativeSelect
           className="source-select"
           aria-label="会话来源"
           value={source}
@@ -40,16 +44,16 @@ export function SourceSwitcher({
           {SESSION_SOURCES.map((item) => {
             const count = loaded ? counts[item.id] : "—";
             return (
-              <option
+              <NativeSelectOption
                 key={item.id}
                 value={item.id}
                 title={`${item.label} · 全部时间已发现 ${count} 个会话`}
               >
                 {item.label} {count}
-              </option>
+              </NativeSelectOption>
             );
           })}
-        </select>
+        </NativeSelect>
         <span className="source-count-caption">全部时间的会话数</span>
       </label>
       {loaded && source !== "all" && counts[source] === 0 && (

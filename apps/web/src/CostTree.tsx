@@ -8,6 +8,7 @@ import {
   formatCost,
   formatCostTitle,
 } from "./format";
+import { BareButton, Panel } from "./ui";
 
 export function siblingDisplayPercents(
   children: Array<{ cost: { raw: number } }>,
@@ -59,7 +60,7 @@ function TreeRow({
 
   return (
     <>
-      <button
+      <BareButton
         type="button"
         className={`tree-row${selected ? " selected" : ""}${muted ? " muted" : ""}`}
         aria-pressed={selected}
@@ -96,7 +97,7 @@ function TreeRow({
             ? formatCostTokens(node.cost)
             : formatCost(node.cost, unit)}
         </span>
-      </button>
+      </BareButton>
       {children.map((child, i) => (
         <TreeRow
           key={child.id}
@@ -124,7 +125,7 @@ export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
   }
 
   return (
-    <div className="cost-tree chart-card">
+    <Panel className="cost-tree chart-card">
       <h3>成本树</h3>
       <p className="chart-desc">按 Token 占比分组，点选分类筛选轮次。</p>
       <TreeRow
@@ -138,16 +139,16 @@ export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
         onSelect={onSelect}
       />
       {hasEmptyBranches(tree) && (
-        <button
+        <BareButton
           type="button"
           className="secondary-action tree-empty-toggle"
           aria-pressed={showEmpty}
           onClick={() => setShowEmpty((current) => !current)}
         >
           {showEmpty ? "隐藏零用量分类" : "显示零用量分类"}
-        </button>
+        </BareButton>
       )}
-    </div>
+    </Panel>
   );
 }
 

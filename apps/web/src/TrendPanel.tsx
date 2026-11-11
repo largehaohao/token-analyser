@@ -16,7 +16,8 @@ import {
 import { formatChartNumber } from "./format";
 import { ModelFilterSelect } from "./ModelFilterSelect";
 import { useModelFilteredOverview } from "./useModelFilteredOverview";
-import { srTable } from "./ui";
+import { Panel, srTable } from "./ui";
+import { Toggle } from "@/components/ui/toggle";
 
 type Props = {
   overview: Overview;
@@ -94,7 +95,7 @@ export function TrendPanel({
   }
 
   return (
-    <section className="chart-card" data-testid="trend-chart" aria-label="每日支出趋势">
+    <Panel role="region" className="chart-card" data-testid="trend-chart" aria-label="每日支出趋势">
       <div className="chart-head">
         <div>
           <h3 className="chart-title">每日支出趋势</h3>
@@ -117,15 +118,16 @@ export function TrendPanel({
             aria-label="趋势图单位"
           >
             {METRICS.map((item) => (
-              <button
+              <Toggle
                 key={item.id}
-                type="button"
+                variant="outline"
+                size="sm"
+                pressed={selectedMetric === item.id}
+                onPressedChange={() => onChartMetric(item.id)}
                 className={selectedMetric === item.id ? "on" : ""}
-                aria-pressed={selectedMetric === item.id}
-                onClick={() => onChartMetric(item.id)}
               >
                 {item.label}
-              </button>
+              </Toggle>
             ))}
           </div>
         </div>
@@ -273,6 +275,6 @@ export function TrendPanel({
           )}
         </>
       )}
-    </section>
+    </Panel>
   );
 }

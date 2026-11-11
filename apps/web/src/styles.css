@@ -6325,6 +6325,7 @@ button.ledger-item:focus-visible {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
 }
 .temps-card-title {
@@ -6554,6 +6555,13 @@ button.ledger-item:focus-visible {
   flex-shrink: 0;
   color: var(--text-muted);
   font-size: 12px;
+}
+/* 七个时间档位在窄屏自动换行，避免按钮文字被挤到一行里。 */
+.temps-period-control {
+  flex-wrap: wrap;
+}
+.temps-period-control button {
+  min-width: 4.6rem;
 }
 .temps-period select {
   min-height: 36px;
@@ -6975,10 +6983,10 @@ button.ledger-item:focus-visible {
   .temps-margin-chip { flex-wrap: wrap; white-space: normal; }
   .temps-live { align-items: flex-start; }
   .hardware-context-copy { margin-left: 0; }
-  /* 时间范围在小屏占满一行，四个档位等宽，避免右对齐留下半行空白。 */
+  /* 时间范围在小屏占满一行，七个档位按可用宽度等分换行。 */
   .temps-history-head .temps-period { width: 100%; }
   .temps-period-control { width: 100%; }
-  .temps-period-control button { flex: 1; padding-inline: 0.2rem; }
+  .temps-period-control button { flex: 1 1 auto; padding-inline: 0.2rem; }
 }
 
 /* 触屏没有悬停和方向键：提示改为轻触，避免给出做不到的操作指引。 */

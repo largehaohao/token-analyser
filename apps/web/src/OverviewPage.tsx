@@ -17,6 +17,7 @@ import {
 import { useUnit } from "./UnitContext";
 import { DetailSection } from "./DetailSection";
 import { Button, Icon, Notice } from "./ui";
+import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
 import {
   BehaviorRankPanel,
   CompositionPanel,
@@ -87,10 +88,10 @@ export function OverviewPage({
         <div className="page-heading-copy">
           <div className="heading-title-row">
             <h1 tabIndex={-1}>成本总览</h1>
-            <span className="page-range">
+            <Badge variant="outline" className="page-range">
               <Icon name="clock" />
               {rangeLabel}
-            </span>
+            </Badge>
           </div>
           <p>从总量到每轮调用，看清用量花在哪里。</p>
         </div>

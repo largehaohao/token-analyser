@@ -468,12 +468,19 @@ export async function fetchTempSnapshot(options: {
   return { ok: true, config, sample: aggregateSnapshot(fetched.parts) };
 }
 
+/** 最长历史窗口：对应温度页「最近 7 天」档位。 */
+export const MAX_HISTORY_SECONDS = 7 * 24 * 3600;
+
 export function clampHistorySeconds(seconds: number): number {
-  return Math.max(60, Math.min(3600, Math.round(seconds)));
+  return Math.max(60, Math.min(MAX_HISTORY_SECONDS, Math.round(seconds)));
 }
 
+/**
+ * 约 300 个采样点：短窗口保留秒级精度，长窗口自动放粗步长，
+ * 否则 7 天按 15 秒查询会拉回数十万点。
+ */
 export function historyStepSec(seconds: number): number {
-  return Math.max(2, Math.min(15, Math.round(seconds / 300)));
+  return Math.max(2, Math.round(seconds / 300));
 }
 
 export async function fetchTempHistory(options: {
@@ -490,7 +497,8 @@ export async function fetchTempHistory(options: {
   const endSec = Math.floor(nowMs / 1000);
   const startSec = endSec - seconds;
   const fetchImpl = options.fetchImpl ?? (globalThis.fetch as FetchLike);
-  const timeoutMs = options.timeoutMs ?? 8000;
+  // 长窗口的 Prometheus range query 更慢，给足超时但不超过客户端等待时间。
+  const timeoutMs = options.timeoutMs ?? (seconds > 3600 ? 15000 : 8000);
 
   const fetched = await fetchAllQueries({
     config,

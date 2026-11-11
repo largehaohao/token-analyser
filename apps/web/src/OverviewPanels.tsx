@@ -20,7 +20,16 @@ import { arrayHistogram, TPS_LABELS, TPS_TICKS, TTFT_LABELS, TTFT_TICKS } from "
 import { HistogramPair } from "./Histogram";
 import { sourceLabel } from "./format";
 import { useModelFilteredOverview } from "./useModelFilteredOverview";
-import { srTable } from "./ui";
+import { BareButton, Panel, srTable } from "./ui";
+import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
+import {
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
 
 function InspectButton({
   label,
@@ -30,14 +39,14 @@ function InspectButton({
   onClick: () => void;
 }) {
   return (
-    <button
+    <BareButton
       type="button"
       className="inspect"
       onClick={onClick}
       title={`查看「${label}」相关会话`}
     >
       查看会话 ›
-    </button>
+    </BareButton>
   );
 }
 
@@ -77,7 +86,7 @@ export function CompositionPanel({ overview }: { overview: Overview }) {
   ];
 
   return (
-    <section className="chart-card" data-testid="composition-panel" aria-label="Token 构成">
+    <Panel role="region" className="chart-card" data-testid="composition-panel" aria-label="Token 构成">
       <div className="chart-head">
         <div>
           <h2 className="chart-title">Token 构成</h2>
@@ -86,7 +95,7 @@ export function CompositionPanel({ overview }: { overview: Overview }) {
           </p>
         </div>
         {hit != null && (
-          <span className="cache-pill">缓存命中 {formatPercent(100 * hit)}</span>
+          <Badge variant="outline" className="cache-pill">缓存命中 {formatPercent(100 * hit)}</Badge>
         )}
       </div>
       <div className="comp-rows">
@@ -145,7 +154,7 @@ export function CompositionPanel({ overview }: { overview: Overview }) {
           total > 0 ? formatPercent(pct(row.value)) : "—",
         ]),
       )}
-    </section>
+    </Panel>
   );
 }
 
@@ -168,7 +177,7 @@ export function BehaviorRankPanel({
   const max = Math.max(...rows.map((row) => row.raw), 1);
 
   return (
-    <section className="chart-card" data-testid="behavior-rank" aria-label="行为排行">
+    <Panel role="region" className="chart-card" data-testid="behavior-rank" aria-label="行为排行">
       <div className="chart-head">
         <div>
           <h2 className="chart-title">行为排行</h2>
@@ -232,7 +241,7 @@ export function BehaviorRankPanel({
           )}
         </>
       )}
-    </section>
+    </Panel>
   );
 }
 
@@ -307,31 +316,31 @@ export function ModelPanel({
       ) : (
         <div className="model-table-scroll" role="region" aria-label="模型用量表，可横向滚动" tabIndex={0}>
           <table className="mt">
-            <thead>
-              <tr>
-                <th scope="col">模型</th>
-                <th scope="col">Token 占比</th>
-                <th scope="col" className="right">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">模型</TableHead>
+                <TableHead scope="col">Token 占比</TableHead>
+                <TableHead scope="col" className="right">
                   Token
-                </th>
-                <th scope="col" className="right">
+                </TableHead>
+                <TableHead scope="col" className="right">
                   轮次
-                </th>
-                <th scope="col" className="right">
+                </TableHead>
+                <TableHead scope="col" className="right">
                   费用（{unit}）
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {entries.map((entry) => (
-                <tr key={entry.model}>
-                  <th scope="row" className="mt-model">
+                <TableRow key={entry.model}>
+                  <TableHead scope="row" className="mt-model">
                     {entry.model}
                     {entry.cost.unmeasured ? (
                       <small className="model-usage-note">{entry.cost.unmeasured} 次调用用量未记录</small>
                     ) : null}
-                  </th>
-                  <td>
+                  </TableHead>
+                  <TableCell>
                     <div
                       className="mt-bar"
                       title={formatCostTitle(entry.cost, "tokens")}
@@ -346,19 +355,19 @@ export function ModelPanel({
                         }}
                       />
                     </div>
-                  </td>
-                  <td className="right num" title={formatCostTitle(entry.cost, "tokens")}>
+                  </TableCell>
+                  <TableCell className="right num" title={formatCostTitle(entry.cost, "tokens")}>
                     {formatCostTokens(entry.cost)}
-                  </td>
-                  <td className="right num">{entry.turnCount.toLocaleString()}</td>
-                  <td className="right num" title={formatCostTitle(entry.cost, unit)}>
+                  </TableCell>
+                  <TableCell className="right num">{entry.turnCount.toLocaleString()}</TableCell>
+                  <TableCell className="right num" title={formatCostTitle(entry.cost, unit)}>
                     {entry.unpricedRaw > 0 && entry.cost.credits == null && entry.cost.usd == null
                       ? "未定价"
                       : formatCost(entry.cost, unit)}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
+            </TableBody>
           </table>
         </div>
       )}
@@ -396,7 +405,7 @@ export function PerformancePanel({
   } = useModelFilteredOverview(baseOverview, filterScope, fetchOverviewForModel);
   const dist = overview.performanceDistribution;
   return (
-    <section className="chart-card perf-card" data-testid="performance-panel" aria-label="响应性能分布">
+    <Panel role="region" className="chart-card perf-card" data-testid="performance-panel" aria-label="响应性能分布">
       <div className="chart-head">
         <div>
           <h2 className="chart-title">性能表现</h2>
@@ -431,7 +440,7 @@ export function PerformancePanel({
           <code> TOKEN_ANALYSER_ENABLE_REQUEST_PERFORMANCE=1</code>。
         </p>
       )}
-    </section>
+    </Panel>
   );
 }
 

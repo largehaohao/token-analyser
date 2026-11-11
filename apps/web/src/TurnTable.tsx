@@ -13,7 +13,15 @@ import {
 import { MixBar } from "./MixBar";
 import { TurnSparkline } from "./TurnSparkline";
 import { useUnit } from "./UnitContext";
-import { Button, Icon } from "./ui";
+import { BareButton, Button, Icon, Panel } from "./ui";
+import {
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
 import {
   TURN_PAGE_SIZE,
   highlightScrollBehavior,
@@ -92,7 +100,7 @@ export function TurnTable({
   }, [highlightTurnId, highlightNonce]);
 
   return (
-    <div className="turn-table-wrap chart-card">
+    <Panel className="turn-table-wrap chart-card">
       <div className="turn-table-head">
         <h3>
           轮次{scopeLabel ? ` · ${scopeLabel}` : ""} ({visible.length}
@@ -127,27 +135,27 @@ export function TurnTable({
               <caption className="visually-hidden">
                 轮次用量，使用时间旁的按钮展开明细
               </caption>
-              <thead>
-                <tr>
-                  <th scope="col" aria-sort="descending">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col" aria-sort="descending">
                     时间
-                  </th>
-                  <th scope="col">本轮目的</th>
-                  <th scope="col">分类</th>
-                  <th scope="col">工具</th>
-                  <th scope="col">构成</th>
-                  <th scope="col" className="turn-cache" title="已缓存输入 ÷ 输入">缓存</th>
-                  <th scope="col" className="num-col" title="该轮记录的原始 token 总量">
+                  </TableHead>
+                  <TableHead scope="col">本轮目的</TableHead>
+                  <TableHead scope="col">分类</TableHead>
+                  <TableHead scope="col">工具</TableHead>
+                  <TableHead scope="col">构成</TableHead>
+                  <TableHead scope="col" className="turn-cache" title="已缓存输入 ÷ 输入">缓存</TableHead>
+                  <TableHead scope="col" className="num-col" title="该轮记录的原始 token 总量">
                     Tokens
-                  </th>
-                  <th scope="col" className="num-col">
+                  </TableHead>
+                  <TableHead scope="col" className="num-col">
                     {unit === "tokens" ? "Token 用量" : formatUnitSuffix(unit)}
-                  </th>
-                  <th scope="col" className="turn-performance num-col" title="本次请求发出到首 token 的等待时间">TTFT (s)</th>
-                  <th scope="col" className="turn-performance num-col" title="本次请求的输出 token 速度；有 TTFT 时按解码时长（请求时长 − TTFT）计算">tok/s</th>
-                </tr>
-              </thead>
-              <tbody>
+                  </TableHead>
+                  <TableHead scope="col" className="turn-performance num-col" title="本次请求发出到首 token 的等待时间">TTFT (s)</TableHead>
+                  <TableHead scope="col" className="turn-performance num-col" title="本次请求的输出 token 速度；有 TTFT 时按解码时长（请求时长 − TTFT）计算">tok/s</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {visible.map((t) => {
                   const appearance = t.bucket
                     ? treeAppearance(t.bucket, "bucket", t.bucket)
@@ -171,7 +179,7 @@ export function TurnTable({
                     : `${performance.ttftMs.toLocaleString("en-US")} ms`;
                   return (
                     <Fragment key={t.id}>
-                      <tr
+                      <TableRow
                         ref={(el) => {
                           if (el) rowRefs.current.set(t.id, el);
                           else rowRefs.current.delete(t.id);
@@ -183,12 +191,12 @@ export function TurnTable({
                           .filter(Boolean)
                           .join(" ")}
                       >
-                        <td
+                        <TableCell
                           title={new Date(t.startedAt).toLocaleString("zh-CN", {
                             hour12: false,
                           })}
                         >
-                          <button
+                          <BareButton
                             type="button"
                             className="turn-expand"
                             aria-expanded={expanded}
@@ -211,12 +219,12 @@ export function TurnTable({
                                 },
                               )}
                             </time>
-                          </button>
-                        </td>
-                        <td className="prompt-col" title={t.prompt}>
+                          </BareButton>
+                        </TableCell>
+                        <TableCell className="prompt-col" title={t.prompt}>
                           {excerpt(t.prompt, 80)}
-                        </td>
-                        <td className="bucket-col">
+                        </TableCell>
+                        <TableCell className="bucket-col">
                           {appearance ? (
                             <span className="bucket-chip">
                               <i
@@ -247,11 +255,11 @@ export function TurnTable({
                               Fast{t.pricing ? ` ×${t.pricing.multiplier}` : ""}
                             </span>
                           )}
-                        </td>
-                        <td className="tools-col" title={formatTools(t)}>
+                        </TableCell>
+                        <TableCell className="tools-col" title={formatTools(t)}>
                           {formatToolNames(t)}
-                        </td>
-                        <td className="mix-col">
+                        </TableCell>
+                        <TableCell className="mix-col">
                           <MixBar
                             className="turn-mix"
                             label="未缓存 / 缓存 / 输出"
@@ -276,8 +284,8 @@ export function TurnTable({
                               },
                             ]}
                           />
-                        </td>
-                        <td
+                        </TableCell>
+                        <TableCell
                           className="turn-cache num-col"
                           title={
                             inputTokens > 0
@@ -288,31 +296,31 @@ export function TurnTable({
                           {inputTokens > 0
                             ? formatPercent((100 * t.cost.cached_input) / inputTokens, 0)
                             : "—"}
-                        </td>
-                        <td
+                        </TableCell>
+                        <TableCell
                           className="num-col"
                           title={formatCostTitle(t.cost, "tokens")}
                         >
                           {t.usageRecorded === false
                             ? "用量未记录"
                             : formatExactTokens(t.cost.raw)}
-                        </td>
-                        <td
+                        </TableCell>
+                        <TableCell
                           className="turn-total"
                           title={formatCostTitle(t.cost, unit)}
                         >
                           {unit === "tokens"
                             ? formatCostTokens(t.cost)
                             : formatCost(t.cost, unit)}
-                        </td>
-                        <td className="turn-performance num-col" title={ttftNote}>
+                        </TableCell>
+                        <TableCell className="turn-performance num-col" title={ttftNote}>
                           {ttft}
-                        </td>
-                        <td className="turn-performance num-col" title={speedNote}>{speed}</td>
-                      </tr>
+                        </TableCell>
+                        <TableCell className="turn-performance num-col" title={speedNote}>{speed}</TableCell>
+                      </TableRow>
                       {expanded && (
-                        <tr className="turn-detail" id={`turn-detail-${t.id}`}>
-                          <td colSpan={10}>
+                        <TableRow className="turn-detail" id={`turn-detail-${t.id}`}>
+                          <TableCell colSpan={10}>
                             <p className="turn-evidence-meta">
                               {new Date(t.startedAt).toLocaleString("zh-CN", {
                                 hour12: false,
@@ -427,13 +435,13 @@ export function TurnTable({
                                 )}
                               </div>
                             </div>
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       )}
                     </Fragment>
                   );
                 })}
-              </tbody>
+              </TableBody>
             </table>
           </div>
           {visible.length < filtered.length && (
@@ -446,6 +454,6 @@ export function TurnTable({
           )}
         </>
       )}
-    </div>
+    </Panel>
   );
 }

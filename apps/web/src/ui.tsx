@@ -3,8 +3,37 @@ import {
   useRef,
   useState,
   type ButtonHTMLAttributes,
+  type ComponentProps,
   type ReactNode,
 } from "react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  FilterIcon,
+  GaugeIcon,
+  InfoIcon,
+  LayersIcon,
+  LayoutGridIcon,
+  PanelsTopLeftIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  ShieldCheckIcon,
+  TriangleAlertIcon,
+  UploadIcon,
+  XIcon,
+  ZapIcon,
+  type LucideIcon,
+} from "lucide-react";
+import { Alert } from "@/components/ui/alert";
+import { Button as ShadcnButton } from "@/components/ui/button";
+import { Card as ShadcnCard } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Toggle } from "@/components/ui/toggle";
+import { cn } from "@/lib/utils";
 
 type IconName =
   | "overview"
@@ -26,26 +55,26 @@ type IconName =
   | "gauge"
   | "power";
 
-const ICON_PATHS: Record<IconName, string> = {
-  overview: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
-  sessions: "M8 4h12v14H8zM4 8v12h12M11 8h6M11 12h6",
-  search: "M20 20l-5-5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0",
-  close: "M6 6l12 12M6 18 18 6",
-  upload: "M12 16V3M7 8l5-5 5 5M4 15v5h16v-5",
-  arrow: "M4 12h16M14 6l6 6-6 6",
-  clock: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
-  shield: "M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6zM8 12l3 3 5-6",
-  warning: "M12 3 2 20h20L12 3zM12 9v5M12 17v.5",
-  check: "M5 12l4 4L19 6",
-  refresh:
-    "M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1",
-  chevron: "M9 5l7 7-7 7",
-  info: "M12 8h.01M11 12h1v5h1M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18",
-  filter: "M4 5h16l-6 7v6l-4 2v-8z",
-  back: "M20 12H4M10 6l-6 6 6 6",
-  layers: "M12 3 3 8l9 5 9-5zM3 13l9 5 9-5",
-  gauge: "M12 13l4-4M4 19a9 9 0 1 1 16 0",
-  power: "M13 2 4 14h6l-1 8 9-12h-6l1-8z",
+/** shadcn ships lucide-react; the STRATA icon vocabulary maps onto it. */
+const ICONS: Record<IconName, LucideIcon> = {
+  overview: LayoutGridIcon,
+  sessions: PanelsTopLeftIcon,
+  search: SearchIcon,
+  close: XIcon,
+  upload: UploadIcon,
+  arrow: ArrowRightIcon,
+  clock: ClockIcon,
+  shield: ShieldCheckIcon,
+  warning: TriangleAlertIcon,
+  check: CheckIcon,
+  refresh: RefreshCwIcon,
+  chevron: ChevronRightIcon,
+  info: InfoIcon,
+  filter: FilterIcon,
+  back: ArrowLeftIcon,
+  layers: LayersIcon,
+  gauge: GaugeIcon,
+  power: ZapIcon,
 };
 
 export function Icon({
@@ -55,21 +84,14 @@ export function Icon({
   name: IconName;
   className?: string;
 }) {
+  const Glyph = ICONS[name];
   return (
-    <svg
-      className={`icon ${className}`}
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+    <Glyph
+      className={cn("icon size-4.5", className)}
+      size={18}
+      strokeWidth={1.7}
       aria-hidden="true"
-    >
-      <path d={ICON_PATHS[name]} />
-    </svg>
+    />
   );
 }
 
@@ -99,6 +121,10 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   busy?: boolean;
 };
 
+/**
+ * Legacy button recipe on top of the shadcn Button (Radix Slot + CVA).
+ * The `button-*` classes stay so styles.css keeps ownership of the appearance.
+ */
 export function Button({
   emphasis = "outline",
   intent = "neutral",
@@ -109,17 +135,71 @@ export function Button({
   type = "button",
   ...props
 }: ButtonProps) {
+  const variant =
+    intent === "danger"
+      ? "destructive"
+      : emphasis === "solid"
+        ? "default"
+        : emphasis === "ghost"
+          ? "ghost"
+          : intent === "brand"
+            ? "outline"
+            : "secondary";
   return (
-    <button
+    <ShadcnButton
       {...props}
       type={type}
+      variant={variant}
+      size="sm"
       disabled={disabled || busy}
       aria-busy={busy || undefined}
-      className={`button button-${emphasis} button-${intent} ${className}`}
+      className={cn(`button button-${emphasis} button-${intent}`, className)}
     >
       <span className="button-label">{children}</span>
       {busy && <span className="button-spinner spinner" aria-hidden="true" />}
-    </button>
+    </ShadcnButton>
+  );
+}
+
+/**
+ * shadcn Button for the app's "bare" controls (tree rows, session cards, rank
+ * rows, inspectors). It keeps Radix Slot / CVA / data-slot semantics and the
+ * accessible disabled + focus states, but opts out of the layout utilities
+ * (height, gap, padding, nowrap, background) so styles.css stays authoritative
+ * and no 320px overflow is introduced.
+ */
+export function BareButton({
+  className,
+  ...props
+}: ComponentProps<typeof ShadcnButton>) {
+  return (
+    <ShadcnButton
+      {...props}
+      variant="ghost"
+      className={cn(
+        "inline-block h-auto min-h-0 w-auto shrink gap-0 whitespace-normal rounded-none bg-transparent p-0 font-normal shadow-none focus-visible:ring-0",
+        className,
+      )}
+    />
+  );
+}
+
+/**
+ * shadcn Card supplies the component semantics; the neutraliser keeps legacy
+ * surfaces on their own layout recipe (no forced flex column / 24px gaps).
+ */
+export function Panel({
+  className,
+  ...props
+}: ComponentProps<typeof ShadcnCard>) {
+  return (
+    <ShadcnCard
+      className={cn(
+        "block gap-0 rounded-none border-0 py-0 shadow-none",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 
@@ -157,6 +237,11 @@ export function srTable(
   );
 }
 
+/**
+ * shadcn Toggle (Radix) keeps the native <button aria-pressed> contract that
+ * the segmented-control UX rules require. ToggleGroup is deliberately not used:
+ * Radix renders its single-select variant as radiogroup/radio instead.
+ */
 export function SegmentedControl<T extends string>({
   label,
   value,
@@ -177,15 +262,16 @@ export function SegmentedControl<T extends string>({
       aria-label={label}
     >
       {options.map((option) => (
-        <button
+        <Toggle
           key={option.id}
-          type="button"
-          aria-pressed={option.id === value}
+          variant="outline"
+          size="sm"
+          pressed={option.id === value}
+          onPressedChange={() => onChange(option.id)}
           className={option.id === value ? "active" : ""}
-          onClick={() => onChange(option.id)}
         >
           {option.label}
-        </button>
+        </Toggle>
       ))}
     </div>
   );
@@ -205,7 +291,7 @@ export function StatePanel({
   compact?: boolean;
 }) {
   return (
-    <div
+    <Panel
       className={`state-panel state-${kind}${compact ? " state-compact" : ""}`}
       aria-busy={kind === "loading" || undefined}
     >
@@ -227,10 +313,11 @@ export function StatePanel({
         {description && <p className="state-description">{description}</p>}
       </div>
       {children && <div className="state-actions">{children}</div>}
-    </div>
+    </Panel>
   );
 }
 
+/** shadcn Alert, with the notice's own live-region role kept on `.notice-copy`. */
 export function Notice({
   tone = "info",
   children,
@@ -241,7 +328,11 @@ export function Notice({
   action?: ReactNode;
 }) {
   return (
-    <div className={`notice notice-${tone}`}>
+    <Alert
+      variant={tone === "error" ? "destructive" : "default"}
+      role={undefined}
+      className={`notice notice-${tone}`}
+    >
       <Icon
         name={
           tone === "success" ? "check" : tone === "info" ? "refresh" : "warning"
@@ -255,7 +346,7 @@ export function Notice({
         {children}
       </div>
       {action && <div className="notice-action">{action}</div>}
-    </div>
+    </Alert>
   );
 }
 
@@ -294,11 +385,11 @@ export function SearchField({
         if (!composing.current) onChange(draft);
       }}
     >
-      <label className="visually-hidden" htmlFor={id}>
+      <Label className="visually-hidden" htmlFor={id}>
         筛选会话
-      </label>
+      </Label>
       <Icon name="search" />
-      <input
+      <Input
         ref={inputRef}
         id={id}
         className="session-search"

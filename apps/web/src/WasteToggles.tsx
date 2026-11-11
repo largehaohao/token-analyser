@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { WasteToggleId, SessionSnapshot } from "./api";
 import { getSession, patchToggles } from "./api";
 import { nextToggleState, persistToggleError } from "./waste-toggles";
-import { Button } from "./ui";
+import { Button, Panel } from "./ui";
 
 const TOGGLE_LABELS: {
   id: WasteToggleId;
@@ -119,7 +119,7 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
   }
 
   return (
-    <div
+    <Panel
       className="waste-toggles chart-card"
       aria-busy={pending > 0 || undefined}
     >
@@ -164,6 +164,6 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
           </label>
         ))}
       </div>
-    </div>
+    </Panel>
   );
 }

@@ -20,6 +20,7 @@ import {
   TEMP_PERIODS,
   WARM_MARGIN_C,
   filterSamplesByWindow,
+  formatSampleTime,
   formatTemp,
   isStale,
   mergeTempSamples,
@@ -29,7 +30,8 @@ import {
   type TempPeriodId,
   type TempReadingTone,
 } from "./hardware-temps";
-import { Icon, Notice, SegmentedControl, srTable } from "./ui";
+import { Icon, Notice, Panel, SegmentedControl, srTable } from "./ui";
+import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
 
 const POLL_MS = 2000;
 const HISTORY_SECONDS = 3600;
@@ -423,6 +425,32 @@ export function SystemTemperaturePage({ now }: { now: number }) {
     };
   }, [link, historySettled, samples.length]);
 
+  // 一档以上的窗口（12 小时 / 1 天 / 7 天）需要更长的 Prometheus 历史。
+  // 按所选档位单独取一次并合并：引擎会随窗口放大采样步长，切回短档位时
+  // 仍保留启动时那批秒级精度的近一小时样本。
+  useEffect(() => {
+    if (period <= HISTORY_SECONDS) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    void getTempsHistory(period, controller.signal)
+      .then((feed) => {
+        if (cancelled || !feed.connected || feed.samples.length === 0) return;
+        if (feed.url) setSourceUrl(feed.url);
+        setSamples((current) => mergeTempSamples(feed.samples, current));
+        const newest = newestSample(feed.samples);
+        if (newest) {
+          setLatest((prev) =>
+            !prev || newest.timestamp > prev.timestamp ? newest : prev,
+          );
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [period]);
+
   const nowSec = Math.max(clock / 1000, latest?.timestamp ?? 0);
   // Charts only need to move when a new sample can arrive; quantising keeps a
   // 1s status clock from forcing three full canvas redraws every second.
@@ -505,12 +533,12 @@ export function SystemTemperaturePage({ now }: { now: number }) {
           <p>{headline(latest)}</p>
         </div>
         <div className="temps-live">
-          <span
+          <Badge variant="outline"
             className={`temps-pill ${live ? "temps-pill-live" : retained ? "temps-pill-stale" : offline ? "temps-pill-offline" : "temps-pill-missing"}`}
             data-testid="temps-pill"
           >
             {live ? "实时采样" : retained ? "已过期" : offline ? "未连接" : "读取中"}
-          </span>
+          </Badge>
           {latest ? (
             <time dateTime={new Date(latest.timestamp * 1000).toISOString()}>
               {formatClock(latest.timestamp)} 更新
@@ -562,7 +590,7 @@ export function SystemTemperaturePage({ now }: { now: number }) {
         </div>
         <div className="temps-guard-side">
           {tightest && (
-            <span
+            <Badge variant="outline"
               className={`temps-margin-chip ${
                 tightest.margin <= 0
                   ? "is-over"
@@ -575,7 +603,7 @@ export function SystemTemperaturePage({ now }: { now: number }) {
               <span className="temps-margin-detail">
                 GPU {tightest.gpuId} · {tightest.sensor} {formatTemp(tightest.value, 0)}°C
               </span>
-            </span>
+            </Badge>
           )}
           <p className="temps-guard-limits">
             <span className="temps-guard-limits-label">GPU 停机线</span>
@@ -678,7 +706,7 @@ function GpuCard({
   const status = gpu?.status ?? "missing";
   const fanStopped = gpu?.fan_rpm === 0;
   return (
-    <article
+    <Panel role="article"
       className="temps-gpu-card"
       data-testid={`temps-gpu-${id}`}
       data-stale={stale || undefined}
@@ -686,9 +714,9 @@ function GpuCard({
     >
       <header className="temps-card-head">
         <div className="temps-card-title">
-          <span className="temps-badge" aria-hidden="true">
+          <Badge variant="outline" className="temps-badge" aria-hidden="true">
             {String(id + 1).padStart(2, "0")}
-          </span>
+          </Badge>
           <div>
             <h2>
               GPU {id}
@@ -698,10 +726,10 @@ function GpuCard({
           </div>
         </div>
         <div className="temps-card-flags">
-          {stale && <span className="temps-stale-tag">数据已过期</span>}
-          <span className={`temps-pill ${pillClass(status)}`}>
+          {stale && <Badge variant="outline" className="temps-stale-tag">数据已过期</Badge>}
+          <Badge variant="outline" className={`temps-pill ${pillClass(status)}`}>
             {statusLabel(status)}
-          </span>
+          </Badge>
         </div>
       </header>
       <div className="temps-sensors temps-sensors-columns">
@@ -809,7 +837,7 @@ function GpuCard({
           </dd>
         </div>
       </dl>
-    </article>
+    </Panel>
   );
 }
 
@@ -839,7 +867,7 @@ function CpuCard({
   ];
   const monitoring = live && status === "available";
   return (
-    <section
+    <Panel role="region"
       className="temps-cpu-card"
       data-stale={stale || undefined}
       aria-label="CPU 温度"
@@ -847,7 +875,7 @@ function CpuCard({
       <div className="temps-cpu-id">
         <p className="temps-kicker">CPU 温度</p>
         <h2>{cpu?.name ?? "等待采样"}</h2>
-        <span
+        <Badge variant="outline"
           className={`temps-pill ${
             stale
               ? "temps-pill-stale"
@@ -857,7 +885,7 @@ function CpuCard({
           }`}
         >
           {stale ? "数据已过期" : monitoring ? "实时监测" : statusLabel(status)}
-        </span>
+        </Badge>
       </div>
       <div className="temps-cpu-grid">
         {rows.map((row) => (
@@ -886,7 +914,7 @@ function CpuCard({
         <br />
         仅展示实测温度
       </p>
-    </section>
+    </Panel>
   );
 }
 
@@ -921,6 +949,11 @@ function TempChart({
   const primary = seriesStats(grid);
   const yMax = chartYMax(series);
   const hasLimits = series.some((line) => line.limit != null);
+  const spanSec = Math.max(1, endSec - startSec);
+  // 超过半天的窗口只写 HH:MM:SS 会分不清是哪一天，读数里补上日期。
+  const longWindow = spanSec >= 12 * 3600;
+  const readoutTime = (t: number) =>
+    longWindow ? formatSampleTime(t) : formatClock(t);
 
   const drawRef = useRef<() => void>(() => {});
   drawRef.current = () => {
@@ -969,7 +1002,7 @@ function TempChart({
     setHover({ index, x, flip: x > canvas.clientWidth * 0.6 });
     if (announce) {
       setAnnouncement(
-        `${axisClock(sample.t)}，${series
+        `${longWindow ? formatSampleTime(sample.t) : axisClock(sample.t, spanSec)}，${series
           .map((line) => {
             const value = line.points[index]?.v ?? null;
             return `${line.label} ${value == null ? "无读数" : `${formatTemp(value, digits)} 摄氏度`}`;
@@ -1033,7 +1066,7 @@ function TempChart({
     value == null ? "—" : `${formatTemp(value, digits)}°C`;
 
   return (
-    <article className="temps-chart" aria-label={`${title} 温度曲线`}>
+    <Panel role="article" className="temps-chart" aria-label={`${title} 温度曲线`}>
       <header className="temps-chart-head">
         <h3>{title}</h3>
         <ul className="temps-legend">
@@ -1075,7 +1108,7 @@ function TempChart({
             style={{ left: hover.x }}
             aria-hidden="true"
           >
-            <b className="temps-tooltip-time">{formatClock(hoverTime)}</b>
+            <b className="temps-tooltip-time">{readoutTime(hoverTime)}</b>
             {series.map((line) => {
               const value = line.points[hover.index]?.v ?? null;
               return (
@@ -1127,7 +1160,7 @@ function TempChart({
           ];
         }),
       )}
-    </article>
+    </Panel>
   );
 }
 
@@ -1278,15 +1311,26 @@ function drawTempChart(
   ctx.textBaseline = "top";
   const labelY = cssH - 16;
   ctx.textAlign = "left";
-  ctx.fillText(axisClock(startSec), CHART_PAD.l, labelY);
+  ctx.fillText(axisClock(startSec, span), CHART_PAD.l, labelY);
   ctx.textAlign = "center";
-  ctx.fillText(axisClock((startSec + endSec) / 2), CHART_PAD.l + plotW / 2, labelY);
+  ctx.fillText(
+    axisClock((startSec + endSec) / 2, span),
+    CHART_PAD.l + plotW / 2,
+    labelY,
+  );
   ctx.textAlign = "right";
-  ctx.fillText(axisClock(endSec), cssW - CHART_PAD.r, labelY);
+  ctx.fillText(axisClock(endSec, span), cssW - CHART_PAD.r, labelY);
 }
 
-function axisClock(timestampSec: number): string {
+/**
+ * 短窗口只标时刻；跨半天的窗口补日期，7 天窗口只留日期，
+ * 否则三处刻度会显示成三个几乎相同的 HH:MM。
+ */
+function axisClock(timestampSec: number, spanSec: number): string {
   const date = new Date(timestampSec * 1000);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  if (spanSec <= 6 * 3600) return clock;
+  const day = `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return spanSec > 48 * 3600 ? day : `${day} ${clock}`;
 }

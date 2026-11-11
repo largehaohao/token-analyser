@@ -3,6 +3,7 @@ import { formatPerformanceDuration, formatPerformanceNumber } from "./format";
 import { performanceCopy } from "./performance-copy";
 import { taskDistributions, turnDistributions } from "./perf-buckets";
 import { HistogramPair } from "./Histogram";
+import { Panel } from "./ui";
 
 type Props = {
   performance?: PerformanceSummary;
@@ -96,21 +97,21 @@ export function PerformanceMetrics({ performance, turns, tasks, source }: Props)
   return (
     <section className="performance-metrics" aria-label="响应性能">
       <div className="performance-grid">
-        <article className="performance-card">
+        <Panel role="article" className="performance-card">
           <h2>平均 TTFT</h2>
           <div className="performance-value" data-testid="ttft-value">
             {formatPerformanceNumber(ttft == null ? null : ttft / 1000)} <small>s</small>
           </div>
           <p>{text.ttftNote}</p>
-        </article>
-        <article className="performance-card">
+        </Panel>
+        <Panel role="article" className="performance-card">
           <h2>{text.speedLabel}</h2>
           <div className="performance-value" data-testid="token-speed-value">
             {formatPerformanceNumber(speed)} <small>tok/s</small>
           </div>
           <p>{text.speedNote}</p>
-        </article>
-        <article className="performance-card performance-card-duration">
+        </Panel>
+        <Panel role="article" className="performance-card performance-card-duration">
           <h2>{text.durationLabel}</h2>
           <div className="performance-duration-list">
             <div className="performance-duration-row">
@@ -128,7 +129,7 @@ export function PerformanceMetrics({ performance, turns, tasks, source }: Props)
               <p>{text.taskDurationNote}</p>
             </div>
           </div>
-        </article>
+        </Panel>
       </div>
       {hasSamples && (
         <HistogramPair

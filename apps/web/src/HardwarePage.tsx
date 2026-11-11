@@ -1,6 +1,7 @@
 import { HardwarePowerPage } from "./HardwarePowerPage";
 import { SystemTemperaturePage } from "./SystemTemperaturePage";
 import { Icon, SegmentedControl } from "./ui";
+import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
 
 type Tab = "temps" | "power";
 
@@ -21,9 +22,9 @@ export function HardwarePage(props: {
             <span className="hardware-crumb-sep" aria-hidden="true">
               /
             </span>
-            <span className="hardware-crumb-section">
+            <Badge variant="outline" className="hardware-crumb-section">
               {props.tab === "temps" ? "温度" : "用电"}
-            </span>
+            </Badge>
           </p>
           <p className="hardware-context-copy">
             {props.tab === "temps"
