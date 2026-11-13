@@ -53,6 +53,7 @@ export function detectSource(events: RolloutLine[], filePath = ""): SessionSourc
       event.type === "session/title"
     )
   ) return "dsh";
+  if (events.some((event) => event.source === "opencode") || path.basename(filePath) === "opencode.db") return "opencode";
   if (events.some((event) => event.type === "session_meta" || event.type === "turn_context")) return "codex";
   if (events.some((event) => event.type === "session" && (event.version != null || event.cwd != null))) return "pi";
   if (events.some((event) => event.source === "cursor")) return "cursor";
@@ -280,7 +281,8 @@ export function parseNativeSession(events: RolloutLine[], filePath: string, sour
   const measurement = record(header?.contextMeasurement);
   const meta: SessionMeta = {
     id, parentId: source === "claude" && agentId ? `claude:${claudeParent}`
-      : source === "cursor" && header?.parentSessionId ? `cursor:${text(header.parentSessionId)}` : null,
+      : source === "cursor" && header?.parentSessionId ? `cursor:${text(header.parentSessionId)}`
+      : source === "opencode" && header?.parentSessionId ? `opencode:${text(header.parentSessionId)}` : null,
     nickname: source === "pi" ? text([...events].reverse().find((event) => event.type === "session_info")?.name) || null : agentId ? text(agentId) : text(header?.name) || null,
     cwd: text(events.find((event) => event.cwd)?.cwd) || null,
     startedAt: iso(header?.timestamp) || null,

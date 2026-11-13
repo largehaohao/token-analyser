@@ -196,22 +196,44 @@ function wireStoreChangeEvents(
   if (tagged[marker]) return;
   tagged[marker] = true;
 
+  const notifyIngested = (id: string | undefined, idsBefore: Set<string>) => {
+    if (!id) return;
+    const snap = store.get(id);
+    const parentId = snap?.parentId;
+    const isRoot = parentId == null || !store.get(parentId);
+    const isNew = isRoot && !idsBefore.has(id);
+    onChange(id, isNew);
+    if (snap?.parentId) onChange(snap.parentId, false);
+  };
+
   const origIngest = store.ingestPath.bind(store);
   store.ingestPath = (filePath: string, ingestOptions?: SessionIngestOptions) => {
     try {
       // Avoid store.list() here: it runs refreshLiveFlags and can re-enter ingest.
       const idsBefore = new Set(store.peekRootIds());
       const id = origIngest(filePath, ingestOptions);
-      if (id) {
-        const snap = store.get(id);
-        const parentId = snap?.parentId;
-        const isRoot = parentId == null || !store.get(parentId);
-        const isNew = isRoot && !idsBefore.has(id);
-        onChange(id, isNew);
-        if (snap?.parentId) {
-          onChange(snap.parentId, false);
-        }
-      }
+      notifyIngested(id, idsBefore);
+      return id;
+    } catch (err) {
+      onError(
+        errorIdFromPath(filePath),
+        err instanceof Error ? err.message : String(err),
+      );
+      return undefined;
+    }
+  };
+
+  const origBatched = store.ingestPathBatched.bind(store);
+  store.ingestPathBatched = async (filePath, ingestOptions) => {
+    try {
+      const idsBefore = new Set(store.peekRootIds());
+      const id = await origBatched(filePath, {
+        ...ingestOptions,
+        onBatch: (ids) => {
+          ingestOptions?.onBatch?.(ids);
+          for (const batchId of ids) notifyIngested(batchId, idsBefore);
+        },
+      });
       return id;
     } catch (err) {
       onError(
@@ -583,7 +605,7 @@ export async function startServer(opts?: {
       const untilRaw = url.searchParams.get("until");
       const daysRaw = url.searchParams.get("days");
       const source = url.searchParams.get("source");
-      if (source != null && source !== "all" && source !== "codex" && source !== "claude" && source !== "cursor" && source !== "pi" && source !== "dsh") {
+      if (source != null && source !== "all" && source !== "codex" && source !== "claude" && source !== "cursor" && source !== "pi" && source !== "dsh" && source !== "opencode") {
         sendJson(res, 400, { error: "invalid_source" });
         return;
       }
@@ -909,15 +931,15 @@ async function main(): Promise<void> {
       console.error(`ingest failed ${filePath}: ${err.message}`);
     };
     const allFiles = collectSessionFiles(config.watch_paths);
-    // Large / often-dirty sources (Cursor DB, multi‑MB live JSONL) block boot if
-    // parsed synchronously. With a warm dump, keep dump data and refresh them
-    // after listen; cold start still loads everything before listen.
+    // Large / often-dirty sources (Cursor DB, OpenCode DB, multi‑MB live JSONL)
+    // block the HTTP loop if parsed synchronously. Always defer them until after
+    // listen so the UI can paint within a few seconds even on a cold dump.
     const DEFER_BYTES = 10 * 1024 * 1024;
     const heavyFiles: string[] = [];
     const lightFiles: string[] = [];
     for (const filePath of allFiles) {
-      let defer = path.basename(filePath) === "state.vscdb";
-      if (!defer && restored > 0) {
+      let defer = path.basename(filePath) === "state.vscdb" || path.basename(filePath) === "opencode.db";
+      if (!defer) {
         try {
           defer = statSync(filePath).size >= DEFER_BYTES;
         } catch {
@@ -926,13 +948,17 @@ async function main(): Promise<void> {
       }
       (defer ? heavyFiles : lightFiles).push(filePath);
     }
+    // Prefer OpenCode before Cursor's often-GB state.vscdb so timing metrics
+    // show up first.
+    heavyFiles.sort((a, b) => {
+      const rank = (filePath: string) =>
+        path.basename(filePath) === "opencode.db" ? 0
+          : filePath.endsWith(".vscdb") ? 2
+          : 1;
+      return rank(a) - rank(b);
+    });
     store.refresh(lightFiles, { onError: onRefreshError });
-    // Cold start with no dump: heavy sources must load before listen.
-    if (restored === 0 && heavyFiles.length > 0) {
-      store.refresh(heavyFiles, { onError: onRefreshError });
-    } else {
-      deferredVscdb = heavyFiles;
-    }
+    deferredVscdb = heavyFiles;
     loadImportedSessions(
       store,
       path.join(tokenAnalyserHome(), "imports"),
@@ -993,16 +1019,21 @@ async function main(): Promise<void> {
           return;
         }
         const filePath = heavyFiles[index]!;
-        try {
-          store.ingestPath(filePath);
-        } catch (err) {
+        const finish = () => setTimeout(() => refreshNext(index + 1), 0);
+        const run = path.basename(filePath) === "opencode.db" || filePath.endsWith(".vscdb")
+          ? store.ingestPathBatched(filePath, {
+            batchSize: path.basename(filePath) === "opencode.db" ? 25 : 8,
+          })
+          : Promise.resolve(store.ingestPath(filePath));
+        void run.then(finish, (err) => {
           const reason = err instanceof Error ? err.message : String(err);
           onIngestError(errorIdFromPath(filePath), reason);
           console.error(`ingest failed ${filePath}: ${reason}`);
-        }
-        setTimeout(() => refreshNext(index + 1), 0);
+          finish();
+        });
       };
-      setTimeout(() => refreshNext(0), 1_500);
+      // Start immediately after listen so OpenCode is ready within a few seconds.
+      setTimeout(() => refreshNext(0), 0);
     }
     // Qwen publishes new rates without warning the local ledger, so refresh
     // them automatically and keep every estimate on the dated official card.

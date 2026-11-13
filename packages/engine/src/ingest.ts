@@ -1,4 +1,5 @@
 import { openSync, readSync, closeSync, statSync } from "node:fs";
+import path from "node:path";
 import { parseJsonlLine } from "./parse-jsonl.ts";
 import { analyseSession, extractSessionInfo } from "./snapshot.ts";
 import { LedgerBuilder } from "./ledger.ts";
@@ -13,6 +14,7 @@ import { effectiveRateCard } from "./rate-card.ts";
 import { loadApiPrices } from "./native-pricing.ts";
 import { detectSource } from "./session-adapters.ts";
 import { readCursorSessions } from "./cursor-store.ts";
+import { readOpenCodeSessions } from "./opencode-store.ts";
 import { isZstdSessionFile, readZstdJsonlFile } from "./zstd-jsonl.ts";
 
 export const READ_CHUNK_BYTES = 64 * 1024;
@@ -230,11 +232,26 @@ export function pricingCacheContext(): string {
   return JSON.stringify([effectiveRateCard(), loadApiPrices()]);
 }
 
-/** A Cursor database contains many sessions; JSONL contains one. */
+/** A Cursor or OpenCode database contains many sessions; JSONL contains one. */
+export function readMultiSessionEvents(filePath: string): RolloutLine[][] | null {
+  if (filePath.endsWith(".vscdb")) return readCursorSessions(filePath);
+  if (path.basename(filePath) === "opencode.db") return readOpenCodeSessions(filePath);
+  return null;
+}
+
+export function snapshotFromEvents(
+  events: RolloutLine[],
+  filePath: string,
+): SessionSnapshot {
+  const snapshot = analyseSession({ events, path: filePath, live: false, parse_errors: [] });
+  return {
+    ...snapshot,
+    live: snapshot.lastEventAt != null && isLive(Date.parse(snapshot.lastEventAt)),
+  };
+}
+
 export function ingestSessions(filePath: string, opts?: IngestOptions): SessionSnapshot[] {
-  if (!filePath.endsWith(".vscdb")) return [ingestFile(filePath, opts)];
-  return readCursorSessions(filePath).map((events) => {
-    const snapshot = analyseSession({ events, path: filePath, live: false, parse_errors: [] });
-    return { ...snapshot, live: snapshot.lastEventAt != null && isLive(Date.parse(snapshot.lastEventAt)) };
-  });
+  const eventsForFile = readMultiSessionEvents(filePath);
+  if (!eventsForFile) return [ingestFile(filePath, opts)];
+  return eventsForFile.map((events) => snapshotFromEvents(events, filePath));
 }

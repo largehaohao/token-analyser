@@ -12,7 +12,8 @@ export type WatchOptions = {
 };
 
 function sessionPath(name: string): string {
-  return name.endsWith("state.vscdb-wal") ? name.slice(0, -4) : name;
+  const stem = name.endsWith("-wal") ? name.slice(0, -4) : name;
+  return isSessionFile(stem) ? stem : name;
 }
 
 function listDirectories(root: string): string[] {
@@ -85,7 +86,7 @@ export function watchSessions(
     // Cursor rewrites state.vscdb WAL continuously while the app is open. A
     // 50ms debounce turns every keystroke into a multi-second SQLite reparse
     // that blocks /sessions and freezes the UI.
-    if (fullPath.endsWith(".vscdb") || fullPath.endsWith("state.vscdb")) {
+    if (fullPath.endsWith(".vscdb") || path.basename(fullPath) === "opencode.db") {
       return 5_000;
     }
     try {
@@ -112,7 +113,7 @@ export function watchSessions(
     try {
       const stat = statSync(fullPath);
       let wal = "";
-      if (fullPath.endsWith(".vscdb")) {
+      if (fullPath.endsWith(".vscdb") || path.basename(fullPath) === "opencode.db") {
         try { const st = statSync(`${fullPath}-wal`); wal = `${st.size}:${st.mtimeMs}:${st.ctimeMs}`; } catch { /* No active WAL. */ }
       }
       return [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs, wal].join(":");

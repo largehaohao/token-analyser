@@ -21,7 +21,7 @@ test("source selection is visible for all providers", async ({ page }) => {
   await page.goto("/#sessions");
   const select = sources(page);
   await expect(select).toBeVisible();
-  for (const label of ["所有来源", "Codex", "Claude Code", "Cursor", "pi", "DeepSeek Harness"]) {
+  for (const label of ["所有来源", "Codex", "Claude Code", "Cursor", "pi", "DeepSeek Harness", "OpenCode"]) {
     await expect(select.locator("option", { hasText: label })).toHaveCount(1);
   }
 });
@@ -206,7 +206,7 @@ test("source controls expand and remain accessible on mobile", async ({ page }, 
   await page.getByRole("button", { name: "展开筛选", exact: true }).click();
   await page.getByRole("button", { name: "全部", exact: true }).click();
   await expect(sources(page)).toBeInViewport();
-  for (const label of ["所有来源", "Codex", "Claude Code", "Cursor", "pi", "DeepSeek Harness"]) {
+  for (const label of ["所有来源", "Codex", "Claude Code", "Cursor", "pi", "DeepSeek Harness", "OpenCode"]) {
     await expect(sources(page).locator("option", { hasText: label })).toHaveCount(1);
   }
   await sources(page).selectOption("cursor");

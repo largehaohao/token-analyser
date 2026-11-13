@@ -1,6 +1,6 @@
 # Token Analyser
 
-Local dashboard for Codex, Claude Code, Cursor, pi, and DeepSeek Harness sessions. The Node engine reads local JSONL (and DSH's zstd-compressed JSONL) plus Cursor's SQLite store; the Vite UI talks to it over HTTP and SSE. Session data stays on the machine. Figures come from recorded usage or dated public API rates; they are not subscription bills.
+Local dashboard for Codex, Claude Code, Cursor, pi, DeepSeek Harness, and OpenCode sessions. The Node engine reads local JSONL (and DSH's zstd-compressed JSONL) plus Cursor's and OpenCode's SQLite stores; the Vite UI talks to it over HTTP and SSE. Session data stays on the machine. Figures come from recorded usage or dated public API rates; they are not subscription bills.
 
 ## Run
 
@@ -34,6 +34,7 @@ Default sources are discovered recursively:
 | Cursor | `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` and Cursor User `globalStorage/state.vscdb` / `workspaceStorage/**/state.vscdb` | Conversation, tools, session metadata, Cursor's own context-token meter; request usage, TTFT and tok/s are not recorded |
 | pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR` supported) | Input, cache read/write, output, recorded USD, tools, branch/fork context, per-request duration (tok/s); TTFT with the [pi request-timing extension](#pi-request-timing) |
 | DeepSeek Harness | `~/.dsh/sessions/**/session*.jsonl.zstd` (`DSH_HOME` supported) | Input, cache read, output, tools, subagent parent links; tok/s from per-message stream timing when present |
+| OpenCode | `$XDG_DATA_HOME/opencode/opencode.db`, otherwise `~/.local/share/opencode/opencode.db` (Windows: `%LOCALAPPDATA%/opencode/opencode.db`) | Input, cache read/write, output, reasoning, recorded USD or API-equivalent estimate, tools, parent sessions; TTFT and tok/s from message stream times when present |
 
 Cursor's User directory is `~/Library/Application Support/Cursor/User` on macOS,
 `%APPDATA%/Cursor/User` on Windows, and `$XDG_CONFIG_HOME/Cursor/User` (or
@@ -102,7 +103,7 @@ measurement, not billable token usage, so it never enters the token ledger, cost
 or cache-hit figures.
 
 Use the visible **会话来源** buttons below the header to select all sources,
-Codex, Claude Code, Cursor, pi, or DeepSeek Harness in both the overview and session detail views.
+Codex, Claude Code, Cursor, pi, DeepSeek Harness, or OpenCode in both the overview and session detail views.
 Their counts include all discovered root sessions across all time. The default
 7-day range can hide older sessions; **查看全部时间** reveals that history.
 The selected source is restored on reload and browser back navigation.
@@ -126,8 +127,8 @@ Optional `~/.token-analyser/config.json` replaces the default discovery paths:
 Codex rate card: `config/rate-card.json`. API-equivalent rates:
 `config/api-prices.json` (dated, sourced from official pricing pages). Recorded
 USD takes precedence; a turn whose log records 0 spend counts as unbilled and is
-estimated from the official rate. Credits apply only to Codex; Claude, Cursor, and
-pi costs are never converted to Codex credits. The price update button refreshes the Codex
+estimated from the official rate. Credits apply only to Codex; Claude, Cursor, pi, DeepSeek Harness, and
+OpenCode costs are never converted to Codex credits. The price update button refreshes the Codex
 card and the Qwen rates in `config/api-prices.json`; a publisher that cannot be
 reached leaves its own local rates untouched and the UI says which source
 failed. The `qwen` block owns Qwen updates: each entry names the official model
@@ -141,6 +142,9 @@ document is fetched; session data never leaves the machine. The engine refreshes
 Qwen rates on startup and hourly whenever the card's Qwen date is not today's
 date, then re-prices local sessions; set `QWEN_PRICING_AUTO_UPDATE=0` to pin
 them.
+Parse cache / session dump: `~/.token-analyser/` (`store.db`). A dump version
+bump rebuilds it on the next start; large Cursor/OpenCode databases are refreshed
+after the UI is listening so the first paint stays within a few seconds.
 Parse cache: `~/.token-analyser/cache/`.
 Imported `.jsonl` / `.ndjson` files are copied to
 `~/.token-analyser/imports/` and restored on the next launch. Existing imports

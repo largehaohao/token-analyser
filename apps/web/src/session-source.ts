@@ -9,6 +9,7 @@ export const SESSION_SOURCES = [
   { id: "cursor", label: "Cursor" },
   { id: "pi", label: "pi" },
   { id: "dsh", label: "DeepSeek Harness" },
+  { id: "opencode", label: "OpenCode" },
 ] as const;
 
 export function normalizeSourceFilter(value: unknown): SessionSourceFilter {
@@ -28,7 +29,7 @@ export function sourceCounts(
   sessions: SessionListItem[],
 ): Record<SessionSourceFilter, number> {
   const counts = {
-    all: sessions.length, codex: 0, claude: 0, cursor: 0, pi: 0, dsh: 0,
+    all: sessions.length, codex: 0, claude: 0, cursor: 0, pi: 0, dsh: 0, opencode: 0,
   };
   for (const session of sessions) counts[session.source ?? "codex"] += 1;
   return counts;
@@ -37,6 +38,6 @@ export function sourceCounts(
 export function sourceEmptyCopy(source: SessionSourceFilter): string {
   const label = SESSION_SOURCES.find((item) => item.id === source)!.label;
   return source === "all"
-    ? "在本机运行 Codex、Claude Code、Cursor、pi 或 DeepSeek Harness 后，会话会自动出现在这里。也可以选择或拖入已有的 JSONL 记录。"
+    ? "在本机运行 Codex、Claude Code、Cursor、pi、DeepSeek Harness 或 OpenCode 后，会话会自动出现在这里。也可以选择或拖入已有的 JSONL 记录。"
     : `未发现 ${label} 会话记录。可在本机运行 ${label}，或选择、拖入该来源的 JSONL 记录。`;
 }

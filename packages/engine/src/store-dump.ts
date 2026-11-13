@@ -16,7 +16,8 @@ import {
 import type { SessionSnapshot, WasteToggleId } from "./types.ts";
 
 /** Bump when the dump shape or rebuild assumptions change. */
-export const STORE_DUMP_VERSION = 1;
+/** Bump when persisted snapshots must be rebuilt (parser / schema changes). */
+export const STORE_DUMP_VERSION = 2;
 
 export type FileFingerprint = {
   inode: number;
@@ -58,14 +59,9 @@ function sidecarStat(filePath: string): { size: number; mtimeMs: number } {
 /** Identity of a session file, including SQLite WAL/SHM for `.vscdb`. */
 export function fileFingerprint(filePath: string): FileFingerprint {
   const st = statSync(filePath);
-  const wal =
-    filePath.endsWith(".vscdb")
-      ? sidecarStat(`${filePath}-wal`)
-      : { size: 0, mtimeMs: 0 };
-  const shm =
-    filePath.endsWith(".vscdb")
-      ? sidecarStat(`${filePath}-shm`)
-      : { size: 0, mtimeMs: 0 };
+  const sqlite = filePath.endsWith(".vscdb") || path.basename(filePath) === "opencode.db";
+  const wal = sqlite ? sidecarStat(`${filePath}-wal`) : { size: 0, mtimeMs: 0 };
+  const shm = sqlite ? sidecarStat(`${filePath}-shm`) : { size: 0, mtimeMs: 0 };
   return {
     inode: st.ino,
     size: st.size,

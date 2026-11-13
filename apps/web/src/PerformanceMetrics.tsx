@@ -31,20 +31,10 @@ function turnSpanMs(turns: Turn[]): number | null {
   return first != null && last != null && last > first ? last - first : null;
 }
 
-/** Older engine payloads omit the two clocks; session view still has the samples. */
-function clocksFrom(
-  performance: PerformanceSummary | undefined,
-  turns: Turn[] | undefined,
-  tasks: TaskTiming[] | undefined,
-): Pick<PerformanceSummary, "requestDurationMs" | "requestDurationCount" | "taskDurationMs" | "taskDurationCount"> {
-  if (performance != null && "requestDurationMs" in performance) {
-    return {
-      requestDurationMs: performance.requestDurationMs ?? null,
-      requestDurationCount: performance.requestDurationCount ?? 0,
-      taskDurationMs: performance.taskDurationMs ?? null,
-      taskDurationCount: performance.taskDurationCount ?? 0,
-    };
-  }
+function requestClocksFromTurns(turns: Turn[] | undefined): {
+  requestDurationMs: number | null;
+  requestDurationCount: number;
+} {
   let requestSum = 0;
   let requestCount = 0;
   for (const turn of turns ?? []) {
@@ -53,6 +43,16 @@ function clocksFrom(
     requestSum += ms;
     requestCount += 1;
   }
+  return {
+    requestDurationMs: requestCount > 0 ? requestSum : null,
+    requestDurationCount: requestCount,
+  };
+}
+
+function taskClocksFrom(
+  turns: Turn[] | undefined,
+  tasks: TaskTiming[] | undefined,
+): { taskDurationMs: number | null; taskDurationCount: number } {
   let taskSum = 0;
   let taskCount = 0;
   if (tasks != null && tasks.length > 0) {
@@ -70,23 +70,70 @@ function clocksFrom(
     }
   }
   return {
-    requestDurationMs: requestCount > 0 ? requestSum : null,
-    requestDurationCount: requestCount,
     taskDurationMs: taskCount > 0 ? taskSum : null,
     taskDurationCount: taskCount,
   };
 }
 
+/** Prefer the summary; if a dump left TTFT/speed/duration empty, rebuild from turns. */
+export function resolvePerformance(
+  performance: PerformanceSummary | undefined,
+  turns: Turn[] | undefined,
+  tasks?: TaskTiming[],
+): PerformanceSummary {
+  const fromTurns = requestClocksFromTurns(turns);
+  const taskClocks = taskClocksFrom(turns, tasks);
+  let ttftSum = 0;
+  let ttftSampleCount = 0;
+  let outputSum = 0;
+  let generationSum = 0;
+  let speedSampleCount = 0;
+  for (const turn of turns ?? []) {
+    const sample = turn.requestPerformance;
+    if (sample?.ttftMs != null) {
+      ttftSum += sample.ttftMs;
+      ttftSampleCount += 1;
+    }
+    const duration = positiveMs(sample?.durationMs);
+    const output = turn.usage?.output_tokens;
+    if (duration == null || output == null || !Number.isFinite(output)) continue;
+    const ttft = sample?.ttftMs;
+    const generation = ttft != null && ttft < duration ? duration - ttft : duration;
+    if (generation <= 0) continue;
+    outputSum += output;
+    generationSum += generation;
+    speedSampleCount += 1;
+  }
+  const requestDurationMs = performance?.requestDurationMs ?? fromTurns.requestDurationMs;
+  const requestDurationCount = performance?.requestDurationCount
+    || (requestDurationMs == null ? 0 : fromTurns.requestDurationCount);
+  return {
+    taskCount: performance?.taskCount ?? turns?.length ?? 0,
+    ttftSampleCount: performance?.ttftSampleCount || ttftSampleCount,
+    speedSampleCount: performance?.speedSampleCount || speedSampleCount,
+    avgTtftMs: performance?.avgTtftMs ?? (ttftSampleCount > 0 ? ttftSum / ttftSampleCount : null),
+    outputTokensPerSecond: performance?.outputTokensPerSecond
+      ?? (generationSum > 0 ? outputSum * 1000 / generationSum : null),
+    totalDurationMs: performance?.totalDurationMs ?? (generationSum > 0 ? generationSum : null),
+    requestDurationMs,
+    requestDurationCount: performance?.requestDurationMs != null
+      ? (performance.requestDurationCount ?? 0)
+      : requestDurationCount,
+    taskDurationMs: performance?.taskDurationMs ?? taskClocks.taskDurationMs,
+    taskDurationCount: performance?.taskDurationMs != null
+      ? (performance.taskDurationCount ?? 0)
+      : taskClocks.taskDurationCount,
+    basis: performance?.basis ?? (ttftSampleCount > 0 || speedSampleCount > 0 ? "request" : null),
+  };
+}
+
 export function PerformanceMetrics({ performance, turns, tasks, source }: Props) {
-  const ttft = performance?.avgTtftMs;
-  const speed = performance?.outputTokensPerSecond;
-  const clocks = clocksFrom(performance, turns, tasks);
-  const requestDuration = formatPerformanceDuration(clocks.requestDurationMs);
-  const taskDuration = formatPerformanceDuration(clocks.taskDurationMs);
-  const text = performanceCopy(
-    performance == null ? undefined : { ...performance, ...clocks },
-    source,
-  );
+  const resolved = resolvePerformance(performance, turns, tasks);
+  const ttft = resolved.avgTtftMs;
+  const speed = resolved.outputTokensPerSecond;
+  const requestDuration = formatPerformanceDuration(resolved.requestDurationMs);
+  const taskDuration = formatPerformanceDuration(resolved.taskDurationMs);
+  const text = performanceCopy(resolved, source);
   // 口径一致：会话平均用任务计时时，直方图也分桶任务计时；否则退回轮次请求计时。
   const taskBased = tasks != null && tasks.length > 0;
   const distributions = taskBased

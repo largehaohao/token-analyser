@@ -8,22 +8,25 @@ const sessions = [
   { id: "u", source: "cursor" },
   { id: "p", source: "pi" },
   { id: "d", source: "dsh" },
+  { id: "o", source: "opencode" },
 ] as SessionListItem[];
 describe("session sources", () => {
   it("keeps all providers selectable and treats legacy records as Codex", () => {
     expect(filterSessionsBySource(sessions, "all")).toBe(sessions);
-    expect(sourceCounts(sessions)).toEqual({ all: 5, codex: 1, claude: 1, cursor: 1, pi: 1, dsh: 1 });
-    for (const source of ["codex", "claude", "cursor", "pi", "dsh"] as const) {
+    expect(sourceCounts(sessions)).toEqual({ all: 6, codex: 1, claude: 1, cursor: 1, pi: 1, dsh: 1, opencode: 1 });
+    for (const source of ["codex", "claude", "cursor", "pi", "dsh", "opencode"] as const) {
       expect(filterSessionsBySource(sessions, source)).toHaveLength(1);
     }
   });
   it("restores only known source preferences", () => {
-    for (const source of ["all", "codex", "claude", "cursor", "pi", "dsh"]) expect(normalizeSourceFilter(source)).toBe(source);
+    for (const source of ["all", "codex", "claude", "cursor", "pi", "dsh", "opencode"]) expect(normalizeSourceFilter(source)).toBe(source);
     for (const value of [null, undefined, "invalid", {}, 0]) expect(normalizeSourceFilter(value)).toBe("all");
   });
   it("explains missing data for the chosen provider", () => {
     expect(sourceEmptyCopy("claude")).toContain("未发现 Claude Code 会话记录");
     expect(sourceEmptyCopy("dsh")).toContain("未发现 DeepSeek Harness 会话记录");
+    expect(sourceEmptyCopy("opencode")).toContain("未发现 OpenCode 会话记录");
+    expect(sourceEmptyCopy("all")).toContain("OpenCode");
     expect(sourceEmptyCopy("all")).toContain("拖入");
   });
 });

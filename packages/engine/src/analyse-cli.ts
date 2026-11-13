@@ -48,7 +48,7 @@ function main(): void {
   const filePath = args.find((arg) => arg !== "--json");
 
   if (!filePath) {
-    console.error("Usage: analyse-cli.ts <session.jsonl|state.vscdb> [--json]");
+    console.error("Usage: analyse-cli.ts <session.jsonl|state.vscdb|opencode.db> [--json]");
     process.exit(1);
   }
 
@@ -56,7 +56,8 @@ function main(): void {
   const snapshots = ingestSessions(absolutePath);
 
   if (jsonMode) {
-    console.log(JSON.stringify(absolutePath.endsWith(".vscdb") ? snapshots : snapshots[0]));
+    const many = absolutePath.endsWith(".vscdb") || path.basename(absolutePath) === "opencode.db";
+    console.log(JSON.stringify(many ? snapshots : snapshots[0]));
     return;
   }
 

@@ -8,6 +8,8 @@ import {
   pricingCacheContext,
   clearLiveReadState,
   pruneInactiveLiveReadStates,
+  readMultiSessionEvents,
+  snapshotFromEvents,
   type IngestOptions,
 } from "./ingest.ts";
 import { isLive, pruneStaleCache } from "./cache.ts";
@@ -331,7 +333,7 @@ export class SessionStore {
     pruneInactiveLiveReadStates();
     let changed = false;
     for (const [id, source] of this.sources) {
-      if (source.path.endsWith(".vscdb")) {
+      if (source.path.endsWith(".vscdb") || path.basename(source.path) === "opencode.db") {
         const live = source.lastEventAt != null && isLive(Date.parse(source.lastEventAt));
         if (live !== source.live) { this.sources.set(id, { ...source, live }); changed = true; }
         continue;
@@ -412,7 +414,7 @@ export class SessionStore {
         if (fingerprintsMatch(recorded, current)) {
           for (const snap of previous) {
             // vscdb live is derived from lastEventAt, not file mtime.
-            const reusedLive = snap.path.endsWith(".vscdb")
+            const reusedLive = snap.path.endsWith(".vscdb") || path.basename(snap.path) === "opencode.db"
               ? snap.lastEventAt != null && isLive(Date.parse(snap.lastEventAt))
               : isLive(current.mtimeMs);
             this.keepSource(snap, nextSources, nextToggles, reusedLive);
@@ -567,6 +569,33 @@ export class SessionStore {
     return removed;
   }
 
+  private installSnapshots(
+    filePath: string,
+    snapshots: SessionSnapshot[],
+    opts?: SessionIngestOptions,
+  ): string | undefined {
+    const resolved = path.resolve(filePath);
+    const ids = new Set(snapshots.map((snap) => snap.id));
+    for (const [id, source] of this.sources) {
+      if (ids.has(id)) continue;
+      if (path.resolve(source.path) !== resolved) continue;
+      this.sources.delete(id);
+      this.toggles.delete(id);
+    }
+    for (const snap of snapshots) {
+      const existing = this.sources.get(snap.id);
+      if (opts?.skipExisting && existing) continue;
+      if (existing?.path.endsWith(".vscdb") && !filePath.endsWith(".vscdb")) continue;
+      if (!this.toggles.has(snap.id)) this.toggles.set(snap.id, { ...snap.toggles });
+      this.sources.set(snap.id, { ...snap, children: [] });
+    }
+    this.rememberFingerprint(filePath);
+    this.reindexPaths();
+    this.rebuildAll();
+    this.scheduleDump();
+    return snapshots[0]?.id;
+  }
+
   ingestPath(
     filePath: string,
     opts?: SessionIngestOptions,
@@ -587,25 +616,58 @@ export class SessionStore {
       cacheHome: this.cacheHome,
       allowAppend: opts?.allowAppend,
     });
-    const ids = new Set(snapshots.map((snap) => snap.id));
+    return this.installSnapshots(filePath, snapshots, opts);
+  }
+
+  /**
+   * Ingest a multi-session DB without blocking the HTTP loop for the whole file.
+   * OpenCode/Cursor stores are analysed in batches with a tick between each.
+   */
+  async ingestPathBatched(
+    filePath: string,
+    opts?: SessionIngestOptions & {
+      batchSize?: number;
+      onBatch?: (ids: string[]) => void;
+    },
+  ): Promise<string | undefined> {
+    const resolved = path.resolve(filePath);
+    try {
+      const current = fileFingerprint(filePath);
+      if (fingerprintsMatch(this.fingerprints.get(resolved), current)) {
+        const existing = this.sourcesForPath(resolved);
+        if (existing[0]) return existing[0].id;
+      }
+    } catch {
+      // Fall through.
+    }
+    const groups = readMultiSessionEvents(filePath);
+    if (!groups) return this.ingestPath(filePath, opts);
+    const batchSize = Math.max(1, opts?.batchSize ?? 20);
+    const resolvedPath = path.resolve(filePath);
     for (const [id, source] of this.sources) {
-      if (ids.has(id)) continue;
-      if (path.resolve(source.path) !== resolved) continue;
+      if (path.resolve(source.path) !== resolvedPath) continue;
       this.sources.delete(id);
       this.toggles.delete(id);
     }
-    for (const snap of snapshots) {
-      const existing = this.sources.get(snap.id);
-      if (opts?.skipExisting && existing) continue;
-      if (existing?.path.endsWith(".vscdb") && !filePath.endsWith(".vscdb")) continue;
-      if (!this.toggles.has(snap.id)) this.toggles.set(snap.id, { ...snap.toggles });
-      this.sources.set(snap.id, { ...snap, children: [] });
+    let firstId: string | undefined;
+    for (let offset = 0; offset < groups.length; offset += batchSize) {
+      const batchIds: string[] = [];
+      for (const events of groups.slice(offset, offset + batchSize)) {
+        const snap = snapshotFromEvents(events, filePath);
+        if (opts?.skipExisting && this.sources.has(snap.id)) continue;
+        if (!this.toggles.has(snap.id)) this.toggles.set(snap.id, { ...snap.toggles });
+        this.sources.set(snap.id, { ...snap, children: [] });
+        batchIds.push(snap.id);
+        firstId ??= snap.id;
+      }
+      this.reindexPaths();
+      this.rebuildAll();
+      opts?.onBatch?.(batchIds);
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
     this.rememberFingerprint(filePath);
-    this.reindexPaths();
-    this.rebuildAll();
     this.scheduleDump();
-    return snapshots[0]?.id;
+    return firstId;
   }
 
   /** Root session ids without refreshLiveFlags — safe inside ingest wrappers. */

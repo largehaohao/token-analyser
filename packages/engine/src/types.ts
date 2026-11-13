@@ -15,7 +15,7 @@ export type TokenUsage = {
   total_tokens: number;
 };
 
-export type SessionSource = "codex" | "claude" | "cursor" | "pi" | "dsh";
+export type SessionSource = "codex" | "claude" | "cursor" | "pi" | "dsh" | "opencode";
 
 export type Cost = {
   raw: number;
