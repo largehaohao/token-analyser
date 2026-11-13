@@ -160,3 +160,36 @@ export function fingerprintsMatch(
     (recorded.shmMtimeMs ?? 0) === current.shmMtimeMs
   );
 }
+
+/** Main-file identity only — Cursor/OpenCode WAL sidecars change constantly. */
+export function sqliteCoreFingerprintsMatch(
+  recorded: FileFingerprint | undefined,
+  current: FileFingerprint,
+): boolean {
+  if (!recorded) return false;
+  return (
+    recorded.inode === current.inode &&
+    recorded.size === current.size &&
+    recorded.mtimeMs === current.mtimeMs
+  );
+}
+
+/** Skip a GB-scale SQLite reparse when only WAL/SHM moved and we just loaded a dump. */
+export const SQLITE_WAL_REPARSE_MIN_BYTES = 10 * 1024 * 1024;
+export const SQLITE_WAL_REPARSE_COOLDOWN_MS = 30_000;
+
+export function shouldDeferSqliteWalReparse(opts: {
+  recorded: FileFingerprint | undefined;
+  current: FileFingerprint;
+  fileBytes: number;
+  lastIngestAt: number | undefined;
+  hasSources: boolean;
+  now?: number;
+}): boolean {
+  if (!opts.hasSources || !opts.recorded) return false;
+  if (opts.fileBytes < SQLITE_WAL_REPARSE_MIN_BYTES) return false;
+  if (!sqliteCoreFingerprintsMatch(opts.recorded, opts.current)) return false;
+  if (fingerprintsMatch(opts.recorded, opts.current)) return false;
+  const last = opts.lastIngestAt ?? 0;
+  return (opts.now ?? Date.now()) - last < SQLITE_WAL_REPARSE_COOLDOWN_MS;
+}

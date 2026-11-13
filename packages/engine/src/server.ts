@@ -509,6 +509,8 @@ export async function startServer(opts?: {
   maxImportBytes?: number;
   pricingUpdate?: PricingUpdateOptions;
   qwenPricingUpdate?: QwenPricingUpdateOptions;
+  /** Retry bind when the previous process still holds the port during dump. */
+  listenRetry?: { retries?: number; retryMs?: number };
 }): Promise<{
   url: string;
   close: () => Promise<void>;
@@ -520,6 +522,9 @@ export async function startServer(opts?: {
   const port =
     opts?.port ??
     (process.env.PORT ? Number.parseInt(process.env.PORT, 10) : DEFAULT_PORT);
+  const listenRetries =
+    opts?.listenRetry?.retries ?? (port === 0 ? 0 : 40);
+  const listenRetryMs = opts?.listenRetry?.retryMs ?? 250;
 
   const sseClients = new Set<http.ServerResponse>();
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
@@ -845,10 +850,28 @@ export async function startServer(opts?: {
     }
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, HOST, () => resolve());
-  });
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (err: Error) => {
+          server.off("listening", onListening);
+          reject(err);
+        };
+        const onListening = () => {
+          server.off("error", onError);
+          resolve();
+        };
+        server.once("error", onError);
+        server.once("listening", onListening);
+        server.listen(port, HOST);
+      });
+      break;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "EADDRINUSE" || attempt >= listenRetries) throw err;
+      await new Promise((resolve) => setTimeout(resolve, listenRetryMs));
+    }
+  }
 
   const address = server.address();
   const actualPort =
@@ -875,6 +898,11 @@ export async function startServer(opts?: {
         client.end();
       }
       sseClients.clear();
+      // Drop keep-alive / SSE sockets so close() resolves and the port frees
+      // immediately — restart must not wait on a multi-second store.dump().
+      if (typeof server.closeAllConnections === "function") {
+        server.closeAllConnections();
+      }
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
@@ -891,6 +919,34 @@ function collectFixtureFiles(dir: string): string[] {
 
 const STORE_DUMP_INTERVAL_MS = 60_000;
 
+/**
+ * Stop accepting connections before persisting the dump so a restart can bind
+ * the same port while the (potentially multi-second) dump still runs.
+ */
+export async function gracefulShutdown(opts: {
+  close: () => Promise<void>;
+  dump: () => void | Promise<void>;
+  exit: (code: number) => void;
+  code?: number;
+}): Promise<void> {
+  const code = opts.code ?? 0;
+  try {
+    await opts.close();
+  } catch (err) {
+    console.error(
+      `server close failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  try {
+    await opts.dump();
+  } catch (err) {
+    console.error(
+      `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  opts.exit(code);
+}
+
 async function main(): Promise<void> {
   const config = loadUserConfig();
   const store = new SessionStore();
@@ -901,6 +957,7 @@ async function main(): Promise<void> {
   const ingestErrors: { id: string; reason: string }[] = [];
   /** Cursor state.vscdb paths deferred until after listen when dump is warm. */
   let deferredVscdb: string[] = [];
+  let dumpRestored = 0;
 
   const fixtureDir = process.env.FIXTURE_DIR;
   if (fixtureDir) {
@@ -922,9 +979,9 @@ async function main(): Promise<void> {
     // app is open — defer that re-parse until after the server is listening
     // when a dump already has Cursor sessions.
     const bootStarted = Date.now();
-    const restored = store.loadDump();
-    if (restored > 0) {
-      console.log(`store dump restored ${restored} session(s)`);
+    dumpRestored = store.loadDump();
+    if (dumpRestored > 0) {
+      console.log(`store dump restored ${dumpRestored} session(s)`);
     }
     const onRefreshError = (filePath: string, err: Error) => {
       ingestErrors.push({ id: errorIdFromPath(filePath), reason: err.message });
@@ -985,7 +1042,7 @@ async function main(): Promise<void> {
   const configuredPort = process.env.PORT
     ? Number.parseInt(process.env.PORT, 10)
     : 7788;
-  const { url, onIngestError } = await startServer({
+  const { url, onIngestError, close } = await startServer({
     store,
     ...(serveUi
       ? { staticDir: webDist, port: configuredPort || 7788 }
@@ -997,7 +1054,11 @@ async function main(): Promise<void> {
   console.log(`token-analyser engine listening on ${url}`);
 
   if (!fixtureDir) {
-    if (deferredVscdb.length > 0) {
+    if (deferredVscdb.length > 0 && dumpRestored > 0) {
+      console.log(
+        `skipping ${deferredVscdb.length} heavy source refresh; dump already has ${dumpRestored} session(s)`,
+      );
+    } else if (deferredVscdb.length > 0) {
       const heavyFiles = deferredVscdb;
       const heavyStarted = Date.now();
       // Wait for the first UI /sessions paint, then refresh one heavy file at a
@@ -1032,8 +1093,8 @@ async function main(): Promise<void> {
           finish();
         });
       };
-      // Start immediately after listen so OpenCode is ready within a few seconds.
-      setTimeout(() => refreshNext(0), 0);
+      // Give /sessions and SSE a tick to complete before GB-scale SQLite work.
+      setTimeout(() => refreshNext(0), 750);
     }
     // Qwen publishes new rates without warning the local ledger, so refresh
     // them automatically and keep every estimate on the dated official card.
@@ -1070,21 +1131,22 @@ async function main(): Promise<void> {
     }, STORE_DUMP_INTERVAL_MS);
     dumpTimer.unref?.();
 
+    let shuttingDown = false;
     const dumpAndExit = (code: number) => {
-      try {
-        store.dump();
-      } catch (err) {
-        console.error(
-          `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      process.exit(code);
+      if (shuttingDown) return;
+      shuttingDown = true;
+      clearInterval(dumpTimer);
+      void gracefulShutdown({
+        close,
+        dump: () => store.dump(),
+        exit: (exitCode) => process.exit(exitCode),
+        code,
+      });
     };
     process.once("SIGINT", () => dumpAndExit(0));
     process.once("SIGTERM", () => dumpAndExit(0));
   }
 }
-
 const entry = process.argv[1]
   ? path.resolve(process.argv[1])
   : undefined;

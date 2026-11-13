@@ -25,6 +25,7 @@ import { buildOverview, type Overview, type OverviewOptions } from "./overview.t
 import {
   fileFingerprint,
   fingerprintsMatch,
+  shouldDeferSqliteWalReparse,
   readStoreDump,
   STORE_DUMP_VERSION,
   writeStoreDump,
@@ -124,6 +125,8 @@ export class SessionStore {
   private toggles = new Map<string, Record<WasteToggleId, boolean>>();
   /** Resolved path → fingerprint of the file used for the current source(s). */
   private fingerprints = new Map<string, FileFingerprint>();
+  /** When we last parsed a large SQLite source (dump restore counts). */
+  private sqliteIngestAt = new Map<string, number>();
   /** Resolved path → session ids (avoids O(sources) scans during refresh). */
   private sourcesByPath = new Map<string, string[]>();
   private cacheHome?: string;
@@ -223,10 +226,32 @@ export class SessionStore {
 
   private rememberFingerprint(filePath: string): void {
     try {
-      this.fingerprints.set(path.resolve(filePath), fileFingerprint(filePath));
+      const resolved = path.resolve(filePath);
+      this.fingerprints.set(resolved, fileFingerprint(filePath));
+      if (resolved.endsWith(".vscdb") || path.basename(resolved) === "opencode.db") {
+        this.sqliteIngestAt.set(resolved, Date.now());
+      }
     } catch {
       this.fingerprints.delete(path.resolve(filePath));
     }
+  }
+
+  /** Large Cursor/OpenCode DBs stay WAL-dirty while the app is open. */
+  private shouldSkipSqliteWal(filePath: string, current: FileFingerprint): boolean {
+    const resolved = path.resolve(filePath);
+    let fileBytes = current.size;
+    try {
+      fileBytes = statSync(filePath).size;
+    } catch {
+      // Use fingerprint size when stat races with a delete.
+    }
+    return shouldDeferSqliteWalReparse({
+      recorded: this.fingerprints.get(resolved),
+      current,
+      fileBytes,
+      lastIngestAt: this.sqliteIngestAt.get(resolved),
+      hasSources: this.sourcesForPath(resolved).length > 0,
+    });
   }
 
   /**
@@ -246,8 +271,13 @@ export class SessionStore {
     for (const [id, toggles] of Object.entries(dump.toggles)) {
       if (this.sources.has(id)) this.toggles.set(id, { ...toggles });
     }
+    const restoredAt = Date.now();
     for (const [filePath, fingerprint] of Object.entries(dump.fingerprints)) {
-      this.fingerprints.set(path.resolve(filePath), fingerprint);
+      const resolved = path.resolve(filePath);
+      this.fingerprints.set(resolved, fingerprint);
+      if (resolved.endsWith(".vscdb") || path.basename(resolved) === "opencode.db") {
+        this.sqliteIngestAt.set(resolved, restoredAt);
+      }
     }
     this.reindexPaths();
     this.rebuildAll();
@@ -411,7 +441,7 @@ export class SessionStore {
         // when inode/size/mtime/WAL were unchanged since the dump.
         // Empty previous is OK: Cursor JSONL dupes are fingerprint-only when
         // state.vscdb already owns those session ids.
-        if (fingerprintsMatch(recorded, current)) {
+        if (fingerprintsMatch(recorded, current) || this.shouldSkipSqliteWal(p, current)) {
           for (const snap of previous) {
             // vscdb live is derived from lastEventAt, not file mtime.
             const reusedLive = snap.path.endsWith(".vscdb") || path.basename(snap.path) === "opencode.db"
@@ -603,7 +633,10 @@ export class SessionStore {
     const resolved = path.resolve(filePath);
     try {
       const current = fileFingerprint(filePath);
-      if (fingerprintsMatch(this.fingerprints.get(resolved), current)) {
+      if (
+        fingerprintsMatch(this.fingerprints.get(resolved), current) ||
+        this.shouldSkipSqliteWal(filePath, current)
+      ) {
         // Unchanged since last ingest/dump — skip the (possibly multi‑MB) parse.
         const existing = this.sourcesForPath(resolved);
         if (opts?.skipExisting && existing[0]) return existing[0].id;
@@ -633,7 +666,10 @@ export class SessionStore {
     const resolved = path.resolve(filePath);
     try {
       const current = fileFingerprint(filePath);
-      if (fingerprintsMatch(this.fingerprints.get(resolved), current)) {
+      if (
+        fingerprintsMatch(this.fingerprints.get(resolved), current) ||
+        this.shouldSkipSqliteWal(filePath, current)
+      ) {
         const existing = this.sourcesForPath(resolved);
         if (existing[0]) return existing[0].id;
       }
@@ -668,6 +704,26 @@ export class SessionStore {
     this.rememberFingerprint(filePath);
     this.scheduleDump();
     return firstId;
+  }
+
+  /** True when dump/refresh already knows this file — startup watch can skip re-parse. */
+  knowsPath(filePath: string): boolean {
+    const resolved = path.resolve(filePath);
+    return this.fingerprints.has(resolved) || this.sourcesForPath(resolved).length > 0;
+  }
+
+  /** Skip the first watch scan when the dump is still a valid read of this file. */
+  canSkipStartupIngest(filePath: string): boolean {
+    if (!this.knowsPath(filePath)) return false;
+    try {
+      const current = fileFingerprint(filePath);
+      return (
+        fingerprintsMatch(this.fingerprints.get(path.resolve(filePath)), current) ||
+        this.shouldSkipSqliteWal(filePath, current)
+      );
+    } catch {
+      return false;
+    }
   }
 
   /** Root session ids without refreshLiveFlags — safe inside ingest wrappers. */

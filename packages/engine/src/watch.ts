@@ -55,6 +55,7 @@ export function watchSessions(
   let directoryScan: ReturnType<typeof setInterval> | undefined;
   const useRecursive = opts?.recursive ?? true;
   let needsDirectoryScan = !useRecursive;
+  let primed = false;
 
   function errorIdFromPath(filePath: string): string {
     const base = path.basename(filePath);
@@ -126,6 +127,9 @@ export function watchSessions(
     const signature = fileSignature(fullPath);
     if (!signature || observedFiles.get(fullPath) === signature) return;
     observedFiles.set(fullPath, signature);
+    // First scan would otherwise re-parse every GB-scale SQLite/JSONL the dump
+    // already restored, blocking /sessions for tens of seconds after listen.
+    if (!primed && store.canSkipStartupIngest(fullPath)) return;
     scheduleIngest(fullPath);
   }
 
@@ -203,7 +207,10 @@ export function watchSessions(
     }
   }
 
-  startupScan = setTimeout(scanForSessions, 25);
+  startupScan = setTimeout(() => {
+    scanForSessions();
+    primed = true;
+  }, 25);
   if (needsDirectoryScan) {
     directoryScan = setInterval(scanForSessions, 1_000);
   }

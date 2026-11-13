@@ -460,6 +460,14 @@ function AppShell() {
   }, [now, refreshList, refreshSession]);
 
   useEffect(() => {
+    if (!sessionsError) return;
+    const timer = setInterval(() => {
+      void refreshList(true).catch(() => undefined);
+    }, 3_000);
+    return () => clearInterval(timer);
+  }, [sessionsError, refreshList]);
+
+  useEffect(() => {
     if (view !== "sessions") return;
     const preferredId = preferredSessionIdRef.current;
     if (preferredId) {

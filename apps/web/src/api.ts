@@ -439,7 +439,11 @@ export async function getPowerFeed(
 }
 
 export async function listSessions(): Promise<SessionListItem[]> {
-  const body = await requestJson<{ sessions: SessionListItem[] }>("/sessions");
+  const body = await requestJson<{ sessions: SessionListItem[] }>(
+    "/sessions",
+    undefined,
+    45_000,
+  );
   return body.sessions;
 }
 
@@ -624,33 +628,54 @@ export function openStream(
   onEvent: (e: StreamEvent) => void,
   onStatus?: (status: StreamStatus) => void,
 ): () => void {
-  const es = new EventSource("/stream");
-  onStatus?.("connecting");
-  es.onopen = () => {
-    onStatus?.("open");
-    onEvent({ type: "resync", id: "*" });
-  };
-  es.onerror = () => {
-    onStatus?.(es.readyState === EventSource.CLOSED ? "error" : "connecting");
+  let stopped = false;
+  let es: EventSource | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const attach = (source: EventSource): void => {
+    const handler =
+      (type: string) =>
+      (ev: MessageEvent): void => {
+        try {
+          const data = JSON.parse(ev.data as string) as {
+            id: string;
+            reason?: string;
+          };
+          onEvent({ type, id: data.id, reason: data.reason });
+        } catch {
+          // ignore malformed events
+        }
+      };
+    source.addEventListener("session_added", handler("session_added"));
+    source.addEventListener("session_updated", handler("session_updated"));
+    source.addEventListener("session_error", handler("session_error"));
   };
 
-  const handler =
-    (type: string) =>
-    (ev: MessageEvent): void => {
-      try {
-        const data = JSON.parse(ev.data as string) as {
-          id: string;
-          reason?: string;
-        };
-        onEvent({ type, id: data.id, reason: data.reason });
-      } catch {
-        // ignore malformed events
+  const connect = (): void => {
+    if (stopped) return;
+    es = new EventSource("/stream");
+    onStatus?.("connecting");
+    es.onopen = () => {
+      onStatus?.("open");
+      onEvent({ type: "resync", id: "*" });
+    };
+    es.onerror = () => {
+      if (stopped || !es) return;
+      onStatus?.(es.readyState === EventSource.CLOSED ? "error" : "connecting");
+      // Vite returns 500 when the engine is down; that closes EventSource for
+      // good. Recreate so the UI recovers without a full page reload.
+      if (es.readyState === EventSource.CLOSED) {
+        es.close();
+        retryTimer = setTimeout(connect, 2_000);
       }
     };
+    attach(es);
+  };
 
-  es.addEventListener("session_added", handler("session_added"));
-  es.addEventListener("session_updated", handler("session_updated"));
-  es.addEventListener("session_error", handler("session_error"));
-
-  return () => es.close();
+  connect();
+  return () => {
+    stopped = true;
+    if (retryTimer) clearTimeout(retryTimer);
+    es?.close();
+  };
 }

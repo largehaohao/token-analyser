@@ -7,10 +7,14 @@ import {
 } from "./api";
 
 class FakeEventSource {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSED = 2;
   static instances: FakeEventSource[] = [];
   onopen: ((ev: Event) => void) | null = null;
   onerror: ((ev: Event) => void) | null = null;
   closed = false;
+  readyState = FakeEventSource.CONNECTING;
   readonly listeners = new Map<string, ((ev: MessageEvent) => void)[]>();
 
   constructor(public readonly url: string) {
@@ -32,6 +36,25 @@ describe("openStream", () => {
   afterEach(() => {
     FakeEventSource.instances = [];
     vi.unstubAllGlobals();
+  });
+
+  it("reopens EventSource when the socket closes so a dead engine can recover", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const statuses: string[] = [];
+    const stop = openStream(
+      () => undefined,
+      (status) => statuses.push(status),
+    );
+    const first = FakeEventSource.instances[0]!;
+    Object.defineProperty(first, "readyState", { value: 2 });
+    first.onerror?.(new Event("error"));
+    expect(statuses).toContain("error");
+    expect(FakeEventSource.instances).toHaveLength(1);
+    vi.advanceTimersByTime(2_000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    stop();
+    vi.useRealTimers();
   });
 
   it("asks the UI to resync when the SSE socket opens", () => {

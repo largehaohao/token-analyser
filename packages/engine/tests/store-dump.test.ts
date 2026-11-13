@@ -15,6 +15,8 @@ import { SessionStore } from "../src/store.ts";
 import {
   fileFingerprint,
   fingerprintsMatch,
+  shouldDeferSqliteWalReparse,
+  SQLITE_WAL_REPARSE_MIN_BYTES,
   readStoreDump,
   storeDbPath,
   storeDumpPath,
@@ -174,6 +176,33 @@ describe("SessionStore dump", () => {
     const after = fileFingerprint(db);
     expect(fingerprintsMatch(before, after)).toBe(false);
     expect(after.walSize).toBeGreaterThan(0);
+    expect(
+      shouldDeferSqliteWalReparse({
+        recorded: before,
+        current: after,
+        fileBytes: SQLITE_WAL_REPARSE_MIN_BYTES,
+        lastIngestAt: Date.now(),
+        hasSources: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeferSqliteWalReparse({
+        recorded: before,
+        current: after,
+        fileBytes: 1024,
+        lastIngestAt: Date.now(),
+        hasSources: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferSqliteWalReparse({
+        recorded: before,
+        current: after,
+        fileBytes: SQLITE_WAL_REPARSE_MIN_BYTES,
+        lastIngestAt: Date.now() - 60_000,
+        hasSources: true,
+      }),
+    ).toBe(false);
   });
 
   it("schedules a dump after ingestPath", () => {

@@ -12,7 +12,11 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SessionStore } from "../src/store.ts";
-import { loadImportedSessions, startServer } from "../src/server.ts";
+import {
+  gracefulShutdown,
+  loadImportedSessions,
+  startServer,
+} from "../src/server.ts";
 import { loadRateCard } from "../src/rate-card.ts";
 
 const fixtures = path.resolve(
@@ -625,5 +629,84 @@ describe("startServer", () => {
     } finally {
       await server.close();
     }
+  });
+
+  it("retries EADDRINUSE long enough for a previous engine to finish dumping", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-retry-bind-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    const blocker = http.createServer((_req, res) => res.end());
+    await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
+    const port = (blocker.address() as { port: number }).port;
+
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const starting = startServer({
+      port,
+      store,
+      listenRetry: { retries: 20, retryMs: 50 },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await new Promise<void>((resolve, reject) =>
+      blocker.close((err) => (err ? reject(err) : resolve())),
+    );
+
+    const server = await starting;
+    try {
+      expect(server.url).toBe(`http://127.0.0.1:${port}`);
+      const res = await fetch(`${server.url}/sessions`);
+      expect(res.status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("releases the listen port before dump so a restart can bind immediately", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-shutdown-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const first = await startServer({ port: 0, store });
+    const port = Number(new URL(first.url).port);
+
+    let dumpGate!: () => void;
+    const dumpStarted = new Promise<void>((resolve) => {
+      dumpGate = resolve;
+    });
+    let dumpFinished = false;
+    let exitCode: number | undefined;
+    const order: string[] = [];
+
+    const shuttingDown = gracefulShutdown({
+      close: async () => {
+        order.push("close");
+        await first.close();
+      },
+      dump: async () => {
+        order.push("dump-start");
+        dumpGate();
+        // Simulate a slow store.dump() without blocking the event loop, so we
+        // can prove another process can bind the same port mid-dump.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        dumpFinished = true;
+        order.push("dump-end");
+      },
+      exit: (code) => {
+        exitCode = code;
+        order.push("exit");
+      },
+    });
+
+    await dumpStarted;
+    expect(dumpFinished).toBe(false);
+
+    const second = await startServer({ port, store });
+    expect(second.url).toBe(`http://127.0.0.1:${port}`);
+    await second.close();
+
+    await shuttingDown;
+    expect(dumpFinished).toBe(true);
+    expect(exitCode).toBe(0);
+    expect(order[0]).toBe("close");
+    expect(order.indexOf("dump-start")).toBeGreaterThan(order.indexOf("close"));
+    expect(order.at(-1)).toBe("exit");
   });
 });
