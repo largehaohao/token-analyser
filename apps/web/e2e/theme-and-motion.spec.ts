@@ -46,3 +46,29 @@ test("reduced motion lands count-ups and animations immediately", async ({
   expect(settled).toBeGreaterThanOrEqual(0);
   await expect(figure).not.toHaveText("0");
 });
+
+test("reduced motion wins over the later motion-layer cascade", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/#overview");
+  await expect(page.getByTestId("overview-page")).toBeVisible();
+  // The motion layer declares more-specific animations/transitions after the
+  // universal guard. Every animated surface must still compute to 0s.
+  const durations = await page.evaluate(() =>
+    [".trend-col .fill", ".hist .hb-bar > i", ".comp-bar > i", ".hero-spark-line"]
+      .map((selector) => {
+        const element = document.querySelector(selector);
+        if (!element) return null;
+        const style = getComputedStyle(element);
+        return {
+          animation: style.animationDuration,
+          transition: style.transitionDuration,
+        };
+      })
+      .filter(Boolean),
+  );
+  expect(durations.length).toBeGreaterThan(0);
+  for (const duration of durations) {
+    expect(duration!.animation).toBe("0s");
+    expect(duration!.transition.split(",").every((part) => part.trim() === "0s")).toBe(true);
+  }
+});

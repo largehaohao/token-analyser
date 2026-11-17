@@ -26,6 +26,7 @@ import {
   RateLimitSummary,
 } from "./OverviewPanels";
 import { LedgerStrip } from "./LedgerStrip";
+import { LedgerHero } from "./LedgerHero";
 import { TrendPanel } from "./TrendPanel";
 
 type Props = {
@@ -65,6 +66,7 @@ export function OverviewPage({
   fetchOverviewForModel,
 }: Props) {
   const { unit, setUnit } = useUnit();
+  const [focusedSlice, setFocusedSlice] = useState<string | null>(null);
   const wastePct = wasteShare(overview.waste, overview.cost, unit);
   const unpriced = unpricedNote(overview.unpricedRaw ?? 0);
   const identity = tokenIdentity(overview.cost);
@@ -83,7 +85,11 @@ export function OverviewPage({
   const money = companionMoneyUnit(unit);
 
   return (
-    <main className="overview" data-testid="overview-page">
+    <main
+      className="overview"
+      data-testid="overview-page"
+      data-focused-slice={focusedSlice ?? undefined}
+    >
       <header className="page-heading">
         <div className="page-heading-copy">
           <div className="heading-title-row">
@@ -136,6 +142,13 @@ export function OverviewPage({
         </p>
       )}
 
+      <LedgerHero
+        overview={overview}
+        previous={previous}
+        previousLabel={previousLabel}
+        unit={unit}
+      />
+
       <LedgerStrip
         overview={overview}
         previous={previous}
@@ -164,8 +177,9 @@ export function OverviewPage({
           onChartMetric={setUnit}
           filterScope={filterScope}
           fetchOverviewForModel={fetchOverviewForModel}
+          onFocusSlice={setFocusedSlice}
         />
-        <CompositionPanel overview={overview} />
+        <CompositionPanel overview={overview} focusedSlice={focusedSlice} />
       </div>
 
       <div className="panel-grid">
@@ -178,6 +192,8 @@ export function OverviewPage({
           overview={overview}
           unit={unit}
           onInspectSlice={onInspectSlice}
+          focusedSlice={focusedSlice}
+          onFocusSlice={setFocusedSlice}
         />
       </div>
 
@@ -283,3 +299,4 @@ export function OverviewPage({
     </main>
   );
 }
+import { useState } from "react";

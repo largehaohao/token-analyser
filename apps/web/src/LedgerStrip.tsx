@@ -33,7 +33,7 @@ function deltaText(delta: number, label: string): string {
 }
 
 /** Keeps the unit's exact rounding rules while the headline count rolls. */
-function formatAnimatedCost(
+export function formatAnimatedCost(
   cost: Cost,
   unit: CostUnit,
   animated: number | null,
@@ -80,6 +80,9 @@ export function LedgerStrip({
   const animatedUnpriced = useAnimatedNumber(overview.unpricedRaw);
   const animatedWaste = useAnimatedNumber(costValue(overview.waste, unit));
   const totalFlash = useFlashOnChange(overview.cost.raw);
+  const cacheFlash = useFlashOnChange(cache);
+  const unpricedFlash = useFlashOnChange(overview.unpricedRaw);
+  const wasteFlash = useFlashOnChange(overview.waste.raw);
 
   return (
     <Panel role="region" className="ledger" data-testid="ledger-strip" aria-label="当前统计范围概览">
@@ -147,7 +150,7 @@ export function LedgerStrip({
       </BareButton>
       <div className="ledger-item">
         <span className="ledger-label">缓存命中</span>
-        <span className="ledger-value">
+        <span className={`ledger-value${cacheFlash ? " value-flash" : ""}`}>
           {animatedCache == null ? "—" : formatPercent(animatedCache)}
         </span>
         <span
@@ -164,7 +167,7 @@ export function LedgerStrip({
       <div className="ledger-item">
         <span className="ledger-label">未定价 Token</span>
         <span
-          className={`ledger-value ${overview.unpricedRaw > 0 ? "warn" : ""}`}
+          className={`ledger-value ${overview.unpricedRaw > 0 ? "warn" : ""}${unpricedFlash ? " value-flash" : ""}`}
         >
           {formatCompactTokens(Math.round(animatedUnpriced ?? 0))}
         </span>
@@ -176,7 +179,7 @@ export function LedgerStrip({
       </div>
       <div className="ledger-item">
         <span className="ledger-label">疑似可优化</span>
-        <span className="ledger-value" title={formatCostTitle(overview.waste, unit)}>
+        <span className={`ledger-value${wasteFlash ? " value-flash" : ""}`} title={formatCostTitle(overview.waste, unit)}>
           {formatAnimatedCost(overview.waste, unit, animatedWaste)}
         </span>
         <span className="ledger-delta">

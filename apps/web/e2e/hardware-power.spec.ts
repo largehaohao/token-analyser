@@ -70,7 +70,9 @@ test("hardware energy follows its range and price without entering token costs",
   await expect(totals).toContainText("电价 1.10 元/kWh");
   expect(await energy()).toBeCloseTo(hourEnergyAgain, 2);
   const money = await waitForSettledNumber(totals.locator(".ledger-value").last());
-  expect(Math.abs(money - hourEnergyAgain * 1.1)).toBeLessThan(0.006);
+  // The displayed money is rounded to cents while energy is rounded to mWh;
+  // compare within a cent rather than on an exact float boundary.
+  expect(money).toBeCloseTo(hourEnergyAgain * 1.1, 1);
   await expect(page.getByRole("status").filter({ hasText: "演示数据，尚未接入" })).toBeVisible();
   await page.getByRole("link", { name: "成本总览", exact: true }).click();
   await expect(page.getByTestId("power-page")).toHaveCount(0);

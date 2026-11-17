@@ -33,6 +33,8 @@ test("overview keeps secondary analysis collapsed and accessible by keyboard", a
   await expect(page.getByTestId("trend-chart")).toBeVisible();
   await expect(page.getByTestId("composition-panel")).toBeVisible();
   await expect(page.getByTestId("behavior-rank")).toBeVisible();
+  await expect(page.getByTestId("ledger-hero")).toBeVisible();
+  await expect(page.getByRole("group", { name: "趋势叠加方式" }).getByRole("button")).toHaveCount(3);
   await expect(page.getByTestId("model-table")).toBeHidden();
   await expect(page.getByLabel("数据质量", { exact: true })).toBeHidden();
   await page.getByRole("button", { name: "Credits", exact: true }).click();
@@ -437,6 +439,50 @@ function overviewPayload(sessionCount: number) {
     models: [],
   };
 }
+
+test("modern data surfaces render a donut, heat calendar, trend overlay and rank focus", async ({
+  page,
+}) => {
+  const cost = {
+    raw: 200,
+    uncached_input: 80,
+    cached_input: 40,
+    output: 80,
+    credits: 2,
+    usd: 0.2,
+  };
+  const flagged = { ...cost, raw: 20, credits: 0.2, usd: 0.02 };
+  const day = (date: string, raw: number) => ({
+    date,
+    cost: { ...cost, raw, credits: raw / 100, usd: raw / 1000 },
+    flaggedCost: { ...flagged, raw: raw / 10 },
+    unpricedRaw: 0,
+  });
+  await page.route("**/overview?**", (route) =>
+    route.fulfill({
+      json: {
+        ...overviewPayload(1),
+        cost,
+        days: [day("2026-11-10", 20), day("2026-11-11", 60), day("2026-11-12", 120)],
+        slices: [{ key: "code", raw: 200, credits: 2, usd: 0.2 }],
+      },
+    }),
+  );
+  await page.goto("/#overview");
+  await expect(page.getByTestId("overview-page")).toBeVisible();
+  await expect(page.getByTestId("ledger-hero")).toBeVisible();
+  await expect(page.locator(".donut-seg")).toHaveCount(3);
+  await expect(page.locator(".heat-cell[data-date]")).toHaveCount(3);
+  await expect(page.locator(".trend-modes button")).toHaveCount(3);
+  await expect(page.locator(".trend-overlay")).toHaveCount(0);
+  await page.getByRole("button", { name: "累计", exact: true }).click();
+  await expect(page.locator(".trend-overlay")).toBeVisible();
+  await page.getByRole("button", { name: "7 日均", exact: true }).click();
+  await expect(page.locator(".trend-overlay")).toBeVisible();
+  await page.locator(".rank-row").first().hover();
+  await expect(page.getByTestId("overview-page")).toHaveAttribute("data-focused-slice", "code");
+  await expect(page.locator(".focus-hint")).toBeVisible();
+});
 
 test("ignores a stale overview after the range changes", async ({ page }) => {
   let release7d!: () => void;

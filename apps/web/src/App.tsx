@@ -168,6 +168,15 @@ function AppShell() {
   }, [theme]);
 
   useEffect(() => {
+    // A one-shot class lets surface colors ease once after a theme change;
+    // it is removed so ordinary hover/state transitions keep their own timing.
+    const root = document.documentElement;
+    root.classList.add("theme-crossfade");
+    const timer = window.setTimeout(() => root.classList.remove("theme-crossfade"), 260);
+    return () => window.clearTimeout(timer);
+  }, [theme]);
+
+  useEffect(() => {
     if (view !== "sessions" || mobileSessionPane !== "detail" ||
         !window.matchMedia("(max-width: 780px)").matches) return;
     const frame = requestAnimationFrame(() => {
@@ -820,11 +829,21 @@ function AppShell() {
               emphasis="ghost"
               aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
               title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
-              onClick={() =>
-                setTheme((current) => (current === "dark" ? "light" : "dark"))
-              }
+              onClick={() => {
+                const next = theme === "dark" ? "light" : "dark";
+                // Apply the palette inside the transition callback so the new
+                // snapshot captures it; the effect below remains idempotent.
+                withViewTransition(() => {
+                  applyTheme(next);
+                  setTheme(next);
+                });
+              }}
             >
-              <Icon name={theme === "dark" ? "sun" : "moon"} />
+              <Icon
+                key={theme}
+                name={theme === "dark" ? "sun" : "moon"}
+                className="theme-glyph"
+              />
             </Button>
             <Button
               className="refresh-button"
@@ -982,6 +1001,22 @@ function AppShell() {
               </main>
             ) : (
               <main className="overview">
+                <div className="loading-reserve" aria-hidden="true">
+                  <div className="reserve-strip">
+                    {[0, 1, 2, 3].map((index) => (
+                      <div className="reserve-cell" key={index} />
+                    ))}
+                  </div>
+                  <div className="reserve-panels">
+                    {[0, 1].map((index) => (
+                      <div className="reserve-panel" key={index}>
+                        <div className="reserve-line short" />
+                        <div className="reserve-line medium" />
+                        <div className="reserve-block" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 <StatePanel
                   kind="loading"
                   title="正在汇总本地用量"

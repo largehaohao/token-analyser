@@ -28,6 +28,14 @@
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --dur-short: var(--motion);
+  --dur-enter: 420ms;
+  --dur-morph: 300ms;
+  --dur-count: 450ms;
+  --dur-flash: 700ms;
+  --dur-draw: 900ms;
+  --dur-theme: 180ms;
+  --stagger-bar: 16ms;
+  --stagger-hist: 10ms;
   --radius-panel: var(--radius);
   --radius-input: var(--radius-control);
   --rule-width: 1px;

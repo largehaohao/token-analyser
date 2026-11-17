@@ -29,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { donutArc, donutSegments } from "./visual-metrics";
 
 
 function InspectButton({
@@ -54,7 +55,13 @@ function InspectButton({
  * Where the tokens in the window came from. Cache is a sub-line of input, so the
  * main rows' percentages describe the whole window and never double-count.
  */
-export function CompositionPanel({ overview }: { overview: Overview }) {
+export function CompositionPanel({
+  overview,
+  focusedSlice,
+}: {
+  overview: Overview;
+  focusedSlice: string | null;
+}) {
   const cost = overview.cost;
   const unpriced = overview.unpricedRaw ?? 0;
   const input = cost.uncached_input + cost.cached_input;
@@ -85,8 +92,18 @@ export function CompositionPanel({ overview }: { overview: Overview }) {
     },
   ];
 
+  const parts = [
+    { key: "cached", label: "已缓存输入", value: cost.cached_input, color: "var(--chart-cyan)" },
+    { key: "input", label: "未缓存输入", value: cost.uncached_input, color: "var(--chart-blue)" },
+    { key: "output", label: "输出", value: cost.output, color: "var(--accent)" },
+  ];
+  const segments = donutSegments(parts);
+  const donutTotal = Math.max(0, cost.raw);
+  const radius = 48;
+  let offset = 0;
+
   return (
-    <Panel role="region" className="chart-card" data-testid="composition-panel" aria-label="Token 构成">
+    <Panel role="region" className="chart-card composition-panel" data-testid="composition-panel" aria-label="Token 构成">
       <div className="chart-head">
         <div>
           <h2 className="chart-title">Token 构成</h2>
@@ -98,6 +115,53 @@ export function CompositionPanel({ overview }: { overview: Overview }) {
           <Badge variant="outline" className="cache-pill">缓存命中 {formatPercent(100 * hit)}</Badge>
         )}
       </div>
+      {donutTotal > 0 && (
+        <div className="donut-wrap">
+          <svg
+            className="donut"
+            viewBox="0 0 128 128"
+            role="img"
+            aria-label={`Token 构成环图：${segments.map((seg) => `${seg.label} ${formatExactTokens(seg.value)}`).join("，")}`}
+          >
+            <circle className="donut-track" cx="64" cy="64" r={radius} />
+            <g transform="rotate(-90 64 64)">
+              {segments.map((seg) => {
+                const arc = donutArc(donutTotal, seg.value, radius);
+                const dashOffset = -offset;
+                offset += arc.dash;
+                return (
+                  <circle
+                    key={seg.key}
+                    className="donut-seg"
+                    cx="64"
+                    cy="64"
+                    r={radius}
+                    stroke={seg.color}
+                    strokeDasharray={`${arc.dash} ${arc.gap}`}
+                    strokeDashoffset={dashOffset}
+                  />
+                );
+              })}
+            </g>
+            <text className="donut-center-value" x="64" y="62">{formatCompactTokens(donutTotal)}</text>
+            <text className="donut-center-label" x="64" y="78">tokens</text>
+          </svg>
+          <div className="donut-legend">
+            {parts.map((part) => (
+              <div key={part.key}>
+                <i style={{ background: part.color }} />
+                <span>{part.label}</span>
+                <b>{formatCompactTokens(part.value)}</b>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {focusedSlice && (
+        <p className="focus-hint" role="status">
+          行为排行正在聚焦「{SLICE_META[focusedSlice as keyof typeof SLICE_META]?.label ?? focusedSlice}」；当前环图显示 Token 构成，不受分类筛选影响。
+        </p>
+      )}
       <div className="comp-rows">
         {rows.map((row) => (
           <div className="comp-row" key={row.key}>
@@ -162,6 +226,8 @@ type RankProps = {
   overview: Overview;
   unit: CostUnit;
   onInspectSlice: (key: string, label: string) => void;
+  focusedSlice: string | null;
+  onFocusSlice: (key: string | null) => void;
 };
 
 /**
@@ -172,6 +238,8 @@ export function BehaviorRankPanel({
   overview,
   unit,
   onInspectSlice,
+  focusedSlice,
+  onFocusSlice,
 }: RankProps) {
   const rows = rankRows(overview);
   const max = Math.max(...rows.map((row) => row.raw), 1);
@@ -192,7 +260,12 @@ export function BehaviorRankPanel({
         <>
           <div className="rank-list">
             {rows.map((row, index) => (
-              <div className="rank-row" key={row.key}>
+              <div
+                className={`rank-row${focusedSlice === row.key ? " focused" : ""}`}
+                key={row.key}
+                onMouseEnter={() => onFocusSlice(row.key)}
+                onMouseLeave={() => onFocusSlice(null)}
+              >
                 <span className="rk">{index + 1}</span>
                 <span className="sw" style={{ background: row.color }} />
                 <div className="rank-main">
@@ -223,7 +296,10 @@ export function BehaviorRankPanel({
                 {row.key !== "unattributed" && (
                   <InspectButton
                     label={row.label}
-                    onClick={() => onInspectSlice(row.key, row.label)}
+                    onClick={() => {
+                      onFocusSlice(row.key);
+                      onInspectSlice(row.key, row.label);
+                    }}
                   />
                 )}
               </div>

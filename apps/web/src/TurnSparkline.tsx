@@ -32,6 +32,7 @@ export function TurnSparkline({ turns }: Props) {
         strokeWidth="1.5"
         strokeLinejoin="round"
         strokeLinecap="round"
+        pathLength={1}
         points={points}
       />
     </svg>

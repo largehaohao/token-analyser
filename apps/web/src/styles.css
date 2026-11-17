@@ -181,13 +181,16 @@ button:not(:disabled):active,
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: var(--bg);
+  /* Light mode stays flat; dark mode lets the body's static ambient wash show
+     through without covering data. */
+  background: transparent;
 }
 
 .app-content {
   flex: 1;
   min-width: 0;
   scroll-margin-top: 7rem;
+  background: transparent;
 }
 .app-notice {
   padding: 0.75rem 1.75rem 0;
@@ -2365,10 +2368,15 @@ button:not(:disabled):active,
   *,
   *::before,
   *::after {
-    animation-duration: 0s;
-    animation-iteration-count: 1;
-    transition-duration: 0s;
-    scroll-behavior: auto;
+    /* The motion layer below declares more-specific, later animation and
+       transition rules. !important keeps this guard winning the cascade while
+       a 0s duration with fill-mode still lands every entrance at its final
+       frame (the power line needs that frame to stay visible). */
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
   }
   .spinner {
     animation: none;
@@ -2871,7 +2879,7 @@ button:not(:disabled):active,
 }
 
 .app-content {
-  background: var(--bg);
+  background: transparent;
 }
 
 .overview {
@@ -7113,14 +7121,24 @@ button.ledger-item:focus-visible {
 }
 
 .value-flash {
-  animation: value-flash 700ms var(--ease-out);
+  animation: value-flash var(--dur-flash) var(--ease-out);
 }
 
 /* Route crossfade (View Transitions API; unsupported browsers just swap). */
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation-duration: 200ms;
+  animation-duration: var(--dur-theme);
 }
+
+/* Named elements morph between routes instead of only crossfading the page. */
+::view-transition-group(ledger-total),
+::view-transition-group(trend-chart),
+::view-transition-group(composition-chart) {
+  animation-duration: var(--dur-morph);
+  animation-timing-function: var(--ease-out);
+}
+.trend-panel { view-transition-name: trend-chart; }
+.composition-panel { view-transition-name: composition-chart; }
 
 /* ---------- ledger delta chips ---------- */
 .ledger-delta.up,
@@ -7163,8 +7181,8 @@ button.ledger-item:focus-visible {
   background: var(--accent-dim);
   pointer-events: none;
   transition:
-    transform 220ms cubic-bezier(0.34, 1.32, 0.64, 1),
-    width 220ms cubic-bezier(0.34, 1.32, 0.64, 1);
+    transform var(--dur-theme) cubic-bezier(0.34, 1.32, 0.64, 1),
+    width var(--dur-theme) cubic-bezier(0.34, 1.32, 0.64, 1);
 }
 .segmented-control button.active {
   background: transparent;
@@ -7178,15 +7196,15 @@ button.ledger-item:focus-visible {
 /* ---------- trend: entrance, crosshair, focus dim, reference line ---------- */
 .trend-col .fill {
   transform-origin: bottom;
-  animation: bar-grow 420ms var(--ease-out) backwards;
-  animation-delay: calc(var(--i, 0) * 16ms);
+  animation: bar-grow var(--dur-enter) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * var(--stagger-bar));
   transition:
-    height 240ms cubic-bezier(0.34, 1.32, 0.64, 1),
+    height var(--dur-morph) cubic-bezier(0.34, 1.32, 0.64, 1),
     opacity var(--motion),
     filter var(--motion);
 }
 .trend-col.today-flash .fill {
-  animation: today-pulse 700ms var(--ease-out);
+  animation: today-pulse var(--dur-flash) var(--ease-out);
 }
 .trend-col.hover::before,
 .trend-col:focus-visible::before {
@@ -7246,9 +7264,9 @@ button.ledger-item:focus-visible {
 /* ---------- histogram: entrance, percentile marks, cumulative toggle ---------- */
 .hist .hb-bar > i {
   transform-origin: bottom;
-  animation: bar-grow 380ms var(--ease-out) backwards;
-  animation-delay: calc(var(--i, 0) * 10ms);
-  transition: height 240ms cubic-bezier(0.34, 1.32, 0.64, 1);
+  animation: bar-grow var(--dur-enter) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * var(--stagger-hist));
+  transition: height var(--dur-morph) cubic-bezier(0.34, 1.32, 0.64, 1);
 }
 .hist .hb {
   overflow: visible;
@@ -7312,10 +7330,10 @@ button.ledger-item:focus-visible {
 .comp-bar > i,
 .rail-rank-bar > i,
 .power-load-fill {
-  transition: width 260ms var(--ease-out);
+  transition: width var(--dur-morph) var(--ease-out);
 }
 .power-energy-seg {
-  transition: flex-grow 300ms var(--ease-out);
+  transition: flex-grow var(--dur-morph) var(--ease-out);
 }
 /* 段内白字要过 4.5:1：浅色的蓝/紫底压暗一档（色相不变，图例点保持原色）。 */
 .power-energy-seg.cpu {
@@ -7366,7 +7384,7 @@ button.rail-rank:hover {
 .power-line-main {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
-  animation: line-draw 900ms var(--ease-in-out) forwards;
+  animation: line-draw var(--dur-draw) var(--ease-in-out) forwards;
 }
 .power-gauge {
   display: block;
@@ -7386,7 +7404,7 @@ button.rail-rank:hover {
   stroke: var(--accent);
   stroke-width: 8;
   stroke-linecap: round;
-  transition: stroke-dasharray 420ms var(--ease-out);
+  transition: stroke-dasharray var(--dur-enter) var(--ease-out);
 }
 .power-gauge-peak {
   stroke: var(--chart-orange);
@@ -7412,3 +7430,352 @@ button.rail-rank:hover {
 .theme-toggle:hover .icon {
   transform: rotate(18deg);
 }
+
+/* ==========================================================================
+   Data-forward modernization layer
+   Everything below resolves through the canonical :root tokens. No glows,
+   remote fonts, or perpetual animation: motion stays event-driven and the
+   reduced-motion guard above wins the cascade.
+   ========================================================================== */
+
+/* ---------- theme switch: one-shot color transition + icon morph ---------- */
+.theme-crossfade .app-header,
+.theme-crossfade .app-footer,
+.theme-crossfade .chart-card,
+.theme-crossfade .ledger,
+.theme-crossfade .state-panel,
+.theme-crossfade .rail-panel,
+.theme-crossfade .session-main,
+.theme-crossfade .detail-section {
+  transition:
+    background-color var(--dur-theme) var(--ease-out),
+    border-color var(--dur-theme) var(--ease-out),
+    color var(--dur-theme) var(--ease-out),
+    box-shadow var(--dur-theme) var(--ease-out);
+}
+@keyframes theme-icon-in {
+  from {
+    opacity: 0;
+    transform: rotate(-40deg) scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0) scale(1);
+  }
+}
+.theme-toggle .icon {
+  animation: theme-icon-in var(--dur-theme) var(--ease-out);
+}
+
+/* ---------- reserved loading geometry (no layout shift) ---------- */
+.loading-reserve {
+  display: grid;
+  gap: 14px;
+  animation: none;
+}
+.loading-reserve .reserve-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  min-height: 96px;
+  padding: 1px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--border);
+}
+.loading-reserve .reserve-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 14px;
+}
+.loading-reserve .reserve-cell {
+  min-height: 96px;
+  border-radius: calc(var(--radius) - 1px);
+  background: var(--bg-raised);
+}
+.loading-reserve .reserve-panel {
+  min-height: 240px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.loading-reserve .reserve-line {
+  height: 10px;
+  margin: 14px;
+  border-radius: 5px;
+  background: var(--bg-inset);
+}
+.loading-reserve .reserve-line.short { width: 38%; }
+.loading-reserve .reserve-line.medium { width: 64%; }
+.loading-reserve .reserve-block {
+  height: 120px;
+  margin: 14px;
+  border-radius: 8px;
+  background: var(--bg-inset);
+}
+@media (max-width: 1180px) {
+  .loading-reserve .reserve-panels { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 780px) {
+  .loading-reserve .reserve-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---------- headline hero: one primary reading, one shape ---------- */
+.ledger-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0 0 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow);
+  view-transition-name: ledger-total;
+}
+.ledger-hero-copy { min-width: 0; }
+.ledger-hero-label {
+  display: block;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.09em;
+}
+.ledger-hero-value {
+  display: block;
+  margin-top: 2px;
+  color: var(--accent);
+  font-family: var(--display);
+  font-size: clamp(30px, 3.2vw, 42px);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+}
+.ledger-hero-value .ledger-unit {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.ledger-hero-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.ledger-hero-spark {
+  flex: 0 0 auto;
+  width: clamp(140px, 20vw, 240px);
+  height: 64px;
+}
+.hero-spark-area { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
+.hero-spark-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: line-draw var(--dur-draw) var(--ease-in-out) forwards;
+}
+.hero-spark-today { fill: var(--accent); }
+@media (max-width: 620px) {
+  .ledger-hero { flex-direction: column; align-items: flex-start; }
+  .ledger-hero-spark { width: 100%; }
+}
+
+/* ---------- composition donut ---------- */
+.donut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.donut {
+  flex: 0 0 auto;
+  width: 128px;
+  height: 128px;
+  view-transition-name: composition-donut;
+}
+.donut-track {
+  fill: none;
+  stroke: var(--bg-inset);
+  stroke-width: 14;
+}
+.donut-seg {
+  fill: none;
+  stroke-width: 14;
+  stroke-linecap: butt;
+  transition: stroke-dasharray var(--dur-morph) var(--ease-out);
+}
+.donut-center-value {
+  fill: var(--text);
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 650;
+  text-anchor: middle;
+  font-variant-numeric: tabular-nums;
+}
+.donut-center-label {
+  fill: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-anchor: middle;
+}
+.donut-legend {
+  display: grid;
+  gap: 8px;
+  min-width: 130px;
+  margin: 0;
+}
+.donut-legend div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.donut-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
+}
+.donut-legend b {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* ---------- trend overlay + mode switch ---------- */
+.trend-mode {
+  padding: 0 8px;
+  min-height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background var(--motion), color var(--motion), border-color var(--motion);
+}
+.trend-mode:hover { color: var(--text); border-color: var(--border-hot); }
+.trend-mode[aria-pressed="true"] {
+  background: var(--accent-dim);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+}
+.trend-overlay {
+  position: absolute;
+  top: 8px;
+  left: 44px;
+  right: 0;
+  height: 178px;
+  pointer-events: none;
+  z-index: 2;
+}
+.trend-overlay polyline {
+  fill: none;
+  stroke: var(--chart-violet);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: line-draw var(--dur-draw) var(--ease-in-out) forwards;
+}
+
+/* ---------- heat calendar ---------- */
+.heat-calendar {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.heat-title {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+.heat-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  max-width: 260px;
+}
+.heat-cell {
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-inset);
+  transition: background var(--dur-morph) var(--ease-out), transform var(--motion);
+}
+.heat-cell[data-level="1"] { background: color-mix(in srgb, var(--accent) 25%, var(--bg-inset)); }
+.heat-cell[data-level="2"] { background: color-mix(in srgb, var(--accent) 45%, var(--bg-inset)); }
+.heat-cell[data-level="3"] { background: color-mix(in srgb, var(--accent) 68%, var(--bg-inset)); }
+.heat-cell[data-level="4"] { background: var(--accent); }
+.heat-cell[data-date]:hover { transform: scale(1.18); }
+.heat-cell.empty { border-color: transparent; background: transparent; }
+.heat-scale {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 9.5px;
+}
+.heat-scale i { width: 10px; height: 10px; border-radius: 2px; border: 1px solid var(--border); }
+
+/* ---------- cross-panel highlight ---------- */
+.overview[data-focused-slice] .rank-row:not(.focused),
+.overview[data-focused-slice] .comp-row:not(.focused) {
+  opacity: 0.42;
+  transition: opacity var(--dur-morph) var(--ease-out);
+}
+.rank-row.focused,
+.comp-row.focused {
+  opacity: 1;
+  transition: opacity var(--dur-morph) var(--ease-out);
+}
+.focus-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+/* ---------- micro-interactions on previously static surfaces ---------- */
+.mt-bar > i,
+.context-meter-bar > span,
+.rate-gauge-fill,
+.tree-bar-fill,
+.waste-bar > i,
+.headline-split-bar > i,
+.trend-overlay polyline {
+  transition: width var(--dur-morph) var(--ease-out), stroke-dasharray var(--dur-morph) var(--ease-out);
+}
+.turn-sparkline polyline {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: line-draw var(--dur-draw) var(--ease-in-out) forwards;
+}
+.model-table tbody tr {
+  transition: background var(--motion);
+}
+.model-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+.context-meter-bar > span { transition: width var(--dur-morph) var(--ease-out); }
+.donut-wrap + .comp-rows { margin-top: 4px; }

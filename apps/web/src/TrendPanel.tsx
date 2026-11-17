@@ -21,6 +21,12 @@ import { ModelFilterSelect } from "./ModelFilterSelect";
 import { useModelFilteredOverview } from "./useModelFilteredOverview";
 import { useFlashOnChange } from "./motion";
 import { Panel, SegmentedControl, srTable } from "./ui";
+import {
+  heatCalendar,
+  metricSeries,
+  trendOverlay,
+  type TrendMode,
+} from "./visual-metrics";
 
 type Props = {
   overview: Overview;
@@ -28,12 +34,19 @@ type Props = {
   onChartMetric: (metric: ChartMetric) => void;
   filterScope: string;
   fetchOverviewForModel: (model: string) => Promise<Overview>;
+  onFocusSlice: (key: string | null) => void;
 };
 
 const METRICS: { id: ChartMetric; label: string }[] = [
   { id: "tokens", label: "tokens" },
   { id: "credits", label: "credits" },
   { id: "usd", label: "USD" },
+];
+
+const MODES: Array<{ id: TrendMode; label: string }> = [
+  { id: "daily", label: "每日" },
+  { id: "cumulative", label: "累计" },
+  { id: "moving", label: "7 日均" },
 ];
 
 /**
@@ -47,6 +60,7 @@ export function TrendPanel({
   onChartMetric,
   filterScope,
   fetchOverviewForModel,
+  onFocusSlice,
 }: Props) {
   const {
     model,
@@ -57,6 +71,7 @@ export function TrendPanel({
   } = useModelFilteredOverview(baseOverview, filterScope, fetchOverviewForModel);
   const [hovered, setHovered] = useState<string | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState({ left: 8, top: 8 });
+  const [mode, setMode] = useState<TrendMode>("daily");
   const metric = chartMetric;
   const max = chartMax(overview.days.map((day) => dayMetricValue(day, metric)));
   const ticks = niceChartTicks(max);
@@ -77,6 +92,9 @@ export function TrendPanel({
       : null;
   const todayFlash = useFlashOnChange(todayValue);
   const selectedMetric = metric;
+  const points = metricSeries(overview.days, metric);
+  const overlay = mode === "daily" ? null : trendOverlay(points, mode);
+  const calendar = heatCalendar(overview.days, metric);
   const label = (value: number | null) =>
     value == null ? "未定价" : formatChartNumber(value, metric);
   const unfocusTimer = useRef<number | null>(null);
@@ -115,7 +133,7 @@ export function TrendPanel({
   }
 
   return (
-    <Panel role="region" className="chart-card" data-testid="trend-chart" aria-label="每日支出趋势">
+    <Panel role="region" className="chart-card trend-panel" data-testid="trend-chart" aria-label="每日支出趋势">
       <div className="chart-head">
         <div>
           <h3 className="chart-title">每日支出趋势</h3>
@@ -139,6 +157,19 @@ export function TrendPanel({
             options={METRICS}
             onChange={onChartMetric}
           />
+          <div className="trend-modes" role="group" aria-label="趋势叠加方式">
+            {MODES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="trend-mode"
+                aria-pressed={mode === item.id}
+                onClick={() => setMode(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       {error ? (
@@ -152,6 +183,24 @@ export function TrendPanel({
         <>
           <div className="chart-body trend" onScroll={positionTooltip}>
             <div className="trend-content" style={{ minWidth: trendContentMinWidth(overview.days.length) }}>
+              {overlay && (
+                <svg
+                  className="trend-overlay"
+                  viewBox={`0 0 ${Math.max(1, overlay.length)} 100`}
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <polyline
+                    pathLength={1}
+                    points={overlay
+                      .map((value, index) =>
+                        value == null ? null : `${index + 0.5},${Math.max(0, 100 - (100 * value) / Math.max(...overlay.filter((v): v is number => v != null), 1))}`,
+                      )
+                      .filter((point): point is string => point != null)
+                      .join(" ")}
+                  />
+                </svg>
+              )}
               <div className="grid">
                 {ticks.map((value) => (
                   <span
@@ -299,7 +348,36 @@ export function TrendPanel({
                 窗口均值 {label(average)}
               </span>
             )}
+            {mode !== "daily" && (
+              <span>
+                <i style={{ display: "inline-block", width: 14, height: 0, borderTop: "2px solid var(--chart-violet)", marginRight: 4, verticalAlign: "3px" }} />
+                {mode === "cumulative" ? "累计用量" : "7 日移动均值"}
+              </span>
+            )}
           </div>
+          {calendar.length > 0 && (
+            <div className="heat-calendar">
+              <p className="heat-title">用量日历（按日强度）</p>
+              <div className="heat-grid" role="group" aria-label="每日用量强度日历">
+                {calendar.map((cell, index) => (
+                  <span
+                    key={cell.date ?? `blank-${index}`}
+                    className={`heat-cell${cell.date ? "" : " empty"}`}
+                    data-level={cell.level}
+                    data-date={cell.date ?? undefined}
+                    title={cell.date ? `${cell.date} · ${label(cell.value)}` : undefined}
+                  />
+                ))}
+              </div>
+              <div className="heat-scale">
+                <span>低</span>
+                {[0, 1, 2, 3, 4].map((level) => (
+                  <i key={level} className={`heat-cell`} data-level={level} style={{ border: 0 }} />
+                ))}
+                <span>高</span>
+              </div>
+            </div>
+          )}
           {srTable(
             "每日支出趋势",
             ["日期", metric, "账本 / 解析异常", "未定价 Token"],
