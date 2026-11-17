@@ -49,6 +49,10 @@ export function Histogram({
     p50 != null && p95 != null
       ? `，p50 落在 ${data.labels[p50]}，p95 落在 ${data.labels[p95]}`
       : "";
+  const headline =
+    p50 != null && p95 != null
+      ? `p50 ${data.labels[p50]} · p95 ${data.labels[p95]}`
+      : null;
 
   const tipFor = (index: number) => {
     const label = data.labels[index] ?? "";
@@ -92,6 +96,9 @@ export function Histogram({
       onKeyDown={handleKeyDown}
       onBlur={() => setActiveIndex(null)}
     >
+      {headline && (
+        <p className="hist-percentile" aria-hidden="true">{headline}</p>
+      )}
       <div className="hist-bars">
         {data.labels.map((label, index) => {
           const count = data.counts[index] ?? 0;

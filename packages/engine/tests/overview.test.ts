@@ -872,6 +872,91 @@ describe("buildOverview", () => {
     expect(filtered.performance.avgTtftMs).toBe(1000);
   });
 
+  it("includes child request timings and drops task samples outside the window", () => {
+    const child = session({
+      id: "child",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      turns: [
+        turn({
+          id: "child-turn",
+          bucket: "code",
+          raw: 200,
+          startedAt: "2026-08-27T10:00:02.000Z",
+          endedAt: "2026-08-27T10:00:03.000Z",
+          requestPerformance: {
+            ttftMs: 400,
+            durationMs: 1000,
+            outputTokensPerSecond: 80,
+            speedSource: "recorded",
+          },
+        }),
+      ],
+    });
+    const root = session({
+      id: "root",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      turns: [
+        turn({
+          id: "root-turn",
+          bucket: "code",
+          raw: 100,
+          startedAt: "2026-08-27T10:00:00.000Z",
+          endedAt: "2026-08-27T10:00:01.000Z",
+          requestPerformance: {
+            ttftMs: 200,
+            durationMs: 1000,
+            outputTokensPerSecond: 40,
+            speedSource: "recorded",
+          },
+        }),
+      ],
+      children: [child],
+    });
+
+    const overview = buildOverview([root], {
+      watchPath: "/tmp",
+      now: "2026-08-28T12:00:00.000Z",
+    });
+    expect(overview.performance.ttftSampleCount).toBe(2);
+    expect(overview.performance.avgTtftMs).toBe(300);
+    expect(overview.performance.basis).toBe("request");
+
+    const ranged = session({
+      id: "tasks",
+      startedAt: "2026-08-20T10:00:00.000Z",
+      turns: [],
+      taskTimings: [
+        {
+          id: "old",
+          startedAt: "2026-08-20T10:00:00.000Z",
+          endedAt: "2026-08-20T10:00:02.000Z",
+          durationMs: 2000,
+          ttftMs: 100,
+          outputTokens: 20,
+        },
+        {
+          id: "recent",
+          startedAt: "2026-08-27T10:00:00.000Z",
+          endedAt: "2026-08-27T10:00:04.000Z",
+          durationMs: 4000,
+          ttftMs: 900,
+          outputTokens: 40,
+        },
+      ],
+    });
+    const windowed = buildOverview([ranged], {
+      watchPath: "/tmp",
+      now: "2026-08-28T12:00:00.000Z",
+      sinceMs: Date.parse("2026-08-25T00:00:00.000Z"),
+    });
+    expect(windowed.performance).toMatchObject({
+      taskCount: 1,
+      ttftSampleCount: 1,
+      avgTtftMs: 900,
+      basis: "task",
+    });
+  });
+
   it("scopes quality warnings to sessions that match the model filter", () => {
     const matching = session({
       id: "match",

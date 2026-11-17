@@ -202,7 +202,14 @@ export function CompositionPanel({
       )}
       {focusedSlice && (
         <p className="focus-hint" role="status">
-          行为排行正在聚焦「{SLICE_META[focusedSlice as keyof typeof SLICE_META]?.label ?? focusedSlice}」；当前环图显示 Token 构成，不受分类筛选影响。
+          {(() => {
+            const slice = overview.slices.find((item) => item.key === focusedSlice);
+            const label = SLICE_META[focusedSlice as keyof typeof SLICE_META]?.label ?? focusedSlice;
+            const share = total > 0 && slice ? formatPercent((100 * slice.raw) / total) : null;
+            return share
+              ? `行为「${label}」${formatExactTokens(slice!.raw)} tokens，占总量 ${share}。环图仍是全部 Token 构成，不受该分类筛选。`
+              : `行为排行正在聚焦「${label}」；当前环图显示 Token 构成，不受分类筛选影响。`;
+          })()}
         </p>
       )}
       <div className="comp-rows">

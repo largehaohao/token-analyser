@@ -34,6 +34,8 @@ import { RelativeTime } from "./RelativeTime";
 import { treeAppearance } from "./buckets";
 import { DetailSection } from "./DetailSection";
 import { PerformanceMetrics } from "./PerformanceMetrics";
+import { formatAnimatedCost } from "./LedgerStrip";
+import { useAnimatedNumber, useFlashOnChange } from "./motion";
 import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
 import { BareButton, Panel } from "./ui";
 
@@ -139,6 +141,15 @@ export function SessionView({
     snapshot.cost.raw > 0
       ? formatPercent((100 * pricedRaw) / snapshot.cost.raw)
       : "100.0%";
+  const animatedTotal = useAnimatedNumber(snapshot.cost.raw === 0 && snapshot.cost.unmeasured ? null : (
+    unit === "tokens" ? snapshot.cost.raw : unit === "credits" ? snapshot.cost.credits : snapshot.cost.usd
+  ));
+  const animatedWaste = useAnimatedNumber(
+    unit === "tokens" ? snapshot.waste.raw : unit === "credits" ? snapshot.waste.credits : snapshot.waste.usd,
+  );
+  const animatedHit = useAnimatedNumber(hit == null ? null : 100 * hit);
+  const totalFlash = useFlashOnChange(snapshot.cost.raw);
+  const wasteFlash = useFlashOnChange(snapshot.waste.raw);
 
   function handleSuggestionClick(ids: string[]) {
     const target = suggestionTarget(snapshot.tree, ids);
@@ -212,12 +223,16 @@ export function SessionView({
                 {unit === "tokens" ? "总用量" : "预估总费用"}
               </span>
               <span
-                className="headline-value"
+                className={`headline-value${totalFlash ? " value-flash" : ""}`}
                 title={formatCostTitle(snapshot.cost, unit)}
               >
                 {unit === "tokens"
-                  ? formatCostTokens(snapshot.cost)
-                  : formatCost(snapshot.cost, unit)}
+                  ? formatCostTokens(
+                      animatedTotal == null
+                        ? snapshot.cost
+                        : { ...snapshot.cost, raw: Math.round(animatedTotal) },
+                    )
+                  : formatAnimatedCost(snapshot.cost, unit, animatedTotal)}
               </span>
               <small>
                 {formatUnitSuffix(unit)} · {turns.length.toLocaleString("en-US")} 轮调用
@@ -253,20 +268,24 @@ export function SessionView({
           <div className="headline-row stat">
             <span className="headline-label">疑似可优化</span>
             <span
-              className="headline-value waste"
+              className={`headline-value waste${wasteFlash ? " value-flash" : ""}`}
               data-testid="waste-headline"
               title={formatCostTitle(snapshot.waste, unit)}
             >
               {unit === "tokens"
-                ? formatCostTokens(snapshot.waste)
-                : formatCost(snapshot.waste, unit)}
+                ? formatCostTokens(
+                    animatedWaste == null
+                      ? snapshot.waste
+                      : { ...snapshot.waste, raw: Math.round(animatedWaste) },
+                  )
+                : formatAnimatedCost(snapshot.waste, unit, animatedWaste)}
             </span>
             <small>{formatUnitSuffix(unit)} · 占比 {unitWaste}</small>
           </div>
           <div className="headline-row stat">
             <span className="headline-label">缓存命中</span>
             <span className="headline-value">
-              {hit != null ? formatPercent(100 * hit) : "—"}
+              {animatedHit == null ? "—" : formatPercent(animatedHit)}
             </span>
             <small>按输入 token 计算</small>
           </div>
@@ -299,25 +318,25 @@ export function SessionView({
         <MixBar
           className="headline-mix"
           testId="headline-mix"
-          label={`浪费 ${tokenWaste}（按 token）`}
+          label={`疑似可优化 ${tokenWaste}（按 token）`}
           segments={[
             {
               key: "useful",
-              label: "有效",
+              label: "其余",
               value: Math.max(0, snapshot.cost.raw - snapshot.waste.raw),
               className: "useful",
             },
             {
               key: "waste",
-              label: "浪费",
+              label: "疑似可优化",
               value: snapshot.waste.raw,
               className: "waste",
             },
           ]}
         />
         <div className="headline-legend">
-          <span className="swatch useful" /> 有效
-          <span className="swatch waste" /> 浪费 {unitWaste}
+          <span className="swatch useful" /> 其余
+          <span className="swatch waste" /> 疑似可优化 {unitWaste}
           {unit !== "tokens" && unitWaste !== tokenWaste && (
             <span className="legend-note">token {tokenWaste}</span>
           )}

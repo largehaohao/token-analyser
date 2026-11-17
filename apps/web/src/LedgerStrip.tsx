@@ -1,6 +1,7 @@
 import type { Cost, Overview } from "./api";
 import {
   cacheHitRatio,
+  comparisonText,
   companionMoneyUnit,
   costValue,
   formatCompactTokens,
@@ -25,11 +26,6 @@ type Props = {
 function share(part: number, total: number): number | null {
   if (!(total > 0) || !Number.isFinite(part)) return null;
   return (100 * part) / total;
-}
-
-function deltaText(delta: number, label: string): string {
-  const arrow = delta > 0 ? "▲" : "▼";
-  return `较${label} ${arrow} ${Math.abs(delta).toFixed(0)}%`;
 }
 
 /** Keeps the unit's exact rounding rules while the headline count rolls. */
@@ -63,12 +59,21 @@ export function LedgerStrip({
 }: Props) {
   const current = costValue(overview.cost, unit);
   const prev = previous ? costValue(previous.cost, unit) : null;
-  const delta =
-    prev != null && prev > 0 && current != null
-      ? ((current - prev) / prev) * 100
-      : null;
   const cache = cacheHitRatio(overview.cost);
   const comparisonLabel = previousLabel ?? "上一周期";
+  const comparison = comparisonText(
+    current,
+    prev,
+    comparisonLabel,
+    (value) => formatCost(
+      unit === "credits"
+        ? { ...overview.cost, credits: value }
+        : unit === "usd"
+          ? { ...overview.cost, usd: value }
+          : { ...overview.cost, raw: value },
+      unit,
+    ),
+  );
   const moneyUnit = unit === "tokens" && overview.cost.credits == null && overview.cost.usd != null
     ? "usd" : companionMoneyUnit(unit);
 
@@ -96,7 +101,7 @@ export function LedgerStrip({
           <span className="ledger-unit"> {formatUnitSuffix(unit)}</span>
         </span>
         <span
-          className={`ledger-delta ${delta == null ? "" : delta > 0 ? "up" : "down"}`}
+          className={`ledger-delta ${comparison.direction}`}
           title={
             prev == null
               ? "该统计范围没有可比较的上一周期"
@@ -110,9 +115,7 @@ export function LedgerStrip({
                 }`
           }
         >
-          {delta == null
-            ? `较${comparisonLabel} —`
-            : deltaText(delta, comparisonLabel)}
+          {comparison.text}
         </span>
       </div>
       {unit === "tokens" && (

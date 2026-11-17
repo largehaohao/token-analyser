@@ -252,6 +252,13 @@ function hasTurnInRange(
 ): boolean {
   for (const turn of session.turns)
     if (turnInRange(turn, sinceMs, untilMs)) return true;
+  for (const timing of session.taskTimings ?? []) {
+    const ended = parseTimeMs(timing.endedAt);
+    if (ended == null) continue;
+    if (sinceMs != null && ended < sinceMs) continue;
+    if (untilMs != null && ended >= untilMs) continue;
+    return true;
+  }
   return session.children.some((child) =>
     hasTurnInRange(child, sinceMs, untilMs),
   );
@@ -262,11 +269,15 @@ function inRange(
   sinceMs?: number,
   untilMs?: number,
 ): boolean {
-  const t = sessionTimeMs(session);
-  if (sinceMs != null && !(t != null && t >= sinceMs)) return false;
+  if (sinceMs != null) {
+    const t = sessionTimeMs(session);
+    const activeSince = t != null && t >= sinceMs;
+    if (!activeSince && !hasTurnInRange(session, sinceMs, untilMs)) return false;
+  }
   // A session that stayed active across the upper bound still belongs to the
   // earlier window; its turns are filtered separately.
   if (untilMs != null) {
+    const t = sessionTimeMs(session);
     const endedBefore = t != null && t < untilMs;
     if (!endedBefore && !hasTurnInRange(session, undefined, untilMs))
       return false;
@@ -528,9 +539,11 @@ export function buildOverview(
         basis: "request" as const,
       }));
     }
-    const hasTasks = collectTaskTimings(session).length > 0;
+    const taskSamples = collectTaskTimings(session);
+    const hasTasks = taskSamples.length > 0;
     // Sources without agent-task windows time a single model request.
-    return (hasTasks ? collectTaskTimings(session) : requestTimings(session.turns))
+    // Request timing includes child sessions; cost and duration already do.
+    return (hasTasks ? taskSamples : requestTimings(flattenTurns(session)))
       .map((sample) => ({ ...sample, basis: hasTasks ? ("task" as const) : ("request" as const) }))
       .filter((sample) =>
         (opts.sinceMs == null || (sample.endedAt != null && Date.parse(sample.endedAt) >= opts.sinceMs)) &&

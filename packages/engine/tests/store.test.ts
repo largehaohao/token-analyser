@@ -149,7 +149,7 @@ describe("SessionStore", () => {
     }
   });
 
-  it("re-reads the final events when a live file becomes historical", () => {
+  it("re-reads the final events when a live file becomes historical", async () => {
     const waitPoll = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8");
     const [first, ...rest] = waitPoll.trimEnd().split("\n");
     const dir = mkdtempSync(path.join(tmpdir(), "store-live-final-"));
@@ -162,6 +162,9 @@ describe("SessionStore", () => {
     const old = new Date(Date.now() - 180_000);
     utimesSync(filePath, old, old);
 
+    const firstRead = store.get("s-poll");
+    expect(firstRead?.live).toBe(false);
+    await store.whenLiveReingestSettled();
     const snapshot = store.get("s-poll");
     expect(snapshot?.live).toBe(false);
     expect(snapshot?.turns.length).toBeGreaterThan(0);

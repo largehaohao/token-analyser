@@ -3,12 +3,14 @@ import type { SessionListItem } from "./api";
 import { MixBar } from "./MixBar";
 import {
   activityTimestamp,
+  cacheHitRatio,
   formatCompactTokens,
   formatCostTokens,
   sourceLabel,
   usageNote,
   formatCost,
   formatCostTitle,
+  formatPercent,
   formatRelativeTime,
   formatAbsoluteTime,
   unpricedNote,
@@ -382,6 +384,7 @@ export function SessionList({
               const activity = activityTimestamp(s);
               const tokenWaste = wasteShare(s.waste, s.cost, "tokens");
               const unitWaste = wasteShare(s.waste, s.cost, unit);
+              const hit = cacheHitRatio(s.cost);
               return (
                 <li
                   key={s.id}
@@ -434,6 +437,11 @@ export function SessionList({
                             ? `${formatCostTokens(s.cost)} tokens`
                             : formatCost(s.cost, unit)}
                         </span>
+                        {hit != null && (
+                          <span className="cache-share" title="已缓存输入 ÷ 全部输入">
+                            缓存 {formatPercent(100 * hit)}
+                          </span>
+                        )}
                         {(s.waste.raw > 0 || selectedId === s.id) && (
                           <span
                             className="waste-share"
@@ -484,17 +492,17 @@ export function SessionList({
                       {(s.waste.raw > 0 || selectedId === s.id) && (
                         <MixBar
                           className="waste-bar"
-                          label={`浪费 ${tokenWaste}（按 token）`}
+                          label={`疑似可优化 ${tokenWaste}（按 token）`}
                           segments={[
                             {
                               key: "useful",
-                              label: "有效",
+                              label: "其余",
                               value: Math.max(0, s.cost.raw - s.waste.raw),
                               className: "useful",
                             },
                             {
                               key: "waste",
-                              label: "浪费",
+                              label: "疑似可优化",
                               value: s.waste.raw,
                               className: "waste",
                             },

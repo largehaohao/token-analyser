@@ -108,10 +108,13 @@ export function TrendPanel({
       <div className="chart-head">
         <div>
           <h3 className="chart-title">每日支出趋势</h3>
-          <p className="chart-desc">
-            柱高为已记录用量，橙色表示含账本警告或解析错误的用量；斜纹表示该日有未定价 Token。
-            虚线为窗口均值，圆点标记今天，周末列有底色。聚焦任意一天可读出当日明细，Esc 关闭。
-          </p>
+          <ul className="trend-legend" aria-label="趋势图图例">
+            <li><i className="swatch uncached" /> 已记录用量</li>
+            <li><i className="swatch flag" /> 账本或解析异常</li>
+            <li><i className="swatch unpriced" /> 含未定价 Token</li>
+            <li><i className="swatch avg" /> 窗口均值</li>
+            <li><i className="swatch today" /> 今天</li>
+          </ul>
         </div>
         <div className="chart-head-controls">
           <ModelFilterSelect

@@ -260,7 +260,6 @@ export type FileCacheRow = {
   cache_key: string;
   version: number;
   path: string;
-  snapshot_json: string;
 };
 
 export function readCacheRow(
@@ -312,7 +311,7 @@ export function writeCacheRow(
 export function listCacheRows(home?: string): FileCacheRow[] {
   try {
     return openDb(home)
-      .prepare("SELECT cache_key, version, path, snapshot_json FROM file_cache")
+      .prepare("SELECT cache_key, version, path FROM file_cache")
       .all() as FileCacheRow[];
   } catch {
     return [];

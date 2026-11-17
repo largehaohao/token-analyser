@@ -179,6 +179,33 @@ export function wasteShare(
   return formatPercent((100 * wasteValue) / totalValue);
 }
 
+/**
+ * Equal-window comparison. A change that rounds to 0% is not a direction;
+ * the absolute difference stays visible so a small move is not an arrow.
+ */
+export function comparisonText(
+  current: number | null,
+  previous: number | null,
+  label: string,
+  formatAbsolute: (value: number) => string,
+): { text: string; direction: "up" | "down" | "flat" } {
+  if (current == null || previous == null || !(previous > 0)) {
+    return { text: `较${label} —`, direction: "flat" };
+  }
+  const delta = ((current - previous) / previous) * 100;
+  const rounded = Math.round(Math.abs(delta) * 10) / 10;
+  const absolute = formatAbsolute(Math.abs(current - previous));
+  if (rounded === 0) {
+    return { text: `较${label} 持平 · ${absolute}`, direction: "flat" };
+  }
+  const direction = delta > 0 ? "up" : "down";
+  const arrow = direction === "up" ? "▲" : "▼";
+  return {
+    text: `较${label} ${arrow} ${absolute}（${rounded.toFixed(1)}%）`,
+    direction,
+  };
+}
+
 export function cacheHitRatio(cost: Cost): number | null {
   const input = cost.uncached_input + cost.cached_input;
   if (input <= 0) return null;

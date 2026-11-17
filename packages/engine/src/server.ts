@@ -957,7 +957,6 @@ async function main(): Promise<void> {
   const ingestErrors: { id: string; reason: string }[] = [];
   /** Cursor state.vscdb paths deferred until after listen when dump is warm. */
   let deferredVscdb: string[] = [];
-  let dumpRestored = 0;
 
   const fixtureDir = process.env.FIXTURE_DIR;
   if (fixtureDir) {
@@ -979,7 +978,7 @@ async function main(): Promise<void> {
     // app is open — defer that re-parse until after the server is listening
     // when a dump already has Cursor sessions.
     const bootStarted = Date.now();
-    dumpRestored = store.loadDump();
+    const dumpRestored = store.loadDump();
     if (dumpRestored > 0) {
       console.log(`store dump restored ${dumpRestored} session(s)`);
     }
@@ -1053,17 +1052,15 @@ async function main(): Promise<void> {
   }
   console.log(`token-analyser engine listening on ${url}`);
 
-  if (!fixtureDir) {
-    if (deferredVscdb.length > 0 && dumpRestored > 0) {
-      console.log(
-        `skipping ${deferredVscdb.length} heavy source refresh; dump already has ${dumpRestored} session(s)`,
-      );
-    } else if (deferredVscdb.length > 0) {
+    if (!fixtureDir) {
+    if (deferredVscdb.length > 0) {
       const heavyFiles = deferredVscdb;
       const heavyStarted = Date.now();
-      // Wait for the first UI /sessions paint, then refresh one heavy file at a
-      // time so a 790MB state.vscdb parse cannot stall the HTTP event loop for
-      // the whole batch.
+      // Wait for the first UI /sessions paint, then check one heavy file at a
+      // time. Unchanged files return from their fingerprint; a parse cannot
+      // stall the HTTP event loop for the whole batch. A warm dump is not a
+      // reason to skip this: files committed while the engine was stopped
+      // would otherwise stay out of memory until the next watcher event.
       const refreshNext = (index: number): void => {
         if (index >= heavyFiles.length) {
           try {

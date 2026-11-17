@@ -9,7 +9,9 @@ import { ChartTooltip, useChartTooltip } from "./ChartTooltip";
 import { localDateString } from "./chart-metric";
 import {
   costValue,
+  comparisonText,
   formatCostTitle,
+  formatCost,
   formatUnitSuffix,
   type CostUnit,
 } from "./format";
@@ -19,26 +21,53 @@ import { metricSeries } from "./visual-metrics";
 import { BareButton, Icon } from "./ui";
 
 const WIDTH = 240;
-const HEIGHT = 64;
+const HEIGHT = 88;
 const PAD = 3;
 
-function sparkPoints(values: number[], max: number): string[] {
+function sparkPoints(values: Array<number | null>, max: number): Array<string | null> {
   const innerW = WIDTH - PAD * 2;
   const innerH = HEIGHT - PAD * 2;
   return values.map((value, index) => {
+    if (value == null) return null;
     const x = PAD + (index / Math.max(1, values.length - 1)) * innerW;
     const y = HEIGHT - PAD - (value / max) * innerH;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
 }
 
-function sparkShape(values: number[], max: number) {
-  if (values.length < 2) return null;
+function sparkRuns(points: Array<string | null>): string[] {
+  const runs: string[] = [];
+  let current: string[] = [];
+  const flush = () => {
+    if (current.length >= 2) runs.push(current.join(" "));
+    current = [];
+  };
+  for (const point of points) {
+    if (point == null) flush();
+    else current.push(point);
+  }
+  flush();
+  return runs;
+}
+
+function sparkShape(values: Array<number | null>, max: number) {
+  const known = values.filter((value): value is number => value != null);
+  if (known.length < 2) return null;
   const points = sparkPoints(values, max);
-  const last = points[points.length - 1]!.split(",");
+  const runs = sparkRuns(points);
+  if (runs.length === 0) return null;
+  const lastKnown = [...points].reverse().find((point) => point != null)!;
+  const last = lastKnown.split(",");
+  const area = runs
+    .map((run) => {
+      const first = run.split(" ")[0]!.split(",")[0];
+      const end = run.split(" ").at(-1)!.split(",")[0];
+      return `${first},${HEIGHT - PAD} ${run} ${end},${HEIGHT - PAD}`;
+    })
+    .join(" ");
   return {
-    line: points.join(" "),
-    area: `${PAD},${HEIGHT - PAD} ${points.join(" ")} ${WIDTH - PAD},${HEIGHT - PAD}`,
+    lines: runs,
+    area,
     lastX: Number(last[0]),
     lastY: Number(last[1]),
   };
@@ -59,20 +88,35 @@ export function LedgerHero({
 }) {
   const current = costValue(overview.cost, unit);
   const prev = previous ? costValue(previous.cost, unit) : null;
-  const delta = prev != null && prev > 0 && current != null ? ((current - prev) / prev) * 100 : null;
+  const comparison = comparisonText(
+    current,
+    prev,
+    previousLabel ?? "上一周期",
+    (value) => formatCost(
+      unit === "credits"
+        ? { ...overview.cost, credits: value }
+        : unit === "usd"
+          ? { ...overview.cost, usd: value }
+          : { ...overview.cost, raw: value },
+      unit,
+    ),
+  );
   const animated = useAnimatedNumber(current);
   const flash = useFlashOnChange(overview.cost.raw);
   const today = localDateString(new Date());
-  const values = metricSeries(overview.days, unit).map((point) => point.value ?? 0);
+  const values = metricSeries(overview.days, unit).map((point) => point.value);
   const prevValues = previous
-    ? metricSeries(previous.days, unit).map((point) => point.value ?? 0)
+    ? metricSeries(previous.days, unit).map((point) => point.value)
     : null;
-  const max = Math.max(...values, ...(prevValues ?? []), 1);
-  const hasData = values.some((value) => value > 0);
+  const known = [...values, ...(prevValues ?? [])].filter(
+    (value): value is number => value != null,
+  );
+  const max = Math.max(...known, 1);
+  const hasData = known.some((value) => value > 0);
   const shape = hasData ? sparkShape(values, max) : null;
   const ghost =
-    prevValues && prevValues.length >= 2 && prevValues.some((value) => value > 0)
-      ? sparkPoints(prevValues, max).join(" ")
+    prevValues && prevValues.filter((value) => value != null).length >= 2
+      ? sparkRuns(sparkPoints(prevValues, max))
       : null;
   const dated = overview.days.filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day.date));
   const lastIsToday = dated.length > 0 && dated[dated.length - 1]!.date === today;
@@ -101,8 +145,9 @@ export function LedgerHero({
 
   const scrubDate = scrub != null ? overview.days[scrub]?.date : null;
   const scrubPoint = scrub != null ? sparkPoints(values, max)[scrub] : null;
-  const scrubX = scrubPoint?.split(",")[0];
-  const scrubY = scrubPoint?.split(",")[1];
+  const scrubX = scrubPoint ? scrubPoint.split(",")[0] : null;
+  const scrubY = scrubPoint ? scrubPoint.split(",")[1] : null;
+  const scrubValue = scrub != null ? values[scrub] : null;
 
   return (
     <section className="ledger-hero" data-testid="ledger-hero" aria-label="当前范围总用量">
@@ -116,10 +161,8 @@ export function LedgerHero({
           <span className="ledger-unit"> {formatUnitSuffix(unit)}</span>
         </span>
         <span className="ledger-hero-meta">
-          <span className={`ledger-delta ${delta == null ? "" : delta > 0 ? "up" : "down"}`}>
-            {delta == null
-              ? `较${previousLabel ?? "上一周期"} —`
-              : `较${previousLabel ?? "上一周期"} ${delta > 0 ? "▲" : "▼"} ${Math.abs(delta).toFixed(0)}%`}
+          <span className={`ledger-delta ${comparison.direction}`}>
+            {comparison.text}
           </span>
           <span>{overview.sessionCount.toLocaleString("en-US")} 个会话 · {overview.turnCount.toLocaleString("en-US")} 轮</span>
           <span>{overview.days.length} 天趋势</span>
@@ -150,8 +193,12 @@ export function LedgerHero({
             aria-hidden="true"
           >
             <polygon className="hero-spark-area" points={shape.area} />
-            {ghost && <polyline className="hero-spark-ghost" points={ghost} />}
-            <polyline className="hero-spark-line" points={shape.line} pathLength={1} />
+            {ghost?.map((run) => (
+              <polyline key={run} className="hero-spark-ghost" points={run} />
+            ))}
+            {shape.lines.map((run) => (
+              <polyline key={run} className="hero-spark-line" points={run} pathLength={1} />
+            ))}
             {scrubX != null && scrubY != null && (
               <g className="hero-spark-scrub">
                 <line x1={scrubX} y1={PAD} x2={scrubX} y2={HEIGHT - PAD} />
@@ -175,9 +222,11 @@ export function LedgerHero({
               onMouseLeave={() => scrubTo(null)}
             >
               <b>{scrubDate}</b>
-              <span>{values[scrub]?.toLocaleString()} {unit}</span>
-              {ghost && prevValues?.[scrub] != null && (
-                <span className="sep">上一周期同序 {prevValues[scrub]?.toLocaleString()}</span>
+              <span>
+                {scrubValue == null ? "未记录" : `${scrubValue.toLocaleString()} ${unit}`}
+              </span>
+              {ghost && scrub != null && prevValues?.[scrub] != null && (
+                <span className="sep">上一周期同序 {prevValues[scrub]!.toLocaleString()}</span>
               )}
               {onDrillDay && (
                 /^\d{4}-\d{2}-\d{2}$/.test(scrubDate) && (

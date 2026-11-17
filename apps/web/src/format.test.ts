@@ -9,6 +9,7 @@ import {
   formatCostTitle,
   formatPerformanceDuration,
   companionMoneyUnit,
+  comparisonText,
   formatPercent,
   formatRelativeTime,
   headlineCostUnit,
@@ -178,6 +179,31 @@ describe("cacheHitRatio", () => {
       ),
     ).toBeCloseTo(0.8, 5);
     expect(cacheHitRatio(cost({ raw: 10, output: 10 }))).toBeNull();
+  });
+});
+
+describe("comparisonText", () => {
+  const format = (value: number) => value.toLocaleString("en-US");
+
+  it("shows the absolute change and one decimal", () => {
+    expect(comparisonText(1100, 1000, "前 7 天", format)).toEqual({
+      text: "较前 7 天 ▲ 100（10.0%）",
+      direction: "up",
+    });
+  });
+
+  it("does not draw an arrow for a change that rounds to zero", () => {
+    expect(comparisonText(1000.2, 1000, "前 7 天", (value) => value.toFixed(1))).toEqual({
+      text: "较前 7 天 持平 · 0.2",
+      direction: "flat",
+    });
+  });
+
+  it("states when no previous window exists", () => {
+    expect(comparisonText(100, null, "上一周期", format)).toEqual({
+      text: "较上一周期 —",
+      direction: "flat",
+    });
   });
 });
 

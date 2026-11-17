@@ -130,6 +130,8 @@ export class SessionStore {
   private sqliteIngestAt = new Map<string, number>();
   /** Resolved path → session ids (avoids O(sources) scans during refresh). */
   private sourcesByPath = new Map<string, string[]>();
+  /** Last mtime used for the live flag, so list/overview do not stat every file. */
+  private liveMtimeMs = new Map<string, number>();
   private cacheHome?: string;
   private dumpTimer: ReturnType<typeof setTimeout> | undefined;
   /** True after a mutation that should be persisted to the store dump. */
@@ -366,76 +368,69 @@ export class SessionStore {
 
   private liveReingestPending = new Set<string>();
   private liveReingestTimer: ReturnType<typeof setTimeout> | undefined;
+  private liveReingestTail: Promise<void> = Promise.resolve();
 
   /** Re-read after a live→historical flip without blocking list()/get(). */
   private scheduleLiveReingest(filePath: string): void {
     this.liveReingestPending.add(filePath);
     if (this.liveReingestTimer) return;
+    let resolveBatch!: () => void;
+    const batch = new Promise<void>((resolve) => {
+      resolveBatch = resolve;
+    });
+    this.liveReingestTail = this.liveReingestTail.then(() => batch);
     this.liveReingestTimer = setTimeout(() => {
       this.liveReingestTimer = undefined;
       const paths = [...this.liveReingestPending];
       this.liveReingestPending.clear();
-      for (const pendingPath of paths) {
-        try {
-          this.ingestPath(pendingPath);
-        } catch {
-          // Watcher / next list will retry; never block the request path.
+      try {
+        for (const pendingPath of paths) {
+          try {
+            this.ingestPath(pendingPath);
+          } catch {
+            // Watcher / next list will retry; never block the request path.
+          }
         }
+      } finally {
+        resolveBatch();
       }
     }, 250);
     this.liveReingestTimer.unref?.();
+  }
+
+  /** Test hook: the deferred re-read has finished. */
+  whenLiveReingestSettled(): Promise<void> {
+    return this.liveReingestTail;
   }
 
   private refreshLiveFlags(): void {
     pruneInactiveLiveReadStates();
     let changed = false;
     for (const [id, source] of this.sources) {
+      const resolved = path.resolve(source.path);
       if (source.path.endsWith(".vscdb") || path.basename(source.path) === "opencode.db") {
         const live = source.lastEventAt != null && isLive(Date.parse(source.lastEventAt));
         if (live !== source.live) { this.sources.set(id, { ...source, live }); changed = true; }
         continue;
       }
       let live = source.live;
+      let mtimeMs: number | undefined;
       try {
-        if (existsSync(source.path)) live = isLive(statSync(source.path).mtimeMs);
+        mtimeMs = statSync(source.path).mtimeMs;
+        live = isLive(mtimeMs);
       } catch {
         // Keep the previous state when a file is being replaced.
       }
+      const knownMtime = this.liveMtimeMs.get(resolved);
+      if (mtimeMs != null && knownMtime === mtimeMs && live === source.live) continue;
+      if (mtimeMs != null) this.liveMtimeMs.set(resolved, mtimeMs);
       if (live !== source.live) {
-        let bytes = 0;
-        try {
-          bytes = statSync(source.path).size;
-        } catch {
-          // Unreadable — still flip the flag below.
-        }
-        // Small files: re-read inline (covers the live→historical final-events
-        // case in tests). Large files: flip the flag now and re-parse async so
-        // /sessions is not blocked on multi-MB JSONL.
-        if (bytes > 0 && bytes < 1_000_000) {
-          try {
-            const refreshed = ingestFile(source.path, {
-              cacheHome: this.cacheHome,
-            });
-            const currentToggles = this.toggles.get(id);
-            if (refreshed.id !== id) {
-              this.sources.delete(id);
-              this.toggles.delete(id);
-              if (currentToggles) this.toggles.set(refreshed.id, currentToggles);
-            }
-            if (!this.toggles.has(refreshed.id)) {
-              this.toggles.set(refreshed.id, { ...refreshed.toggles });
-            }
-            this.sources.set(refreshed.id, { ...refreshed, children: [] });
-            this.rememberFingerprint(refreshed.path);
-            changed = true;
-            continue;
-          } catch {
-            // Keep the live transition even if a file is temporarily unreadable.
-          }
-        }
         this.sources.set(id, { ...source, live });
         changed = true;
-        if (bytes >= 1_000_000) this.scheduleLiveReingest(source.path);
+        // Re-read off the request path. A live→historical flip can carry the
+        // file's final events, and parsing them inside list()/get() blocks
+        // every other session on the event loop.
+        this.scheduleLiveReingest(source.path);
       }
     }
     if (changed) {
