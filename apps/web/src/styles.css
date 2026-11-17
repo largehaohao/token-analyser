@@ -69,6 +69,12 @@ body {
   overflow-x: clip;
 }
 
+/* Opaque canvas. A fixed body background is dropped by Chromium when html/body
+   use overflow-x: clip, which lets the host page show through in dark mode. */
+html {
+  background: var(--bg);
+}
+
 *,
 *::before,
 *::after {
@@ -7079,10 +7085,9 @@ button.ledger-item:focus-visible {
       transparent 58%
     ),
     var(--bg);
-  background-attachment: fixed;
 }
 [data-theme="dark"] .app-header {
-  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-raised) 88%, var(--bg));
 }
 
 /* ==========================================================================
