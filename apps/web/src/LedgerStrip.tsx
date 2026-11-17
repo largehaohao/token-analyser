@@ -1,4 +1,4 @@
-import type { Overview } from "./api";
+import type { Cost, Overview } from "./api";
 import {
   cacheHitRatio,
   companionMoneyUnit,
@@ -10,6 +10,7 @@ import {
   formatUnitSuffix,
   type CostUnit,
 } from "./format";
+import { useAnimatedNumber, useFlashOnChange } from "./motion";
 import { BareButton, Panel } from "./ui";
 
 type Props = {
@@ -31,10 +32,27 @@ function deltaText(delta: number, label: string): string {
   return `较${label} ${arrow} ${Math.abs(delta).toFixed(0)}%`;
 }
 
+/** Keeps the unit's exact rounding rules while the headline count rolls. */
+function formatAnimatedCost(
+  cost: Cost,
+  unit: CostUnit,
+  animated: number | null,
+): string {
+  if (animated == null) return formatCost(cost, unit);
+  if (unit === "tokens") {
+    return `${cost.unmeasured ? "≥ " : ""}${Math.round(animated).toLocaleString("en-US")}`;
+  }
+  return formatCost(
+    unit === "credits" ? { ...cost, credits: animated } : { ...cost, usd: animated },
+    unit,
+  );
+}
+
 /**
  * The five numbers a cost review starts with, plus how the window compares with
  * the equal-length window before it. No chart is spent on a number that has no
- * comparison to make.
+ * comparison to make. Headlines count up on arrival and flash once when a live
+ * refresh changes them; the exact values stay in the titles and sr text.
  */
 export function LedgerStrip({
   overview,
@@ -54,15 +72,24 @@ export function LedgerStrip({
   const moneyUnit = unit === "tokens" && overview.cost.credits == null && overview.cost.usd != null
     ? "usd" : companionMoneyUnit(unit);
 
+  const animatedCurrent = useAnimatedNumber(current);
+  const animatedMoney = useAnimatedNumber(costValue(overview.cost, moneyUnit));
+  const animatedSessions = useAnimatedNumber(overview.sessionCount);
+  const animatedTurns = useAnimatedNumber(overview.turnCount);
+  const animatedCache = useAnimatedNumber(cache == null ? null : 100 * cache);
+  const animatedUnpriced = useAnimatedNumber(overview.unpricedRaw);
+  const animatedWaste = useAnimatedNumber(costValue(overview.waste, unit));
+  const totalFlash = useFlashOnChange(overview.cost.raw);
+
   return (
     <Panel role="region" className="ledger" data-testid="ledger-strip" aria-label="当前统计范围概览">
       <div className="ledger-item">
         <span className="ledger-label">总支出（{unit}）</span>
         <span
-          className="ledger-value"
+          className={`ledger-value${totalFlash ? " value-flash" : ""}`}
           title={formatCostTitle(overview.cost, unit)}
         >
-          {formatCost(overview.cost, unit)}
+          {formatAnimatedCost(overview.cost, unit, animatedCurrent)}
           <span className="ledger-unit"> {formatUnitSuffix(unit)}</span>
         </span>
         <span
@@ -92,7 +119,7 @@ export function LedgerStrip({
             className="ledger-value"
             title={formatCostTitle(overview.cost, moneyUnit)}
           >
-            {formatCost(overview.cost, moneyUnit)}
+            {formatAnimatedCost(overview.cost, moneyUnit, animatedMoney)}
             <span className="ledger-unit"> {formatUnitSuffix(moneyUnit)}</span>
           </span>
           <span className="ledger-delta">
@@ -107,10 +134,10 @@ export function LedgerStrip({
       >
         <span className="ledger-label">已分析会话 / 请求轮次</span>
         <span className="ledger-value">
-          {overview.sessionCount.toLocaleString()}
+          {Math.round(animatedSessions ?? 0).toLocaleString()}
           <span className="ledger-unit">
             {" / "}
-            {overview.turnCount.toLocaleString()}
+            {Math.round(animatedTurns ?? 0).toLocaleString()}
           </span>
         </span>
         <span className="ledger-delta">
@@ -121,7 +148,7 @@ export function LedgerStrip({
       <div className="ledger-item">
         <span className="ledger-label">缓存命中</span>
         <span className="ledger-value">
-          {cache == null ? "—" : formatPercent(100 * cache)}
+          {animatedCache == null ? "—" : formatPercent(animatedCache)}
         </span>
         <span
           className="ledger-delta"
@@ -139,7 +166,7 @@ export function LedgerStrip({
         <span
           className={`ledger-value ${overview.unpricedRaw > 0 ? "warn" : ""}`}
         >
-          {formatCompactTokens(overview.unpricedRaw)}
+          {formatCompactTokens(Math.round(animatedUnpriced ?? 0))}
         </span>
         <span className="ledger-delta">
           {overview.unpricedRaw > 0
@@ -150,7 +177,7 @@ export function LedgerStrip({
       <div className="ledger-item">
         <span className="ledger-label">疑似可优化</span>
         <span className="ledger-value" title={formatCostTitle(overview.waste, unit)}>
-          {formatCost(overview.waste, unit)}
+          {formatAnimatedCost(overview.waste, unit, animatedWaste)}
         </span>
         <span className="ledger-delta">
           {share(overview.waste.raw, overview.cost.raw) == null

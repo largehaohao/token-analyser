@@ -95,6 +95,16 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
 - Chart surfaces are never the only reading: trend, composition, ranking,
   models and histograms publish the same numbers as a screen-reader table, and the
   trend column exposes a focusable tooltip dismissed by `Escape`.
+- Trend annotations are redundant encodings of recorded data, not new data: a
+  dashed window-average line (labelled with its value, drawn only with ≥2 known
+  days), a dot and bold tick on today's column, weekend column shading, and
+  nice-number Y ticks. Hovering or focusing a column dims the others and shows a
+  crosshair; the tooltip and `srTable` values are unchanged.
+- Histograms mark the p50 and p95 buckets with dashed labelled marks derived
+  from the same fixed counts, name both buckets in the chart's accessible
+  label, and offer a `累积` (CDF) toggle per histogram. The toggle is a pressed
+  button, changes only the view of the same samples, and keeps the bucket
+  scale, denominator and summary line intact.
 - The orange trend segment identifies ledger/parse anomalies (`flaggedCost`),
   independently of waste rules. Dates align below bars, and the first touch opens
   a tooltip kept within the viewport. Model tables scroll inside their disclosure
@@ -106,7 +116,7 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
 
 - The API returns the complete session summary list. Preserve the existing explicit Load more strategy: 100 sessions or 100 turns per batch. Do not infer server paging or an incomplete dataset.
 - Session queries filter locally, commit after IME composition, and clear immediately. Empty input is distinct from no results. A clear action returns focus to the search input.
-- **Privacy override to URL defaults:** session IDs, search queries (which can contain local paths), list limit, and scroll position stay in tab-scoped sessionStorage. They never enter URLs or persistent localStorage. Range and active view are restored per tab; only `#overview`, `#sessions`, and `#power` appear in route URLs. Display unit uses the existing non-sensitive local preference.
+- **Privacy override to URL defaults:** session IDs, search queries (which can contain local paths), list limit, and scroll position stay in tab-scoped sessionStorage. They never enter URLs or persistent localStorage. Range and active view are restored per tab; only `#overview`, `#sessions`, and `#power` appear in route URLs. Display unit and light/dark theme are the only persistent local preferences; both are non-sensitive (`token-analyser:unit`, `token-analyser:theme`), and the theme falls back to `prefers-color-scheme` when unset.
 - Browser Back restores the route, selection, and range. Returning to sessions restores its query, batch limit, and scroll offset. Changing a query resets the batch; a selected session outside the query remains readable and is explicitly explained.
 - Below 780px, the filter toolbar starts collapsed with the current source, range and unit visible in its summary. The filter button exposes its expanded state and controls relationship.
 - Below 780px, list and detail are separate panes: selecting a session opens and focuses detail; returning restores the selected list item. The search shortcut reveals the list first. A selected item outside the search results remains accessible through “查看当前会话”. This presentation state stays local to the current mount.
@@ -126,7 +136,7 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
 
 ## Navigation and responsive behavior
 
-Top-level navigation uses real hash links with `aria-current`. Route document title policy: `成本总览 · Token Analyser`, `会话明细 · Token Analyser`, `硬件温度 · Token Analyser`, or `硬件用电 · Token Analyser`; failures use an honest route label and never leak prompts or local paths into the title. Session selection is a button action inside the current route. A skip link targets the current main region.
+Top-level navigation uses real hash links with `aria-current`. Route and tab changes animate through the View Transitions API where the browser supports it and reduced motion is off; otherwise the swap is immediate, so navigation never depends on the animation. Route document title policy: `成本总览 · Token Analyser`, `会话明细 · Token Analyser`, `硬件温度 · Token Analyser`, or `硬件用电 · Token Analyser`; failures use an honest route label and never leak prompts or local paths into the title. Session selection is a button action inside the current route. A skip link targets the current main region.
 
 The document scrolls naturally. On desktop the session selector can scroll independently; on narrow screens it remains a bounded region above the detail. The turn table scrolls horizontally with an explicit cue and vertically within its own frame. Full evidence remains reachable at 360px and reduced motion. The narrow header is not sticky, so it cannot cover the focused field or evidence.
 
@@ -152,7 +162,7 @@ There are no unsaved text-edit forms, sensitive-value fields, clipboard operatio
 
 Required checks: web TypeScript, engine and web unit tests, production build, Playwright against isolated fixture ports, token drift check, DESIGN.md lint, and the Frontend Design Premium strict audit. See `premium-ui.json` for executable project checks.
 
-Compare overview and session detail in the existing dark theme at desktop and 390px. Exercise normal, loading, zero data, no matches, read failure/retry, stale requests, import validation/single-flight/success/failure, toggle failure, keyboard, Back/reload, long text, reduced motion, and global scrollbar styles. No Japanese market, dropdown popup, auth, delete, or payment verification is applicable.
+Compare overview and session detail in both light and dark themes (header toggle, persisted preference, and `prefers-color-scheme` fallback) at desktop and 390px. Exercise normal, loading, zero data, no matches, read failure/retry, stale requests, import validation/single-flight/success/failure, toggle failure, keyboard, Back/reload, long text, reduced motion (count-ups, flashes, bar growth, curve morphs and view transitions must all land immediately), and global scrollbar styles. No Japanese market, dropdown popup, auth, delete, or payment verification is applicable.
 
 ## Hardware electricity preview
 
@@ -175,3 +185,8 @@ bucket window and the sample count, so an averaged curve is never presented as
 raw readings, and sub-minute buckets show seconds in their labels. Native date inputs and
 price errors are labelled; charts have a screen-reader table and focusable data
 points; the statistics table has a keyboard-accessible horizontal scroll region.
+The current-power gauge is decorative (`aria-hidden`) beside the exact watt
+figure and states its scale; its arc and peak mark derive from the same current
+sample and interval peak as the statistics. Curve morphs and the temperature
+canvas interpolation only ease between recorded grids — a changed sample-gap
+pattern snaps, so animation never invents a reading.

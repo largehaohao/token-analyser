@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,8 @@ import {
   type TempReadingTone,
 } from "./hardware-temps";
 import { Icon, Notice, Panel, SegmentedControl, srTable } from "./ui";
+import { easeOutCubic, lerp, sameGapPattern } from "./motion";
+import { THEME_CHANGE_EVENT } from "./theme-pref";
 import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
 
 const POLL_MS = 2000;
@@ -311,6 +314,11 @@ export function SystemTemperaturePage({ now }: { now: number }) {
 
   useEffect(() => {
     setPalette(readPalette());
+    // 主题切换后 CSS 变量已换，但 canvas 不会自动重读色板。
+    const onThemeChange = () => setPalette(readPalette());
+    // applyTheme dispatches on window; window-dispatched events do not reach document.
+    window.addEventListener(THEME_CHANGE_EVENT, onThemeChange);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, onThemeChange);
   }, []);
 
   useEffect(() => {
@@ -955,20 +963,30 @@ function TempChart({
   const readoutTime = (t: number) =>
     longWindow ? formatSampleTime(t) : formatClock(t);
 
+  // 画布始终画“当前显示值”：新采样到达时按索引插值过渡（窗口滑动、数值
+  // 变化都平滑），缺失读数不参与插值，网格形状变化则直接落位。
+  const displayRef = useRef<{
+    series: ChartSeries[];
+    startSec: number;
+    endSec: number;
+    yMax: number;
+  } | null>(null);
+  const morphFrame = useRef<number | null>(null);
+
   const drawRef = useRef<() => void>(() => {});
   drawRef.current = () => {
     const canvas = canvasRef.current;
-    if (canvas) {
-      drawTempChart(
-        canvas,
-        series,
-        startSec,
-        endSec,
-        palette,
-        yMax,
-        hoverRef.current,
-      );
-    }
+    if (!canvas) return;
+    const shown = displayRef.current ?? { series, startSec, endSec, yMax };
+    drawTempChart(
+      canvas,
+      shown.series,
+      shown.startSec,
+      shown.endSec,
+      palette,
+      shown.yMax,
+      hoverRef.current,
+    );
   };
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -979,8 +997,59 @@ function TempChart({
     observer.observe(canvas);
     return () => observer.disconnect();
   }, []);
-  useEffect(() => {
-    drawRef.current();
+  useLayoutEffect(() => {
+    const target = { series, startSec, endSec, yMax };
+    const previous = displayRef.current;
+    const reduced = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    const morphable =
+      previous != null &&
+      !reduced &&
+      previous.series.length === series.length &&
+      series.every((line, s) =>
+        sameGapPattern(
+          previous.series[s]!.points.map((point) => point.v),
+          line.points.map((point) => point.v),
+        ),
+      );
+    if (!morphable) {
+      displayRef.current = target;
+      drawRef.current();
+      return;
+    }
+    const from = previous;
+    const start = performance.now();
+    const duration = 280;
+    const step = (time: number) => {
+      const eased = easeOutCubic(Math.min(1, (time - start) / duration));
+      displayRef.current = {
+        startSec: lerp(from.startSec, startSec, eased),
+        endSec: lerp(from.endSec, endSec, eased),
+        yMax: lerp(from.yMax, yMax, eased),
+        series: series.map((line, s) => ({
+          ...line,
+          points: line.points.map((point, i) => {
+            const prev = from.series[s]!.points[i]!;
+            return {
+              t: lerp(prev.t, point.t, eased),
+              v:
+                point.v == null || prev.v == null
+                  ? point.v
+                  : lerp(prev.v, point.v, eased),
+            };
+          }),
+        })),
+      };
+      drawRef.current();
+      if (time - start < duration) {
+        morphFrame.current = requestAnimationFrame(step);
+      }
+    };
+    morphFrame.current = requestAnimationFrame(step);
+    return () => {
+      if (morphFrame.current != null) cancelAnimationFrame(morphFrame.current);
+    };
   }, [series, startSec, endSec, palette, yMax]);
 
   function showIndex(index: number, announce = false) {

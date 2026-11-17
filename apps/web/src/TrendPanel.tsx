@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { Overview } from "./api";
 import {
   barHeightPct,
@@ -8,6 +8,9 @@ import {
   dayUnpricedRaw,
   flaggedValue,
   formatChartDay,
+  isWeekendDate,
+  localDateString,
+  niceChartTicks,
   shouldLabelChartDay,
   trendColumnAriaLabel,
   trendContentMinWidth,
@@ -16,8 +19,8 @@ import {
 import { formatChartNumber } from "./format";
 import { ModelFilterSelect } from "./ModelFilterSelect";
 import { useModelFilteredOverview } from "./useModelFilteredOverview";
-import { Panel, srTable } from "./ui";
-import { Toggle } from "@/components/ui/toggle";
+import { useFlashOnChange } from "./motion";
+import { Panel, SegmentedControl, srTable } from "./ui";
 
 type Props = {
   overview: Overview;
@@ -56,6 +59,23 @@ export function TrendPanel({
   const [tooltipPosition, setTooltipPosition] = useState({ left: 8, top: 8 });
   const metric = chartMetric;
   const max = chartMax(overview.days.map((day) => dayMetricValue(day, metric)));
+  const ticks = niceChartTicks(max);
+  const knownValues = overview.days
+    .map((day) => dayMetricValue(day, metric))
+    .filter((value): value is number => value != null);
+  const average =
+    knownValues.length >= 2
+      ? knownValues.reduce((sum, value) => sum + value, 0) / knownValues.length
+      : null;
+  const today = localDateString(new Date());
+  const todayValue =
+    overview.days.find((day) => day.date === today) != null
+      ? dayMetricValue(
+          overview.days.find((day) => day.date === today)!,
+          metric,
+        )
+      : null;
+  const todayFlash = useFlashOnChange(todayValue);
   const selectedMetric = metric;
   const label = (value: number | null) =>
     value == null ? "未定价" : formatChartNumber(value, metric);
@@ -101,7 +121,7 @@ export function TrendPanel({
           <h3 className="chart-title">每日支出趋势</h3>
           <p className="chart-desc">
             柱高为已记录用量，橙色表示含账本警告或解析错误的用量；斜纹表示该日有未定价 Token。
-            聚焦任意一天可读出当日明细，Esc 关闭。
+            虚线为窗口均值，圆点标记今天，周末列有底色。聚焦任意一天可读出当日明细，Esc 关闭。
           </p>
         </div>
         <div className="chart-head-controls">
@@ -112,24 +132,13 @@ export function TrendPanel({
             onChange={setModel}
             disabled={loading}
           />
-          <div
+          <SegmentedControl
             className="chart-metric-tabs"
-            role="group"
-            aria-label="趋势图单位"
-          >
-            {METRICS.map((item) => (
-              <Toggle
-                key={item.id}
-                variant="outline"
-                size="sm"
-                pressed={selectedMetric === item.id}
-                onPressedChange={() => onChartMetric(item.id)}
-                className={selectedMetric === item.id ? "on" : ""}
-              >
-                {item.label}
-              </Toggle>
-            ))}
-          </div>
+            label="趋势图单位"
+            value={selectedMetric}
+            options={METRICS}
+            onChange={onChartMetric}
+          />
         </div>
       </div>
       {error ? (
@@ -144,30 +153,38 @@ export function TrendPanel({
           <div className="chart-body trend" onScroll={positionTooltip}>
             <div className="trend-content" style={{ minWidth: trendContentMinWidth(overview.days.length) }}>
               <div className="grid">
-                {[1, 0.5, 0].map((ratio) => (
+                {ticks.map((value) => (
                   <span
-                    key={ratio}
+                    key={value}
                     className="gl"
-                    title={label(max * ratio)}
-                    style={{ bottom: `calc(${ratio * 100}% - 1px)` }}
+                    title={label(value)}
+                    style={{ bottom: `calc(${(100 * value) / max}% - 1px)` }}
                   />
                 ))}
-                {[1, 0.5, 0].map((ratio) => (
+                {ticks.map((value) => (
                   <span
-                    key={`label-${ratio}`}
+                    key={`label-${value}`}
                     className="ylab"
-                    style={{ bottom: `calc(${ratio * 100}% - 7px)` }}
+                    style={{ bottom: `calc(${(100 * value) / max}% - 7px)` }}
                   >
-                    {label(max * ratio)}
+                    {label(value)}
                   </span>
                 ))}
+                {average != null && (
+                  <span
+                    className="trend-avg"
+                    style={{ bottom: `calc(${(100 * average) / max}% - 1px)` }}
+                  >
+                    <b>均值 {label(average)}</b>
+                  </span>
+                )}
               </div>
               <div
-                className="bars"
+                className={`bars${hovered != null ? " has-hover" : ""}`}
                 role="group"
                 aria-label={`每日${metric}用量柱状图`}
               >
-                {overview.days.map((day) => {
+                {overview.days.map((day, index) => {
                   const value = dayMetricValue(day, metric);
                   const bar = barHeightPct(value, day.cost.raw, max);
                   const flagged = flaggedValue(day, metric);
@@ -181,7 +198,12 @@ export function TrendPanel({
                       type="button"
                       className={`trend-col ${
                         hovered === day.date ? "hover" : ""
-                      } ${dayHasMixedUnpriced(day, metric) ? "unpriced" : ""}`}
+                      } ${dayHasMixedUnpriced(day, metric) ? "unpriced" : ""} ${
+                        isWeekendDate(day.date) ? "weekend" : ""
+                      } ${day.date === today ? "today" : ""} ${
+                        day.date === today && todayFlash ? "today-flash" : ""
+                      }`}
+                      style={{ "--i": Math.min(index, 14) } as CSSProperties}
                       onMouseEnter={(e) => show(day.date, e.currentTarget)}
                       onMouseLeave={() => setHovered(null)}
                       onFocus={(e) => show(day.date, e.currentTarget)}
@@ -234,7 +256,7 @@ export function TrendPanel({
                       shouldLabelChartDay(day.date, overview.days.map((d) => d.date))
                         ? ""
                         : "muted-tick"
-                    }`}
+                    } ${day.date === today ? "today-tick" : ""}`}
                     title={formatChartDay(day.date)}
                   >
                     {formatChartDay(day.date)}
@@ -262,6 +284,21 @@ export function TrendPanel({
               />
               未定价 Token
             </span>
+            {average != null && (
+              <span>
+                <i
+                  style={{
+                    display: "inline-block",
+                    width: 14,
+                    height: 0,
+                    borderTop: "1px dashed var(--accent)",
+                    marginRight: 4,
+                    verticalAlign: "3px",
+                  }}
+                />
+                窗口均值 {label(average)}
+              </span>
+            )}
           </div>
           {srTable(
             "每日支出趋势",

@@ -57,6 +57,54 @@ describe("openStream", () => {
     vi.useRealTimers();
   });
 
+  it("opens only one replacement when a closed socket reports repeated errors", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const stop = openStream(() => undefined);
+    const first = FakeEventSource.instances[0]!;
+    first.readyState = FakeEventSource.CLOSED;
+    first.onerror?.(new Event("error"));
+    first.onerror?.(new Event("error"));
+    vi.advanceTimersByTime(2_000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(first.closed).toBe(true);
+    stop();
+    expect(FakeEventSource.instances.every((source) => source.closed)).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("cancels a pending reconnect when the stream is stopped", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const stop = openStream(() => undefined);
+    const first = FakeEventSource.instances[0]!;
+    first.readyState = FakeEventSource.CLOSED;
+    first.onerror?.(new Event("error"));
+    stop();
+    vi.advanceTimersByTime(10_000);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
+  it("ignores a late error from the replaced socket", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const stop = openStream(() => undefined);
+    const first = FakeEventSource.instances[0]!;
+    first.readyState = FakeEventSource.CLOSED;
+    first.onerror?.(new Event("error"));
+    vi.advanceTimersByTime(2_000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    const second = FakeEventSource.instances[1]!;
+    second.readyState = FakeEventSource.CLOSED;
+    first.onerror?.(new Event("error"));
+    vi.advanceTimersByTime(10_000);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(second.closed).toBe(false);
+    stop();
+    vi.useRealTimers();
+  });
+
   it("asks the UI to resync when the SSE socket opens", () => {
     vi.stubGlobal("EventSource", FakeEventSource);
     const events: StreamEvent[] = [];

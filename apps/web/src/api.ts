@@ -653,29 +653,45 @@ export function openStream(
 
   const connect = (): void => {
     if (stopped) return;
-    es = new EventSource("/stream");
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
+    }
+    // Capture the socket that owns these handlers: a late error from the
+    // previous socket must not close or retry the replacement.
+    const source = new EventSource("/stream");
+    es = source;
     onStatus?.("connecting");
-    es.onopen = () => {
+    source.onopen = () => {
+      if (stopped || es !== source) return;
       onStatus?.("open");
       onEvent({ type: "resync", id: "*" });
     };
-    es.onerror = () => {
-      if (stopped || !es) return;
-      onStatus?.(es.readyState === EventSource.CLOSED ? "error" : "connecting");
+    source.onerror = () => {
+      if (stopped || es !== source) return;
+      const closed = source.readyState === EventSource.CLOSED;
+      onStatus?.(closed ? "error" : "connecting");
       // Vite returns 500 when the engine is down; that closes EventSource for
-      // good. Recreate so the UI recovers without a full page reload.
-      if (es.readyState === EventSource.CLOSED) {
-        es.close();
-        retryTimer = setTimeout(connect, 2_000);
-      }
+      // good. Recreate so the UI recovers without a full page reload. Only one
+      // retry may be pending — repeated error events must not spawn a second
+      // socket that stop() would leave connected.
+      if (!closed || retryTimer) return;
+      source.close();
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        connect();
+      }, 2_000);
     };
-    attach(es);
+    attach(source);
   };
 
   connect();
   return () => {
     stopped = true;
-    if (retryTimer) clearTimeout(retryTimer);
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
+    }
     es?.close();
   };
 }

@@ -26,11 +26,13 @@ import {
   type PowerDataAdapter,
   type PowerQuickRangeId,
   type PowerSample,
+  type PowerSeriesKey,
   type PowerWindow,
   type SeriesIntegral,
   type SeriesPoint,
 } from "./hardware-power";
 import { getPowerFeed } from "./api";
+import { easeOutCubic, lerp, sameGapPattern, useAnimatedNumber } from "./motion";
 import { Button, Notice, Panel, SegmentedControl, srTable } from "./ui";
 import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
 import { Input } from "@/components/ui/input";
@@ -77,6 +79,153 @@ function otherPoints(samples: PowerSample[]): SeriesPoint[] {
 
 function niceMaxW(value: number): number {
   return Math.max(100, Math.ceil(value / 50) * 50);
+}
+
+type SeriesKey = PowerSeriesKey;
+const SERIES_KEYS: SeriesKey[] = POWER_SERIES.map((s) => s.key);
+type YValues = Record<SeriesKey, (number | null)[]>;
+
+function lineD(
+  ys: (number | null)[],
+  x: (i: number) => number,
+  y: (w: number) => number,
+): string {
+  let d = "";
+  let open = false;
+  ys.forEach((v, i) => {
+    if (v == null) {
+      open = false;
+      return;
+    }
+    d += `${open ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)} `;
+    open = true;
+  });
+  return d.trim();
+}
+
+/** Closed-to-baseline area under the machine curve; gaps stay gaps. */
+function areaD(
+  ys: (number | null)[],
+  x: (i: number) => number,
+  y: (w: number) => number,
+  baseline: number,
+): string {
+  let d = "";
+  let segment: number[] = [];
+  const flush = () => {
+    if (segment.length === 0) return;
+    d += `M${x(segment[0]!).toFixed(1)} ${baseline.toFixed(1)} `;
+    for (const i of segment) d += `L${x(i).toFixed(1)} ${y(ys[i]!).toFixed(1)} `;
+    d += `L${x(segment[segment.length - 1]!).toFixed(1)} ${baseline.toFixed(1)} Z `;
+    segment = [];
+  };
+  ys.forEach((v, i) => {
+    if (v == null) flush();
+    else segment.push(i);
+  });
+  flush();
+  return d.trim();
+}
+
+/** 整机负载表的量程与两个百分比，同源派生，作为一组传给整机项。 */
+type LoadGauge = {
+  scaleW: number;
+  nowPct: number;
+  peakPct: number;
+};
+
+/**
+ * 当前瞬时功率的单项。整机项带半圆负载表：弧线填充 = 当前功率相对
+ * “当前与区间峰值取大”的比例，橙色刻线标出区间峰值位置。
+ */
+function PowerNowItem({
+  seriesKey,
+  current,
+  otherNow,
+  load,
+}: {
+  seriesKey: SeriesKey;
+  current: PowerSample;
+  otherNow: number | null;
+  load: LoadGauge;
+}) {
+  const meta = POWER_SERIES.find((s) => s.key === seriesKey)!;
+  const v = current[seriesKey];
+  const isTotal = seriesKey === "machine";
+  const animated = useAnimatedNumber(v);
+  const peakAngle = Math.PI * (1 - load.peakPct / 100);
+  const peakX = (r: number) => 60 + r * Math.cos(peakAngle);
+  const peakY = (r: number) => 60 - r * Math.sin(peakAngle);
+  return (
+    <div className={`ledger-item${isTotal ? " power-now-total" : ""}`}>
+      <span className="ledger-label">
+        {isTotal ? "整机当前功率" : `${meta.label} 当前功率`}
+      </span>
+      <span className="ledger-value power-now-value">
+        {animated == null ? "—" : Math.round(animated).toLocaleString("zh-CN")}
+        <span className="ledger-unit"> W</span>
+      </span>
+      <span className="ledger-delta">
+        {v == null ? "当前时刻无采样" : `采样于 ${formatClock(current.t)}`}
+        {isTotal && v != null ? " · 含其他硬件" : ""}
+      </span>
+      {isTotal && v != null && (
+        <>
+          <svg
+            className="power-gauge"
+            viewBox="0 0 120 72"
+            aria-hidden="true"
+          >
+            <title>{`当前负载 ${Math.round(load.nowPct)}% · 量程 ${Math.round(load.scaleW)} W`}</title>
+            <path
+              className="power-gauge-track"
+              d="M10 60 A50 50 0 0 1 110 60"
+              pathLength={100}
+            />
+            <path
+              className="power-gauge-fill"
+              d="M10 60 A50 50 0 0 1 110 60"
+              pathLength={100}
+              strokeDasharray={`${load.nowPct} 100`}
+            />
+            <line
+              className="power-gauge-peak"
+              x1={peakX(44)}
+              y1={peakY(44)}
+              x2={peakX(56)}
+              y2={peakY(56)}
+            />
+            <text className="power-gauge-text" x="60" y="50" textAnchor="middle">
+              {Math.round(load.nowPct)}%
+            </text>
+            <text className="power-gauge-scale" x="10" y="70" textAnchor="middle">
+              0
+            </text>
+            <text className="power-gauge-scale" x="110" y="70" textAnchor="middle">
+              {Math.round(load.scaleW)}
+            </text>
+          </svg>
+          <div className="power-now-split" aria-hidden="true">
+            {[
+              { key: "cpu", value: current.cpu ?? 0 },
+              { key: "gpu", value: current.gpu ?? 0 },
+              { key: "other", value: otherNow ?? 0 },
+            ].map((part) => (
+              <i
+                key={part.key}
+                className={`power-now-seg ${part.key}`}
+                style={{ flex: Math.max(part.value, 1) }}
+              />
+            ))}
+          </div>
+          <span className="power-now-split-note">
+            CPU {formatWatts(current.cpu)} · GPU {formatWatts(current.gpu)} ·
+            其他 {formatWatts(otherNow)}
+          </span>
+        </>
+      )}
+    </div>
+  );
 }
 
 function parsePrice(raw: string): { value: number; error: string | null } {
@@ -277,6 +426,9 @@ export function HardwarePowerPage({
   const cost = (integral: SeriesIntegral) =>
     energyCostCny(integral.kwh, price.value);
 
+  const animatedKwh = useAnimatedNumber(integrals.machine.kwh);
+  const animatedCost = useAnimatedNumber(cost(integrals.machine));
+
   function switchRange(next: PowerQuickRangeId | "custom") {
     if (next === "custom") {
       // 切到自定义时，用当前范围预填起止时间，方便微调。
@@ -340,21 +492,69 @@ export function HardwarePowerPage({
   );
   const x = (i: number) => PLOT_LEFT + i * COL_W + COL_W / 2;
   const y = (w: number) => PLOT_TOP + PLOT_H - (PLOT_H * w) / yMax;
+  const baseline = PLOT_TOP + PLOT_H;
 
-  function pathFor(key: "cpu" | "gpu" | "machine"): string {
-    let d = "";
-    let open = false;
-    buckets.forEach((b, i) => {
-      const v = b[key];
-      if (v == null) {
-        open = false;
-        return;
-      }
-      d += `${open ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)} `;
-      open = true;
-    });
-    return d.trim();
+  function pathFor(key: SeriesKey): string {
+    return lineD(buckets.map((b) => b[key]), x, y);
   }
+
+  // Range/refresh morph: interpolate the drawn watts between the previous and
+  // next bucket grids so the curve flows instead of jumping. Missing readings
+  // never interpolate — a changed gap pattern snaps, keeping "— honest".
+  const lineRefs = useRef<Record<SeriesKey, SVGPathElement | null>>({
+    cpu: null,
+    gpu: null,
+    machine: null,
+  });
+  const areaRef = useRef<SVGPathElement | null>(null);
+  const drawnYsRef = useRef<YValues | null>(null);
+  const morphFrame = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const target: YValues = {
+      cpu: buckets.map((b) => b.cpu),
+      gpu: buckets.map((b) => b.gpu),
+      machine: buckets.map((b) => b.machine),
+    };
+    const write = (ys: YValues) => {
+      for (const key of SERIES_KEYS) {
+        lineRefs.current[key]?.setAttribute("d", lineD(ys[key], x, y));
+      }
+      areaRef.current?.setAttribute("d", areaD(ys.machine, x, y, baseline));
+    };
+    const previous = drawnYsRef.current;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const morphable =
+      previous != null &&
+      !reduced &&
+      SERIES_KEYS.every((key) => sameGapPattern(previous[key], target[key]));
+    if (!morphable) {
+      drawnYsRef.current = target;
+      write(target);
+      return;
+    }
+    const from = previous;
+    const start = performance.now();
+    const duration = 300;
+    const step = (time: number) => {
+      const progress = Math.min(1, (time - start) / duration);
+      const eased = easeOutCubic(progress);
+      const ys = {} as YValues;
+      for (const key of SERIES_KEYS) {
+        ys[key] = target[key].map((v, i) =>
+          v == null ? null : lerp(from[key][i]!, v, eased),
+        );
+      }
+      drawnYsRef.current = ys;
+      write(ys);
+      if (progress < 1) morphFrame.current = requestAnimationFrame(step);
+    };
+    morphFrame.current = requestAnimationFrame(step);
+    return () => {
+      if (morphFrame.current != null) cancelAnimationFrame(morphFrame.current);
+    };
+    // x/y/baseline derive from yMax and chartWidth; buckets carry the window.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buckets, yMax, chartWidth]);
 
   const tickEvery = Math.max(1, Math.ceil((n - 1) / 5) || 1);
   const visibleTicks = buckets
@@ -453,7 +653,7 @@ export function HardwarePowerPage({
           <div className="power-energy-primary">
             <span className="ledger-label">整机用电量</span>
             <span className="ledger-value power-hero-value">
-              {formatKwh(integrals.machine)}
+              {formatKwh({ kwh: animatedKwh, complete: integrals.machine.complete })}
               <span className="ledger-unit"> kWh</span>
             </span>
             <span className="ledger-delta">
@@ -467,7 +667,7 @@ export function HardwarePowerPage({
               {live ? "估算电费" : "演示电费"}
             </span>
             <span className="ledger-value power-hero-value power-hero-cost">
-              {formatCny(cost(integrals.machine), integrals.machine.complete)}
+              {formatCny(animatedCost, integrals.machine.complete)}
             </span>
             <span className="ledger-delta">
               {price.error
@@ -481,37 +681,45 @@ export function HardwarePowerPage({
         <dl className="power-energy-stats">
           <div>
             <dt>区间平均</dt>
-            <dd>{formatWatts(integrals.machine.avgW)}</dd>
-            <span className="power-stat-hint">整机口径</span>
+            <dd>
+              {formatWatts(integrals.machine.avgW)}
+              <span className="power-stat-hint">整机口径</span>
+            </dd>
           </div>
           <div>
             <dt>区间峰值</dt>
-            <dd>{formatWatts(integrals.machine.peakW)}</dd>
-            <span className="power-stat-hint">原始采样</span>
+            <dd>
+              {formatWatts(integrals.machine.peakW)}
+              <span className="power-stat-hint">原始采样</span>
+            </dd>
           </div>
           <div className="power-stat-now">
             <dt>当前功率</dt>
-            <dd>{formatWatts(current.machine)}</dd>
-            <span className="power-stat-hint">
-              {current.machine == null
-                ? "当前时刻无采样"
-                : `采样于 ${formatClock(current.t)}`}
-            </span>
-            {current.machine != null && integrals.machine.peakW != null && (
-              <div
-                className="power-load-track"
-                aria-hidden="true"
-                title={`当前相对区间峰值 ${Math.round(loadNowPct)}%`}
-              >
-                <i className="power-load-fill" style={{ width: `${loadNowPct}%` }} />
-                <i className="power-load-peak" style={{ left: `${loadPeakPct}%` }} />
-              </div>
-            )}
+            <dd>
+              {formatWatts(current.machine)}
+              <span className="power-stat-hint">
+                {current.machine == null
+                  ? "当前时刻无采样"
+                  : `采样于 ${formatClock(current.t)}`}
+              </span>
+              {current.machine != null && integrals.machine.peakW != null && (
+                <span
+                  className="power-load-track"
+                  aria-hidden="true"
+                  title={`当前相对区间峰值 ${Math.round(loadNowPct)}%`}
+                >
+                  <i className="power-load-fill" style={{ width: `${loadNowPct}%` }} />
+                  <i className="power-load-peak" style={{ left: `${loadPeakPct}%` }} />
+                </span>
+              )}
+            </dd>
           </div>
           <div>
             <dt>统计窗口</dt>
-            <dd>{formatDuration(spanMs)}</dd>
-            <span className="power-stat-hint">{formatWindowRange(activeWindow)}</span>
+            <dd>
+              {formatDuration(spanMs)}
+              <span className="power-stat-hint">{formatWindowRange(activeWindow)}</span>
+            </dd>
           </div>
         </dl>
         <div className="power-energy-breakdown">
@@ -590,55 +798,15 @@ export function HardwarePowerPage({
       </Panel>
 
       <Panel role="region" className="ledger power-ledger-now" aria-label="当前瞬时功率">
-        {(["machine", "cpu", "gpu"] as const).map((key) => {
-          const meta = POWER_SERIES.find((s) => s.key === key)!;
-          const v = current[key];
-          const isTotal = key === "machine";
-          return (
-            <div
-              className={`ledger-item${isTotal ? " power-now-total" : ""}`}
-              key={key}
-            >
-              <span className="ledger-label">
-                {isTotal ? "整机当前功率" : `${meta.label} 当前功率`}
-              </span>
-              <span className="ledger-value power-now-value">
-                {v == null ? "—" : Math.round(v).toLocaleString("zh-CN")}
-                <span className="ledger-unit"> W</span>
-              </span>
-              <span className="ledger-delta">
-                {v == null
-                  ? "当前时刻无采样"
-                  : `采样于 ${formatClock(current.t)}`}
-                {isTotal && v != null ? " · 含其他硬件" : ""}
-              </span>
-              {isTotal && v != null && (
-                <>
-                  <div
-                    className="power-now-split"
-                    aria-hidden="true"
-                  >
-                    {[
-                      { key: "cpu", value: current.cpu ?? 0 },
-                      { key: "gpu", value: current.gpu ?? 0 },
-                      { key: "other", value: otherNow ?? 0 },
-                    ].map((part) => (
-                      <i
-                        key={part.key}
-                        className={`power-now-seg ${part.key}`}
-                        style={{ flex: Math.max(part.value, 1) }}
-                      />
-                    ))}
-                  </div>
-                  <span className="power-now-split-note">
-                    CPU {formatWatts(current.cpu)} · GPU {formatWatts(current.gpu)} ·
-                    其他 {formatWatts(otherNow)}
-                  </span>
-                </>
-              )}
-            </div>
-          );
-        })}
+        {(["machine", "cpu", "gpu"] as const).map((key) => (
+          <PowerNowItem
+            key={key}
+            seriesKey={key}
+            current={current}
+            otherNow={otherNow}
+            load={{ scaleW: loadScaleW, nowPct: loadNowPct, peakPct: loadPeakPct }}
+          />
+        ))}
       </Panel>
 
       <Panel role="region" className="chart-card power-trend" data-testid="power-trend" aria-label="功率趋势">
@@ -748,6 +916,26 @@ export function HardwarePowerPage({
                   role="img"
                   aria-label={`${rangeSub}功率趋势图：CPU、GPU、整机三条折线`}
                 >
+                  <defs>
+                    <linearGradient
+                      id="power-area-fill"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop
+                        offset="0%"
+                        style={{ stopColor: "var(--chart-cyan)" }}
+                        stopOpacity="0.28"
+                      />
+                      <stop
+                        offset="100%"
+                        style={{ stopColor: "var(--chart-cyan)" }}
+                        stopOpacity="0.02"
+                      />
+                    </linearGradient>
+                  </defs>
                   {[1, 0.5, 0].map((ratio) => (
                     <line
                       key={ratio}
@@ -769,11 +957,26 @@ export function HardwarePowerPage({
                       {Math.round(yMax * ratio)}
                     </text>
                   ))}
+                  <path
+                    ref={areaRef}
+                    className="power-area"
+                    d={areaD(buckets.map((b) => b.machine), x, y, baseline)}
+                    fill="url(#power-area-fill)"
+                    stroke="none"
+                  />
                   {POWER_SERIES.map((s) => (
                     <path
-                      key={s.key}
-                      className="power-line"
+                      key={s.key === "machine" ? `machine-${rangeKey}` : s.key}
+                      ref={(el) => {
+                        lineRefs.current[s.key] = el;
+                      }}
+                      className={
+                        s.key === "machine"
+                          ? "power-line power-line-main"
+                          : "power-line"
+                      }
                       d={pathFor(s.key)}
+                      pathLength={s.key === "machine" ? 1 : undefined}
                       stroke={s.color}
                       strokeDasharray={s.dash === "none" ? undefined : s.dash}
                     />

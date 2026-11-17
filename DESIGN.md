@@ -81,7 +81,7 @@ components:
 
 ## Overview
 
-The reference is an `htop` ledger: precise numeric columns, visible branches, quiet light surfaces, and a mint trace through recorded usage. That ledger structure stays as described in [the product brief](docs/superpowers/specs/2026-08-27-agent-token-monitor-design.md), drawn in the light STRATA theme. This is a product surface for people auditing local Codex runs, primarily on a laptop, with phone layouts for checking a run. The job is to connect a total to its evidence, not to sell an analytics service.
+The reference is an `htop` ledger: precise numeric columns, visible branches, quiet surfaces, and a mint trace through recorded usage. That ledger structure stays as described in [the product brief](docs/superpowers/specs/2026-08-27-agent-token-monitor-design.md), drawn in the light STRATA theme by default with a dark STRATA overlay for low-light review. This is a product surface for people auditing local Codex runs, primarily on a laptop, with phone layouts for checking a run. The job is to connect a total to its evidence, not to sell an analytics service.
 
 ## Macrostructure family
 
@@ -101,7 +101,9 @@ The signature is the token partition: the same colors and exact numerical semant
 
 Mint is the established selection/action accent; it is not an indication that every recorded turn is useful. Amber identifies potentially optimizable usage and data warnings, with explicit labels to distinguish them. Coral identifies request failures. Cool light-gray surfaces keep the ledger quiet; mint stays the action color rather than a second brand.
 
-Text must remain readable at the compact data sizes: use `--text` for values, `--text-muted` for labels, and `--text-dim` for supporting text. Never dim a meaningful label using opacity. Cache and output keep their existing blue and violet associations. Chart labels and patterns supplement color. The light theme is the supported appearance; forced colors use operating-system colors.
+Text must remain readable at the compact data sizes: use `--text` for values, `--text-muted` for labels, and `--text-dim` for supporting text. Never dim a meaningful label using opacity. Cache and output keep their existing blue and violet associations. Chart labels and patterns supplement color. Forced colors use operating-system colors.
+
+Two themes are supported. Light is the default; `[data-theme="dark"]` in `styles.css` re-resolves the same token names (surfaces, borders, text, semantic tones, and a brightened chart palette) at equal specificity, so every component and the shadcn aliases follow without per-component overrides. The header carries a single sun/moon toggle; the choice persists in the non-sensitive `token-analyser:theme` local preference and falls back to `prefers-color-scheme` on first visit. The theme is applied before first paint. Dark mode alone carries a static two-point ambient wash (accent and chart-blue radial tints at ≤7% over `--bg`); it never animates and never appears in light mode. Canvas charts re-read the CSS palette on theme change.
 
 The 硬件 monitor pages share this one palette. Their structure follows the hardware-monitor reference — breadcrumb kicker, display-scale temperature figures, per-sensor swatches, a single guard strip — but every surface, pill, and chart line resolves through the same `:root` tokens as the overview and session views, so navigation never shifts the app's palette.
 
@@ -119,7 +121,7 @@ Use the existing 24px panel spacing and 20px gaps. Only the session selector, tu
 
 ## Elevation & Depth
 
-Tonal surfaces and borders carry hierarchy. Static cards have no ornamental shadow. Tooltips alone may use `--shadow`. Keep the header opaque so text does not overlap background data. No ambient gradients or perpetual live-status animation.
+Tonal surfaces and borders carry hierarchy. Static cards have no ornamental shadow in light mode; dark mode uses restrained tonal shadows from its own token set. Tooltips alone may use `--shadow`. Keep the header opaque so text does not overlap background data. The only ambient gradient is the static dark-mode wash; there is no perpetual live-status animation.
 
 ## Shapes
 
@@ -139,11 +141,11 @@ Cards use `--radius` (14px); controls use `--radius-control` (8px). Pills are re
 
 `ui.tsx` owns Button (emphasis × intent), SegmentedControl, SearchField, StatePanel, Notice, and icons. Enabled actions have a hover treatment, 2px focus ring, pressed state, and pointer cursor. Disabled and busy actions cannot run; a busy button reserves its label's dimensions. Native links navigate. Native buttons expand turn evidence. Do not make table rows pretend to be buttons.
 
-The ledger strip, chart cards, rail panels, ranked rows and histogram cards are surfaces, not cards to be clicked: only ranked rows, the session-count figure and rail session rows are buttons, and each names what pressing it does. A chart figure is always paired with its tabular `srTable`, a text value, and a comparison where one exists; a number without a comparison states that plainly. Histograms use fixed shared buckets (`≤ 1s`, `1–2s`, … and `≤ 40 tok/s`, `40–50 tok/s`, …, `240–250 tok/s`, `> 250 tok/s`) so two sessions, ranges and sources compare on one scale, and their denominator is stated (`3/14 轮有记录`). Output speed stays coarse up to 40 tok/s, then splits every 10 tok/s up to 250 tok/s, and keeps everything faster in the open `> 250 tok/s` bucket, so a fast model's spread is visible. A dense histogram labels each bar with its bucket's upper edge (`≤40`, `50`, …, `250`, `>250`) and shows the percentage on hover/focus; the full range name stays in the hover text and in the summary line. With 23 buckets the axis compresses its gaps and, on narrow screens, hides alternate labels while keeping the first and last.
+The ledger strip, chart cards, rail panels, ranked rows and histogram cards are surfaces, not cards to be clicked: only ranked rows, the session-count figure and rail session rows are buttons, and each names what pressing it does. A chart figure is always paired with its tabular `srTable`, a text value, and a comparison where one exists; a number without a comparison states that plainly. Histograms use fixed shared buckets (`≤ 1s`, `1–2s`, … and `≤ 40 tok/s`, `40–50 tok/s`, …, `290–300 tok/s`, `> 300 tok/s`) so two sessions, ranges and sources compare on one scale, and their denominator is stated (`3/14 轮有记录`). Output speed stays coarse up to 40 tok/s, then splits every 10 tok/s up to 300 tok/s, and keeps everything faster in the open `> 300 tok/s` bucket, so a fast model's spread is visible. A dense histogram labels each bar with its bucket's upper edge (`≤40`, `50`, …, `300`, `>300`) and shows the percentage on hover/focus; the full range name stays in the hover text and in the summary line. With 28 buckets the axis compresses its gaps and, on narrow screens, hides alternate labels while keeping the first and last. Dashed p50/p95 marks name the percentile buckets on the same fixed scale (also spoken in the chart's accessible label), and a per-histogram `累积` toggle switches to the CDF view of the same samples without changing buckets or denominator.
 
 Loading uses an app-owned spinner in a reserved StatePanel, never a speculative skeleton. Stale reads retain data and show an inline notice. Search has an explicit clear button. Import shows a file name, truthful busy state, validation, and a persistent outcome. Details and context disclosures use native semantics. Behavior, privacy, navigation, and recovery are owned by [UX-CONTRACT.md](UX-CONTRACT.md).
 
-Use 140ms color/border transitions; motion never drives layout. Under reduced motion, loaders remain visible but static, transitions stop, and evidence scrolling is immediate. A live connection is indicated by text and a steady dot.
+Use 140ms color/border transitions; motion never drives layout (tabular digits keep every animated figure at its final width). On top of that baseline, `motion.ts` owns a small event-driven motion layer: ledger and hero figures count up to their value on mount and retarget from the displayed value when data changes; a one-shot brightness flash marks a figure whose live value just changed; trend and histogram bars grow in with a capped per-column stagger; the power curve draws on once per range and morphs between bucket grids; the temperature canvas interpolates between poll ticks; route and tab changes use the View Transitions API where available and fall back to an immediate swap. Interpolated frames only ever move between two recorded states — missing readings stay missing and a changed gap pattern snaps instead of fabricating samples. Segmented controls slide a measured thumb between options; ranked rows lift 1px on hover. Under reduced motion every one of these is skipped or static: loaders remain visible, transitions stop, count-ups and morphs land immediately, and evidence scrolling is immediate. A live connection is indicated by text and a steady dot.
 
 ## Do's and Don'ts
 
@@ -168,3 +170,9 @@ The trend keeps its 24px columns: at most 150 columns per range, each column a
 sampling bucket's mean, so finer sampling scrolls the plot instead of shrinking
 it. The bucket's peak rides in the tooltip, and the statistics table reports
 total, average and peak from the raw sampling grid, never from the buckets.
+The whole-machine curve carries a cyan-to-transparent area fill (a data
+encoding of the same series, not decoration), draws on once when the range
+changes, and morphs between refreshes; the current-power figure pairs with a
+semicircular load gauge whose arc is the current watts relative to the larger
+of current and interval peak, with the interval peak marked on the arc and a
+text percentage at its center.

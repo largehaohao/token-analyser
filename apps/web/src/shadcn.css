@@ -6,7 +6,8 @@
  * silently change the existing dashboard layout.
  *
  * Every shadcn semantic color below is an alias of a canonical STRATA token in
- * styles.css — there is no second palette and no dark theme override.
+ * styles.css — there is no second palette. The dark theme re-resolves those
+ * same tokens under [data-theme="dark"], so the aliases follow automatically.
  */
 
 @layer theme, base, components, utilities;

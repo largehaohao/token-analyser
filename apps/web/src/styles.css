@@ -4626,26 +4626,19 @@ button.ledger-item:focus-visible {
   padding: 0;
   border: 0;
   background: transparent;
+  /* 不用 opacity 压淡：11px 的强调色文字必须保持 4.5:1 以上。 */
   color: var(--accent);
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.04em;
   cursor: pointer;
-  opacity: 0.6;
 }
 .inspect .icon {
   width: 12px;
   height: 12px;
 }
-.rank-row:hover .inspect,
-.rank-row:focus-within .inspect,
-.comp-row:hover .inspect,
-.model-row:hover .inspect {
-  opacity: 1;
-}
 .inspect:hover,
 .inspect:focus-visible {
-  opacity: 1;
   text-decoration: underline;
 }
 
@@ -4718,6 +4711,12 @@ button.ledger-item:focus-visible {
 .hist .hb:focus-visible {
   outline: 1px solid var(--border-strong, var(--border));
   outline-offset: 1px;
+}
+/* 整图是一个键盘目标（方向键逐桶读数），焦点环画在图框上。 */
+.hist:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .hist .hb-bar {
   display: flex;
@@ -4793,9 +4792,9 @@ button.ledger-item:focus-visible {
   font-size: 8px;
   overflow: visible;
 }
-/* 390px 下密集直方图一列只剩十几 px：轴隔一个标，读轴不靠挤。 */
+/* 390px 下密集直方图一列只剩十几 px：轴隔一个标，读轴不靠挤；末桶始终可见。 */
 @media (max-width: 430px) {
-  .hist.dense .hist-tick:nth-child(even) {
+  .hist.dense .hist-tick:nth-child(even):not(:last-child) {
     visibility: hidden;
   }
 }
@@ -5275,7 +5274,7 @@ button.ledger-item:focus-visible {
   font-size: 18px;
 }
 .headline-row.stat .headline-value.waste {
-  color: var(--chart-orange);
+  color: var(--warn);
 }
 .headline-row.stat small {
   color: var(--text-muted);
@@ -5336,7 +5335,7 @@ button.ledger-item:focus-visible {
 }
 
 /* ---------- responsive ---------- */
-@media (min-width: 1181px) {
+@media (min-width: 1651px) {
   .tree-panel {
     position: sticky;
     top: 12px;
@@ -5360,6 +5359,11 @@ button.ledger-item:focus-visible {
   .panel-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+/* 轮次表至少需要 768px：1650px 以下证据区放不满双栏（1600px 时右栏恰好
+ * 差几个像素），先上下叠放，避免桌面宽度出现不必要的横向滚动
+ * （成本树粘性也只在大屏双栏时启用）。 */
+@media (max-width: 1650px) {
   .session-body.two {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -5886,6 +5890,9 @@ button.ledger-item:focus-visible {
 }
 .power-energy-stats dd {
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   color: var(--text);
   font-family: var(--display);
   font-size: clamp(1.05rem, 1.6vw, 1.28rem);
@@ -5908,6 +5915,7 @@ button.ledger-item:focus-visible {
 }
 .power-load-track {
   position: relative;
+  display: block;
   height: 5px;
   margin-top: 6px;
   overflow: hidden;
@@ -6994,4 +7002,413 @@ button.ledger-item:focus-visible {
 @media (hover: none), (pointer: coarse) {
   .temps-hint-desktop { display: none; }
   .temps-hint-touch { display: inline; }
+}
+
+/* ==========================================================================
+   STRATA dark theme · canonical dark token overlay
+   Light values above remain the source of truth for scripts/verify-ui-tokens.mjs;
+   this block only re-resolves the same semantic roles for [data-theme="dark"].
+   ========================================================================== */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1519;
+  --bg-raised: #161d23;
+  --bg-inset: #1d262e;
+  --border: #27323b;
+  --border-hot: #3c4a56;
+  --control-border: #3c4a56;
+  --text: #e7edf3;
+  --text-muted: #a3b3c2;
+  /* ≥4.5:1 on --bg-inset and --bg-raised at 11–12px. */
+  --text-dim: #8b9cab;
+  --accent: #35d3a6;
+  --accent-dim: #123529;
+  --accent-hover: #63e2bd;
+  --accent-ink: #06231b;
+  --warn: #e2a83d;
+  --danger: #f27682;
+  --danger-bg: #38181d;
+  --danger-border: #7c3a42;
+  --warn-bg: #32260e;
+  --warn-border: #6d5520;
+  --chart-blue: #6fa8f2;
+  --chart-violet: #b490f2;
+  --chart-cyan: #41c3da;
+  --chart-orange: #ea9a5e;
+  --chart-pink: #d97ce9;
+  --chart-rose: #f2749e;
+  --chart-indigo: #8f97f2;
+  --chart-wait: #5fabdf;
+  --chart-neutral: #9ab3a5;
+  --chart-flagged: #d19d67;
+  --violet-bg: #161d23;
+  --shadow: 0 5px 24px rgba(0, 0, 0, 0.42);
+  --shadow-tooltip: 0 8px 20px rgba(0, 0, 0, 0.55);
+  --surface-overlay: rgba(22, 29, 35, 0.78);
+  --accent-overlay: rgba(53, 211, 166, 0.08);
+  --accent-selection-ring: rgba(53, 211, 166, 0.3);
+  --warn-overlay: rgba(50, 38, 14, 0.88);
+  --selected-overlay: rgba(53, 211, 166, 0.12);
+  --scrollbar-thumb: #3c4a56;
+  --scrollbar-track: #0f1519;
+  --scrollbar-hover: #556674;
+  --scrollbar-active: #71828f;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+/* Dark ambient: two static, low-alpha tint fields borrowed from the palette.
+   No animation, no light-mode change; the ledger stays quiet. */
+[data-theme="dark"] body {
+  background:
+    radial-gradient(
+      1100px 560px at 88% -12%,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      900px 520px at -8% 112%,
+      color-mix(in srgb, var(--chart-blue) 6%, transparent),
+      transparent 58%
+    ),
+    var(--bg);
+  background-attachment: fixed;
+}
+[data-theme="dark"] .app-header {
+  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+}
+
+/* ==========================================================================
+   Motion layer · event-driven, reduced-motion safe
+   The global prefers-reduced-motion block above zeroes every animation and
+   transition declared here; count-up/morph hooks also resolve instantly.
+   ========================================================================== */
+@keyframes bar-grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+@keyframes value-flash {
+  0% {
+    filter: brightness(1.45);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+@keyframes line-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes today-pulse {
+  0% {
+    filter: brightness(1.6);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+.value-flash {
+  animation: value-flash 700ms var(--ease-out);
+}
+
+/* Route crossfade (View Transitions API; unsupported browsers just swap). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
+}
+
+/* ---------- ledger delta chips ---------- */
+.ledger-delta.up,
+.ledger-delta.down {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.ledger-delta.up {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+.ledger-delta.down {
+  background: var(--accent-dim);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* ---------- segmented sliding thumb ---------- */
+.segmented-control {
+  position: relative;
+}
+.segmented-control > button {
+  position: relative;
+  z-index: 1;
+}
+.seg-thumb {
+  position: absolute;
+  z-index: 0;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  border: 1px solid var(--border-hot);
+  border-radius: 6px;
+  background: var(--accent-dim);
+  pointer-events: none;
+  transition:
+    transform 220ms cubic-bezier(0.34, 1.32, 0.64, 1),
+    width 220ms cubic-bezier(0.34, 1.32, 0.64, 1);
+}
+.segmented-control button.active {
+  background: transparent;
+  border-color: transparent;
+}
+.chart-metric-tabs button.active {
+  background: transparent;
+  color: var(--accent);
+}
+
+/* ---------- trend: entrance, crosshair, focus dim, reference line ---------- */
+.trend-col .fill {
+  transform-origin: bottom;
+  animation: bar-grow 420ms var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 16ms);
+  transition:
+    height 240ms cubic-bezier(0.34, 1.32, 0.64, 1),
+    opacity var(--motion),
+    filter var(--motion);
+}
+.trend-col.today-flash .fill {
+  animation: today-pulse 700ms var(--ease-out);
+}
+.trend-col.hover::before,
+.trend-col:focus-visible::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--border-hot);
+  pointer-events: none;
+}
+.chart-body.trend .bars.has-hover .trend-col:not(.hover):not(:focus-visible) .fill {
+  opacity: 0.45;
+}
+.trend-col.weekend {
+  background: color-mix(in srgb, var(--bg-inset) 55%, transparent);
+  border-radius: 4px;
+}
+.trend-col.today::after {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translateX(-50%);
+}
+.chart-body.trend .tick.today-tick {
+  color: var(--accent);
+  font-weight: 700;
+}
+.trend-avg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--accent) 65%, transparent);
+  pointer-events: none;
+}
+.trend-avg b {
+  position: absolute;
+  top: -9px;
+  right: 0;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+/* ---------- histogram: entrance, percentile marks, cumulative toggle ---------- */
+.hist .hb-bar > i {
+  transform-origin: bottom;
+  animation: bar-grow 380ms var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 10ms);
+  transition: height 240ms cubic-bezier(0.34, 1.32, 0.64, 1);
+}
+.hist .hb {
+  overflow: visible;
+}
+.pct-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -1px;
+  width: 0;
+  border-left: 1px dashed var(--text-dim);
+  pointer-events: none;
+}
+.pct-mark b {
+  position: absolute;
+  top: -2px;
+  right: 2px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.pct-mark.p95 b {
+  right: auto;
+  left: 2px;
+}
+.hist-mode {
+  padding: 0 6px;
+  min-height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition:
+    background var(--motion),
+    color var(--motion),
+    border-color var(--motion);
+}
+.hist-mode:hover {
+  color: var(--text);
+  border-color: var(--border-hot);
+}
+.hist-mode[aria-pressed="true"] {
+  background: var(--accent-dim);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+}
+
+/* ---------- composition / share bars morph ---------- */
+.mix-seg,
+.comp-bar > i,
+.rail-rank-bar > i,
+.power-load-fill {
+  transition: width 260ms var(--ease-out);
+}
+.power-energy-seg {
+  transition: flex-grow 300ms var(--ease-out);
+}
+/* 段内白字要过 4.5:1：浅色的蓝/紫底压暗一档（色相不变，图例点保持原色）。 */
+.power-energy-seg.cpu {
+  background: color-mix(in srgb, var(--chart-blue) 80%, #000);
+}
+.power-energy-seg.gpu {
+  background: color-mix(in srgb, var(--chart-violet) 80%, #000);
+}
+.power-energy-seg.other {
+  background: color-mix(in srgb, var(--chart-cyan) 80%, #000);
+}
+/* 深色主题的图色更亮，改用深墨字、原色底。 */
+[data-theme="dark"] .power-energy-seg {
+  color: #0c1216;
+}
+[data-theme="dark"] .power-energy-seg.cpu {
+  background: var(--chart-blue);
+}
+[data-theme="dark"] .power-energy-seg.gpu {
+  background: var(--chart-violet);
+}
+[data-theme="dark"] .power-energy-seg.other {
+  background: var(--chart-cyan);
+}
+
+/* ---------- interactive row lift ---------- */
+button.rail-rank {
+  transition:
+    background var(--motion),
+    transform var(--motion),
+    box-shadow var(--motion);
+}
+button.rail-rank:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+.rank-row {
+  transition: background var(--motion);
+}
+.rank-row:hover {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+/* ---------- power page: area fill, line draw, gauge ---------- */
+.power-area {
+  opacity: 0.9;
+}
+.power-line-main {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: line-draw 900ms var(--ease-in-out) forwards;
+}
+.power-gauge {
+  display: block;
+  width: 132px;
+  max-width: 100%;
+  height: auto;
+  margin-top: 6px;
+}
+.power-gauge-track {
+  fill: none;
+  stroke: var(--bg-inset);
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+.power-gauge-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 8;
+  stroke-linecap: round;
+  transition: stroke-dasharray 420ms var(--ease-out);
+}
+.power-gauge-peak {
+  stroke: var(--chart-orange);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.power-gauge-text {
+  fill: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-anchor: middle;
+}
+.power-gauge-scale {
+  fill: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+/* ---------- theme toggle ---------- */
+.theme-toggle .icon {
+  transition: transform var(--motion);
+}
+.theme-toggle:hover .icon {
+  transform: rotate(18deg);
 }

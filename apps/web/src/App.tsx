@@ -37,6 +37,13 @@ import { SessionView } from "./SessionView";
 import { UnitSwitcher } from "./UnitSwitcher";
 import { NowProvider, useNow } from "./useNow";
 import { readUnitPref, writeUnitPref } from "./unit-pref";
+import {
+  applyTheme,
+  readThemePref,
+  writeThemePref,
+  type ThemePref,
+} from "./theme-pref";
+import { withViewTransition } from "./view-transition";
 import { SESSION_PAGE_SIZE, resolveSelectedSession } from "./session-page";
 import { readDroppedFile, type ImportStatus } from "./import-file";
 import { pricingUpdateNotice as buildPricingUpdateNotice } from "./pricing-notice";
@@ -87,6 +94,7 @@ function AppShell() {
     initialNavigation.hardwareTab ?? "temps",
   );
   const [unit, setUnit] = useState<CostUnit>(readUnitPref);
+  const [theme, setTheme] = useState<ThemePref>(readThemePref);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [previousOverview, setPreviousOverview] = useState<Overview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -155,6 +163,11 @@ function AppShell() {
   }, [unit]);
 
   useEffect(() => {
+    applyTheme(theme);
+    writeThemePref(theme);
+  }, [theme]);
+
+  useEffect(() => {
     if (view !== "sessions" || mobileSessionPane !== "detail" ||
         !window.matchMedia("(max-width: 780px)").matches) return;
     const frame = requestAnimationFrame(() => {
@@ -192,16 +205,18 @@ function AppShell() {
 
   useEffect(() => {
     function restoreNavigation() {
-      mobileContextTarget.current = false;
-      const next = readSessionNavigation();
-      preferredSessionIdRef.current = next.selectedId;
-      setView(next.view);
-      setHardwareTab(next.hardwareTab ?? "temps");
-      setSelectedId(next.selectedId);
-      setRange(next.range);
-      setSource(next.source);
-      setSelectedNodeId(null);
-      setContextOpen(null);
+      withViewTransition(() => {
+        mobileContextTarget.current = false;
+        const next = readSessionNavigation();
+        preferredSessionIdRef.current = next.selectedId;
+        setView(next.view);
+        setHardwareTab(next.hardwareTab ?? "temps");
+        setSelectedId(next.selectedId);
+        setRange(next.range);
+        setSource(next.source);
+        setSelectedNodeId(null);
+        setContextOpen(null);
+      });
     }
     window.addEventListener("popstate", restoreNavigation);
     return () => window.removeEventListener("popstate", restoreNavigation);
@@ -461,8 +476,17 @@ function AppShell() {
 
   useEffect(() => {
     if (!sessionsError) return;
+    // A hung engine can keep a request in flight for the full 45s timeout.
+    // Wait for each retry to settle so polling cannot stack up a dozen
+    // overlapping /sessions requests against a recovering engine.
+    let retryInFlight = false;
     const timer = setInterval(() => {
-      void refreshList(true).catch(() => undefined);
+      if (retryInFlight) return;
+      retryInFlight = true;
+      void refreshList(true).then(
+        () => { retryInFlight = false; },
+        () => { retryInFlight = false; },
+      );
     }, 3_000);
     return () => clearInterval(timer);
   }, [sessionsError, refreshList]);
@@ -573,14 +597,21 @@ function AppShell() {
   function handleSelectSession(id: string) {
     mobileContextTarget.current = false;
     preferredSessionIdRef.current = null;
+    const select = () => {
+      setSelectedId(id);
+      setSelectedNodeId(null);
+      setContextOpen(null);
+      setMobileSessionPane("detail");
+    };
     if (view !== "sessions") {
-      pushSessionNavigation({ view: "sessions", selectedId: id, range, source });
-      setView("sessions");
+      withViewTransition(() => {
+        pushSessionNavigation({ view: "sessions", selectedId: id, range, source });
+        setView("sessions");
+        select();
+      });
+      return;
     }
-    setSelectedId(id);
-    setSelectedNodeId(null);
-    setContextOpen(null);
-    setMobileSessionPane("detail");
+    select();
   }
 
   function returnToSessionList() {
@@ -652,11 +683,13 @@ function AppShell() {
     mobileContextTarget.current = false;
     setContextOpen(null);
     const nextId = resolveSelectedSession(selectedId, visibleSessions);
-    if (view !== "sessions")
-      pushSessionNavigation({ view: "sessions", selectedId: nextId, range, source });
-    setView("sessions");
-    setMobileSessionPane("list");
-    setSelectedId(nextId);
+    withViewTransition(() => {
+      if (view !== "sessions")
+        pushSessionNavigation({ view: "sessions", selectedId: nextId, range, source });
+      setView("sessions");
+      setMobileSessionPane("list");
+      setSelectedId(nextId);
+    });
   }
 
   function navigate(event: React.MouseEvent<HTMLAnchorElement>, next: View) {
@@ -673,26 +706,30 @@ function AppShell() {
     if (next === "sessions") openSessions();
     else {
       const tab = next === "hardware" ? hardwareTab : undefined;
-      pushSessionNavigation({
-        view: next,
-        selectedId,
-        range,
-        source,
-        ...(tab ? { hardwareTab: tab } : {}),
+      withViewTransition(() => {
+        pushSessionNavigation({
+          view: next,
+          selectedId,
+          range,
+          source,
+          ...(tab ? { hardwareTab: tab } : {}),
+        });
+        setView(next);
       });
-      setView(next);
     }
   }
 
   function handleHardwareTabChange(tab: HardwareTab) {
     if (tab === hardwareTab) return;
-    setHardwareTab(tab);
-    pushSessionNavigation({
-      view: "hardware",
-      selectedId,
-      range,
-      source,
-      hardwareTab: tab,
+    withViewTransition(() => {
+      setHardwareTab(tab);
+      pushSessionNavigation({
+        view: "hardware",
+        selectedId,
+        range,
+        source,
+        hardwareTab: tab,
+      });
     });
   }
 
@@ -778,6 +815,17 @@ function AppShell() {
                 </span>
               </Badge>
             </div>
+            <Button
+              className="theme-toggle"
+              emphasis="ghost"
+              aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+              title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+              onClick={() =>
+                setTheme((current) => (current === "dark" ? "light" : "dark"))
+              }
+            >
+              <Icon name={theme === "dark" ? "sun" : "moon"} />
+            </Button>
             <Button
               className="refresh-button"
               busy={refreshing}

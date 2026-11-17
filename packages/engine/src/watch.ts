@@ -74,6 +74,13 @@ export function watchSessions(
       const id = store.ingestPath(fullPath, { allowAppend: true });
       rememberFile(fullPath);
       if (id) onChange(id);
+      // The store may have deferred a WAL-only SQLite change to protect the
+      // first UI paint. If the WAL then stops changing, that change would be
+      // lost forever, so queue one recheck after the cooldown expires.
+      const deferredMs = store.sqliteWalReparseDelayMs(fullPath);
+      if (deferredMs !== undefined) {
+        scheduleIngest(fullPath, deferredMs + 250);
+      }
     } catch (err) {
       observedFiles.delete(fullPath);
       opts?.onError?.(
@@ -98,7 +105,7 @@ export function watchSessions(
     return 50;
   }
 
-  function scheduleIngest(fullPath: string): void {
+  function scheduleIngest(fullPath: string, delayMs?: number): void {
     fullPath = sessionPath(fullPath);
     if (!isSessionFile(fullPath)) return;
     const previous = pending.get(fullPath);
@@ -106,7 +113,7 @@ export function watchSessions(
     const timer = setTimeout(() => {
       pending.delete(fullPath);
       ingestIfSession(fullPath);
-    }, ingestDelayMs(fullPath));
+    }, delayMs ?? ingestDelayMs(fullPath));
     pending.set(fullPath, timer);
   }
 
@@ -129,7 +136,15 @@ export function watchSessions(
     observedFiles.set(fullPath, signature);
     // First scan would otherwise re-parse every GB-scale SQLite/JSONL the dump
     // already restored, blocking /sessions for tens of seconds after listen.
-    if (!primed && store.canSkipStartupIngest(fullPath)) return;
+    if (!primed && store.canSkipStartupIngest(fullPath)) {
+      // Exact matches need nothing. A WAL-only change, however, was deferred
+      // rather than ingested: queue the reparse that the cooldown promises.
+      const deferredMs = store.sqliteWalReparseDelayMs(fullPath);
+      if (deferredMs !== undefined) {
+        scheduleIngest(fullPath, deferredMs + 250);
+      }
+      return;
+    }
     scheduleIngest(fullPath);
   }
 

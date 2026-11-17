@@ -16,6 +16,7 @@ import {
   fileFingerprint,
   fingerprintsMatch,
   shouldDeferSqliteWalReparse,
+  SQLITE_WAL_REPARSE_COOLDOWN_MS,
   SQLITE_WAL_REPARSE_MIN_BYTES,
   readStoreDump,
   storeDbPath,
@@ -203,6 +204,71 @@ describe("SessionStore dump", () => {
         hasSources: true,
       }),
     ).toBe(false);
+  });
+
+  it("keeps the last parsed fingerprint and expires a deferred WAL reparse", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "store-dump-wal-defer-"));
+    const cacheDir = path.join(dir, "cache");
+    const rollout = path.join(dir, "rollout.jsonl");
+    const db = path.join(dir, "state.vscdb");
+    const wal = `${db}-wal`;
+    writeFileSync(rollout, readFileSync(path.join(fixtures, "wait-poll.jsonl")));
+    ageFile(rollout);
+    writeFileSync(db, Buffer.alloc(11 * 1024 * 1024));
+    writeFileSync(wal, "wal-v1");
+    ageFile(db);
+    ageFile(wal);
+
+    const first = new SessionStore({ cacheDir });
+    first.refresh([rollout]);
+    const parsed = fileFingerprint(db);
+    // Cancel refresh's scheduled dump before writing the crafted one.
+    first.dump();
+
+    // A real parsed snapshot repointed at the big SQLite file, so loadDump()
+    // has a source + fingerprint without parsing a fake 11MB database.
+    const snapshot = first.get(first.list()[0]!.id)!;
+    writeStoreDump(
+      {
+        version: STORE_DUMP_VERSION,
+        pricingContext: pricingCacheContext(),
+        sources: [{ ...snapshot, path: db, children: [] }],
+        toggles: {},
+        fingerprints: { [db]: parsed },
+      },
+      dir,
+    );
+
+    const second = new SessionStore({ cacheDir });
+    expect(second.loadDump()).toBe(1);
+    // A WAL-only commit written while the engine was stopped.
+    writeFileSync(wal, "wal-v2-with-new-events");
+    utimesSync(wal, new Date(), new Date());
+    const current = fileFingerprint(db);
+    expect(fingerprintsMatch(parsed, current)).toBe(false);
+    expect(second.canSkipStartupIngest(db)).toBe(true);
+    const delay = second.sqliteWalReparseDelayMs(db);
+    expect(delay).toBeGreaterThan(0);
+    expect(delay).toBeLessThanOrEqual(SQLITE_WAL_REPARSE_COOLDOWN_MS);
+
+    // The deferral must not persist a fingerprint for WAL data we skipped.
+    second.refresh([db]);
+    second.dump({ force: true });
+    const persisted = readStoreDump(dir, pricingCacheContext());
+    expect(fingerprintsMatch(persisted?.fingerprints[db], parsed)).toBe(true);
+    expect(fingerprintsMatch(persisted?.fingerprints[db], current)).toBe(false);
+
+    // Once the cooldown expires the same WAL change is no longer skippable.
+    const startedAt = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(startedAt + SQLITE_WAL_REPARSE_COOLDOWN_MS + 1_000);
+      expect(second.canSkipStartupIngest(db)).toBe(false);
+      expect(second.sqliteWalReparseDelayMs(db)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+    closeStoreDb(dir);
   });
 
   it("schedules a dump after ingestPath", () => {

@@ -66,6 +66,41 @@ export function chartMax(values: Array<number | null>): number {
   return Math.max(...known, 1);
 }
 
+/**
+ * 4–6 readable axis values from 0 to max: a 1/2/5×10ⁿ step, plus the exact
+ * max when the step does not land on it, so the top gridline always matches
+ * the tallest bar's scale.
+ */
+export function niceChartTicks(max: number): number[] {
+  if (!(max > 0) || !Number.isFinite(max)) return [0];
+  const rough = max / 4;
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  const normalized = rough / magnitude;
+  const step =
+    (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) *
+    magnitude;
+  const ticks: number[] = [];
+  for (let i = 0; i * step <= max + step * 1e-6; i += 1) {
+    ticks.push(i * step);
+  }
+  if (ticks.length === 0 || ticks[ticks.length - 1]! < max - step * 1e-6) {
+    ticks.push(max);
+  }
+  return ticks;
+}
+
+/** Local calendar date (YYYY-MM-DD) used to mark the trend's today column. */
+export function localDateString(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+export function isWeekendDate(date: string): boolean {
+  if (isOverflowDate(date)) return false;
+  const day = new Date(`${date}T00:00:00`).getDay();
+  return day === 0 || day === 6;
+}
+
 export function barHeightPct(
   value: number | null,
   raw: number,

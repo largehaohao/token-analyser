@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ButtonHTMLAttributes,
@@ -17,10 +18,12 @@ import {
   InfoIcon,
   LayersIcon,
   LayoutGridIcon,
+  MoonIcon,
   PanelsTopLeftIcon,
   RefreshCwIcon,
   SearchIcon,
   ShieldCheckIcon,
+  SunIcon,
   TriangleAlertIcon,
   UploadIcon,
   XIcon,
@@ -53,7 +56,9 @@ type IconName =
   | "back"
   | "layers"
   | "gauge"
-  | "power";
+  | "power"
+  | "sun"
+  | "moon";
 
 /** shadcn ships lucide-react; the STRATA icon vocabulary maps onto it. */
 const ICONS: Record<IconName, LucideIcon> = {
@@ -75,6 +80,8 @@ const ICONS: Record<IconName, LucideIcon> = {
   layers: LayersIcon,
   gauge: GaugeIcon,
   power: ZapIcon,
+  sun: SunIcon,
+  moon: MoonIcon,
 };
 
 export function Icon({
@@ -212,28 +219,33 @@ export function srTable(
   headers: string[],
   rows: (string | number)[][],
 ) {
+  // Clip via an outer box: a <table> ignores widths below its min-content size,
+  // so putting `visually-hidden` on the table itself lets wide tables (e.g. the
+  // 28-bucket histogram) stretch the document and cause horizontal scroll.
   return (
-    <table className="visually-hidden">
-      <caption>{caption}</caption>
-      <thead>
-        <tr>
-          {headers.map((header) => (
-            <th key={header} scope="col">
-              {header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row, index) => (
-          <tr key={index}>
-            {row.map((cell, cellIndex) => (
-              <td key={cellIndex}>{cell}</td>
+    <div className="visually-hidden">
+      <table>
+        <caption>{caption}</caption>
+        <thead>
+          <tr>
+            {headers.map((header) => (
+              <th key={header} scope="col">
+                {header}
+              </th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={index}>
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -255,12 +267,48 @@ export function SegmentedControl<T extends string>({
   onChange: (value: T) => void;
   className?: string;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<{ left: number; width: number } | null>(
+    null,
+  );
+
+  // The sliding pill is measured from the active button so it tracks label
+  // width, wrapping and font metrics without a second source of truth.
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const measure = () => {
+      const active = container.querySelector<HTMLElement>("button.active");
+      setThumb(
+        active
+          ? { left: active.offsetLeft, width: active.offsetWidth }
+          : null,
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [value, options]);
+
   return (
     <div
+      ref={containerRef}
       className={`segmented-control ${className}`}
       role="group"
       aria-label={label}
     >
+      {thumb && (
+        <span
+          className="seg-thumb"
+          aria-hidden="true"
+          style={{
+            transform: `translateX(${thumb.left}px)`,
+            width: `${thumb.width}px`,
+          }}
+        />
+      )}
       {options.map((option) => (
         <Toggle
           key={option.id}

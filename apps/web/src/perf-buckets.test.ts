@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   arrayHistogram,
   distributionSummary,
+  percentileBucket,
   TPS_EDGES,
   TPS_LABELS,
   TPS_TICKS,
@@ -141,5 +142,23 @@ describe("latency buckets", () => {
     const summary = distributionSummary(dist);
     expect(summary).toContain("10/10");
     expect(summary).toContain(TPS_LABELS[2]);
+  });
+});
+
+describe("percentileBucket", () => {
+  it("finds the bucket where the cumulative count reaches q%", () => {
+    const dist = arrayHistogram(TTFT_LABELS, [2, 3, 4, 1, 0], "s", 10);
+    expect(percentileBucket(dist, 50)).toBe(1);
+    expect(percentileBucket(dist, 95)).toBe(3);
+    expect(percentileBucket(dist, 10)).toBe(0);
+    expect(percentileBucket(dist, 100)).toBe(3);
+  });
+
+  it("returns null without samples and the last bucket for tail-only data", () => {
+    const empty = arrayHistogram(TTFT_LABELS, [0, 0, 0, 0, 0], "s", 4);
+    expect(percentileBucket(empty, 50)).toBeNull();
+    const tail = arrayHistogram(TTFT_LABELS, [0, 0, 0, 0, 7], "s", 7);
+    expect(percentileBucket(tail, 50)).toBe(4);
+    expect(percentileBucket(tail, 95)).toBe(4);
   });
 });

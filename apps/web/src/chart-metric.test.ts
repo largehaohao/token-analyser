@@ -9,6 +9,9 @@ import {
   dayMetricValue,
   flaggedValue,
   formatChartDay,
+  isWeekendDate,
+  localDateString,
+  niceChartTicks,
   shouldLabelChartDay,
   TREND_COLUMN_GAP_PX,
   TREND_COLUMN_MIN_WIDTH_PX,
@@ -152,5 +155,38 @@ describe("chart labels", () => {
     expect(trendContentMinWidth(8)).toBe(
       44 + 8 * TREND_COLUMN_SLOT_PX - TREND_COLUMN_GAP_PX,
     );
+  });
+});
+
+describe("niceChartTicks", () => {
+  it("produces round steps that cover the max", () => {
+    expect(niceChartTicks(100)).toEqual([0, 50, 100]);
+    expect(niceChartTicks(80)).toEqual([0, 20, 40, 60, 80]);
+    expect(niceChartTicks(400)).toEqual([0, 100, 200, 300, 400]);
+  });
+
+  it("appends the exact max when the step overshoots it", () => {
+    expect(niceChartTicks(90)).toEqual([0, 50, 90]);
+  });
+
+  it("handles tiny and invalid maxima", () => {
+    expect(niceChartTicks(0)).toEqual([0]);
+    expect(niceChartTicks(-5)).toEqual([0]);
+    expect(niceChartTicks(Number.NaN)).toEqual([0]);
+    expect(niceChartTicks(4)).toEqual([0, 1, 2, 3, 4]);
+  });
+});
+
+describe("localDateString / isWeekendDate", () => {
+  it("formats the local calendar date", () => {
+    expect(localDateString(new Date(2026, 10, 16))).toBe("2026-11-16");
+    expect(localDateString(new Date(2026, 0, 5))).toBe("2026-01-05");
+  });
+
+  it("flags Saturday and Sunday only", () => {
+    expect(isWeekendDate("2026-11-14")).toBe(true);
+    expect(isWeekendDate("2026-11-15")).toBe(true);
+    expect(isWeekendDate("2026-11-16")).toBe(false);
+    expect(isWeekendDate("2026-11-13")).toBe(false);
   });
 });

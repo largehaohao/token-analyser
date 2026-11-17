@@ -177,6 +177,25 @@ export function arrayHistogram(
   };
 }
 
+/**
+ * Bucket holding the q-th percentile (0–100) of the recorded samples. Counts
+ * are bucketed, so the answer is the bucket whose cumulative count first
+ * reaches q% of `known` — precise enough to mark p50/p95 on the fixed scale.
+ */
+export function percentileBucket(
+  dist: HistogramData,
+  q: number,
+): number | null {
+  if (dist.known <= 0) return null;
+  const target = (q / 100) * dist.known;
+  let cumulative = 0;
+  for (let i = 0; i < dist.counts.length; i += 1) {
+    cumulative += dist.counts[i] ?? 0;
+    if (cumulative >= target) return i;
+  }
+  return dist.counts.length - 1;
+}
+
 export function distributionSummary(
   dist: HistogramData,
   noun = "轮",

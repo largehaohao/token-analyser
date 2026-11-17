@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { waitForSettled } from "./helpers";
 
 async function openSessions(page: Page) {
   await page.goto("/#sessions");
@@ -320,7 +321,10 @@ test("a failed background overview refresh preserves readable data", async ({
 }) => {
   await page.goto("/#overview");
   await expect(page.getByTestId("overview-page")).toBeVisible();
-  const total = await page.locator(".ledger-value").first().textContent();
+  // 数字有 count-up 动效：先等读数落定，再取基准值。
+  const total = await waitForSettled(
+    async () => page.locator(".ledger-value").first().textContent(),
+  );
   await page.route("**/overview?**", (route) =>
     route.fulfill({ status: 503, json: { error: "test offline" } }),
   );

@@ -8,7 +8,7 @@ const fixtureDir = fileURLToPath(new URL("../../../fixtures/native/", import.met
 
 const sources = (page: Page) => page.getByRole("combobox", { name: "会话来源", exact: true });
 async function seedNative(page: Page) {
-  for (const source of ["claude", "cursor", "pi"]) {
+  for (const source of ["claude", "cursor", "pi", "dsh"]) {
     const response = await page.request.post("/import", {
       headers: { "Content-Type": "application/x-ndjson", "X-Filename": `${source}.jsonl` },
       data: readFileSync(path.join(fixtureDir, `${source}.jsonl`), "utf8"),
@@ -136,7 +136,7 @@ test("every source filters the list and overview, and survives reload and browse
   await page.goto("/#sessions");
   await page.getByRole("button", { name: "全部", exact: true }).click();
   for (const [id, label] of [["codex", "Codex"], ["claude", "Claude Code"], ["cursor", "Cursor"], ["pi", "pi"], ["dsh", "DeepSeek Harness"]]) {
-    await sources(page).getByRole("button", { name: label, exact: true }).click();
+    await sources(page).selectOption(id);
     await expect(page.locator(".session-main").first()).toBeVisible();
     const badges = page.locator(".session-main .row-top .badge").filter({ hasText: new RegExp(`^${label}$`) });
     await expect.poll(async () => await badges.count() === await page.locator(".session-main").count()).toBe(true);
@@ -147,15 +147,15 @@ test("every source filters the list and overview, and survives reload and browse
     await page.getByRole("link", { name: "会话明细", exact: true }).click();
   }
   await page.getByRole("searchbox", { name: "筛选会话" }).fill("unmatched query");
-  await sources(page).getByRole("button", { name: "Claude Code", exact: true }).click();
+  await sources(page).selectOption("claude");
   await expect(page.getByRole("searchbox", { name: "筛选会话" })).toHaveValue("");
   await page.reload();
-  await expect(sources(page).getByRole("button", { name: "Claude Code", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(sources(page)).toHaveValue("claude");
   await expect(page.locator(".sess-title .badge", { hasText: "Claude Code" })).toBeVisible();
-  await sources(page).getByRole("button", { name: "Cursor", exact: true }).click();
+  await sources(page).selectOption("cursor");
   await expect(page.locator(".sess-title .badge", { hasText: "Cursor" })).toBeVisible();
   await page.goBack();
-  await expect(sources(page).getByRole("button", { name: "Claude Code", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(sources(page)).toHaveValue("claude");
   await expect(page.locator(".sess-title .badge", { hasText: "Claude Code" })).toBeVisible();
 });
 
@@ -166,12 +166,12 @@ test("historical sessions stay discoverable and missing sources explain how to i
     .map((s: object) => ({ ...s, startedAt: "2020-01-01T00:00:00Z", lastEventAt: "2020-01-01T00:00:00Z" }));
   await page.route("**/sessions", (route) => route.fulfill({ json: { sessions: historical } }));
   await page.goto("/#sessions");
-  await sources(page).getByRole("button", { name: "pi", exact: true }).click();
+  await sources(page).selectOption("pi");
   await expect(page.locator(".source-range-notice")).toContainText("pi 已发现");
   await expect(page.locator(".session-main")).toHaveCount(0);
   await page.getByRole("button", { name: "查看全部时间", exact: true }).click();
   await expect(page.locator(".session-main").first()).toBeVisible();
-  await sources(page).getByRole("button", { name: "Claude Code", exact: true }).click();
+  await sources(page).selectOption("claude");
   await expect(page.locator(".session-list")).toContainText("未发现 Claude Code 会话记录");
   await expect(page.getByRole("button", { name: "选择文件", exact: true })).toBeEnabled();
 });
@@ -192,7 +192,7 @@ test("changing sources rejects late overview data for the previous source", asyn
   });
   await page.goto("/");
   await request;
-  await sources(page).getByRole("button", { name: "pi", exact: true }).click();
+  await sources(page).selectOption("pi");
   await expect(page.getByRole("button", { name: /已分析会话/ })).toContainText("1");
   release();
   await expect.poll(() => fulfilled).toBe(true);

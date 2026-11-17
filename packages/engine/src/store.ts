@@ -26,6 +26,7 @@ import {
   fileFingerprint,
   fingerprintsMatch,
   shouldDeferSqliteWalReparse,
+  SQLITE_WAL_REPARSE_COOLDOWN_MS,
   readStoreDump,
   STORE_DUMP_VERSION,
   writeStoreDump,
@@ -236,8 +237,10 @@ export class SessionStore {
     }
   }
 
-  /** Large Cursor/OpenCode DBs stay WAL-dirty while the app is open. */
-  private shouldSkipSqliteWal(filePath: string, current: FileFingerprint): boolean {
+  private sqliteWalState(
+    filePath: string,
+    current: FileFingerprint,
+  ): Parameters<typeof shouldDeferSqliteWalReparse>[0] {
     const resolved = path.resolve(filePath);
     let fileBytes = current.size;
     try {
@@ -245,13 +248,37 @@ export class SessionStore {
     } catch {
       // Use fingerprint size when stat races with a delete.
     }
-    return shouldDeferSqliteWalReparse({
+    return {
       recorded: this.fingerprints.get(resolved),
       current,
       fileBytes,
       lastIngestAt: this.sqliteIngestAt.get(resolved),
       hasSources: this.sourcesForPath(resolved).length > 0,
-    });
+    };
+  }
+
+  /** Large Cursor/OpenCode DBs stay WAL-dirty while the app is open. */
+  private shouldSkipSqliteWal(filePath: string, current: FileFingerprint): boolean {
+    return shouldDeferSqliteWalReparse(this.sqliteWalState(filePath, current));
+  }
+
+  /**
+   * Milliseconds until a deferred WAL-only SQLite change may be re-parsed, or
+   * undefined when no deferral is pending. The watcher uses this to schedule
+   * the eventual reparse: without it, a single WAL commit made while the engine
+   * was stopped is skipped at warm start and never ingested.
+   */
+  sqliteWalReparseDelayMs(filePath: string): number | undefined {
+    let current: FileFingerprint;
+    try {
+      current = fileFingerprint(filePath);
+    } catch {
+      return undefined;
+    }
+    const state = this.sqliteWalState(filePath, current);
+    if (!shouldDeferSqliteWalReparse(state)) return undefined;
+    const elapsed = Date.now() - (state.lastIngestAt ?? 0);
+    return Math.max(0, SQLITE_WAL_REPARSE_COOLDOWN_MS - elapsed);
   }
 
   /**
@@ -441,7 +468,9 @@ export class SessionStore {
         // when inode/size/mtime/WAL were unchanged since the dump.
         // Empty previous is OK: Cursor JSONL dupes are fingerprint-only when
         // state.vscdb already owns those session ids.
-        if (fingerprintsMatch(recorded, current) || this.shouldSkipSqliteWal(p, current)) {
+        const unchanged = fingerprintsMatch(recorded, current);
+        const deferredWal = !unchanged && this.shouldSkipSqliteWal(p, current);
+        if (unchanged || deferredWal) {
           for (const snap of previous) {
             // vscdb live is derived from lastEventAt, not file mtime.
             const reusedLive = snap.path.endsWith(".vscdb") || path.basename(snap.path) === "opencode.db"
@@ -449,7 +478,13 @@ export class SessionStore {
               : isLive(current.mtimeMs);
             this.keepSource(snap, nextSources, nextToggles, reusedLive);
           }
-          nextFingerprints.set(resolved, current);
+          // A deferred WAL-only change was NOT parsed. Keep the fingerprint of
+          // the last real parse, otherwise the next refresh (and the on-disk
+          // dump) would claim to have ingested WAL data it never read.
+          nextFingerprints.set(
+            resolved,
+            deferredWal && recorded ? recorded : current,
+          );
           continue;
         }
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   appendFileSync,
   readFileSync,
@@ -393,6 +393,66 @@ describe("watchSessions", () => {
       expect(store.list().some((item) => item.id === "gone")).toBe(false);
     } finally {
       stop();
+    }
+  });
+
+  it("rechecks a deferred WAL-only change even when the file stops changing", () => {
+    vi.useFakeTimers();
+    const dir = mkdtempSync(path.join(tmpdir(), "watch-wal-defer-"));
+    const db = path.join(dir, "state.vscdb");
+    writeFileSync(db, "main");
+    let reingested = false;
+    const ingestPath = vi.fn((_filePath: string) => {
+      reingested = true;
+      return "s-cursor";
+    });
+    const store = {
+      canSkipStartupIngest: () => true,
+      sqliteWalReparseDelayMs: () => (reingested ? undefined : 30_000),
+      ingestPath,
+      removePath: () => undefined,
+    } as unknown as SessionStore;
+
+    const stop = watchSessions(store, () => {}, {
+      watchPaths: [dir],
+      recursive: false,
+    });
+    try {
+      vi.advanceTimersByTime(50);
+      expect(ingestPath).not.toHaveBeenCalled();
+      // No further fs event arrives; the cooldown recheck must still ingest.
+      vi.advanceTimersByTime(30_500);
+      expect(ingestPath).toHaveBeenCalledTimes(1);
+      expect(ingestPath.mock.calls[0]![0]).toBe(db);
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not schedule a recheck for an exact fingerprint match", () => {
+    vi.useFakeTimers();
+    const dir = mkdtempSync(path.join(tmpdir(), "watch-wal-match-"));
+    const db = path.join(dir, "state.vscdb");
+    writeFileSync(db, "main");
+    const ingestPath = vi.fn(() => "s-cursor");
+    const store = {
+      canSkipStartupIngest: () => true,
+      sqliteWalReparseDelayMs: () => undefined,
+      ingestPath,
+      removePath: () => undefined,
+    } as unknown as SessionStore;
+
+    const stop = watchSessions(store, () => {}, {
+      watchPaths: [dir],
+      recursive: false,
+    });
+    try {
+      vi.advanceTimersByTime(60_000);
+      expect(ingestPath).not.toHaveBeenCalled();
+    } finally {
+      stop();
+      vi.useRealTimers();
     }
   });
 });

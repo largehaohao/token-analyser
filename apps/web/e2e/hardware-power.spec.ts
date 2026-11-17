@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { waitForSettledNumber } from "./helpers";
 
 const PRESETS = [
   "近10分钟",
@@ -54,7 +55,8 @@ test("hardware energy follows its range and price without entering token costs",
   const summary = page.getByTestId("power-summary");
   await expect(summary).toContainText("近1小时用电量");
   await expect(summary).toContainText("电价 0.6629 元/kWh");
-  const energy = async () => Number((await totals.locator(".ledger-value").first().innerText()).replace(/[^\d.]/g, ""));
+  // 大数字有 count-up 动效：读数落定（连续两次一致）后再取值比较。
+  const energy = async () => waitForSettledNumber(totals.locator(".ledger-value").first());
   const hourEnergy = await energy();
   await range.getByRole("button", { name: "近1天", exact: true }).click();
   await expect(grid).toContainText("采集粒度每 1 分钟");
@@ -67,7 +69,7 @@ test("hardware energy follows its range and price without entering token costs",
   await page.getByRole("spinbutton", { name: "电价（元/kWh）" }).fill("1.10");
   await expect(totals).toContainText("电价 1.10 元/kWh");
   expect(await energy()).toBeCloseTo(hourEnergyAgain, 2);
-  const money = Number((await totals.locator(".ledger-value").last().innerText()).replace(/[^\d.]/g, ""));
+  const money = await waitForSettledNumber(totals.locator(".ledger-value").last());
   expect(Math.abs(money - hourEnergyAgain * 1.1)).toBeLessThan(0.006);
   await expect(page.getByRole("status").filter({ hasText: "演示数据，尚未接入" })).toBeVisible();
   await page.getByRole("link", { name: "成本总览", exact: true }).click();
