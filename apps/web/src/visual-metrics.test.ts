@@ -7,6 +7,7 @@ import {
   heatCalendar,
   metricSeries,
   movingAverage,
+  overlaySegments,
   trendOverlay,
 } from "./visual-metrics";
 
@@ -87,5 +88,28 @@ describe("heat calendar", () => {
       ...days,
     ];
     expect(heatCalendar(withOverflow, "tokens").some((cell) => cell.date === "earlier")).toBe(false);
+  });
+
+  it("keeps unknown days in their weekday slot", () => {
+    const withUnknown: OverviewDay[] = [
+      { date: "2026-11-01", cost: cost(10), flaggedCost: cost(0), unpricedRaw: 0 },
+      { date: "2026-11-02", cost: { ...cost(50), credits: null, usd: null }, flaggedCost: cost(0), unpricedRaw: 50 },
+      { date: "2026-11-03", cost: cost(30), flaggedCost: cost(0), unpricedRaw: 0 },
+    ];
+    const cells = heatCalendar(withUnknown, "usd");
+    expect(cells[6]?.date).toBe("2026-11-01");
+    expect(cells[7]).toMatchObject({ date: "2026-11-02", value: null, level: 0 });
+    expect(cells[8]?.date).toBe("2026-11-03");
+    expect(cells.length % 7).toBe(0);
+  });
+});
+
+describe("overlaySegments", () => {
+  it("scales on the shared max and splits missing runs", () => {
+    expect(overlaySegments([50, null, 100], 100)).toEqual(["0.5,50", "2.5,0"]);
+  });
+
+  it("keeps a single known run intact on its own scale", () => {
+    expect(overlaySegments([0, 100], 200)).toEqual(["0.5,100 1.5,50"]);
   });
 });

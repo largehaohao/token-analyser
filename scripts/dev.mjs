@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const enginePort = Number.parseInt(process.env.PORT ?? "7789", 10) || 7789;
 
 function waitForPort(port, timeoutMs = 20_000) {
   const started = Date.now();
@@ -30,12 +31,13 @@ const engine = spawn("pnpm", ["--filter", "engine", "start"], {
   cwd: root,
   stdio: "inherit",
   env: process.env,
+  detached: true,
 });
 
 try {
-  await waitForPort(7789);
+  await waitForPort(enginePort);
 } catch (err) {
-  engine.kill();
+  killTree(engine);
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 }
@@ -44,11 +46,27 @@ const web = spawn("pnpm", ["--filter", "web", "dev"], {
   cwd: root,
   stdio: "inherit",
   env: process.env,
+  detached: true,
 });
 
+function killTree(child) {
+  if (child.pid == null || child.exitCode != null) return;
+  try {
+    // Negative pid signals the whole process group (pnpm → node → tsx/vite),
+    // so restarts do not leave orphaned engines holding the port.
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
 function shutdown(code = 0) {
-  engine.kill();
-  web.kill();
+  killTree(engine);
+  killTree(web);
   process.exit(code);
 }
 

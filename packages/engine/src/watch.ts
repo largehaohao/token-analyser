@@ -57,6 +57,13 @@ export function watchSessions(
   let needsDirectoryScan = !useRecursive;
   let primed = false;
 
+  function ensureDirectoryScan(): void {
+    needsDirectoryScan = true;
+    if (directoryScan == null) {
+      directoryScan = setInterval(scanForSessions, 1_000);
+    }
+  }
+
   function errorIdFromPath(filePath: string): string {
     const base = path.basename(filePath);
     return base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : base;
@@ -162,6 +169,17 @@ export function watchSessions(
         if (!filename) return;
         scheduleIngest(path.join(dir, filename));
       });
+      // An async watcher failure (deleted root, EMFILE) must not become an
+      // unhandled 'error' event that kills the engine; fall back to scanning.
+      w.on("error", () => {
+        watchedDirs.delete(dir);
+        try {
+          w.close();
+        } catch {
+          // Already closed.
+        }
+        ensureDirectoryScan();
+      });
       watchers.push(w);
     } catch {
       watchedDirs.delete(dir);
@@ -209,6 +227,14 @@ export function watchSessions(
             scheduleIngest(path.join(root, filename));
           },
         );
+        w.on("error", () => {
+          try {
+            w.close();
+          } catch {
+            // Already closed.
+          }
+          ensureDirectoryScan();
+        });
         watchers.push(w);
         continue;
       } catch {

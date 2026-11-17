@@ -1,5 +1,6 @@
 import http from "node:http";
 import {
+  chmodSync,
   createReadStream,
   existsSync,
   mkdirSync,
@@ -23,6 +24,7 @@ import {
   type QwenPricingUpdateOptions,
 } from "./qwen-pricing.ts";
 import { SessionStore, type SessionIngestOptions } from "./store.ts";
+import { withPricingLock } from "./pricing-lock.ts";
 import { fetchPowerRange } from "./power.ts";
 import { fetchTempSnapshot, fetchTempHistory } from "./temps.ts";
 import { watchSessions } from "./watch.ts";
@@ -34,6 +36,7 @@ const HOST = "127.0.0.1";
 const DEFAULT_PORT = 7789;
 const HEARTBEAT_MS = 15_000;
 const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
+const MAX_SSE_BUFFER_BYTES = 1024 * 1024;
 
 type SseEvent = "session_added" | "session_updated" | "session_error";
 
@@ -68,6 +71,33 @@ function corsHeaders(extra: Record<string, string> = {}): Record<string, string>
     "Access-Control-Allow-Headers": "Content-Type, X-Filename",
     ...extra,
   };
+}
+
+/**
+ * Loopback binding alone does not stop DNS rebinding: a remote page can resolve
+ * its own hostname to 127.0.0.1 and become same-origin with this server. Only
+ * loopback Host authorities are served, and state-changing requests must come
+ * from a loopback Origin (or no Origin at all, e.g. a local CLI).
+ */
+function isLoopbackHost(host: string | undefined): boolean {
+  if (!host) return false;
+  const hostname = host.replace(/:\d+$/, "").toLowerCase();
+  return (
+    hostname === "127.0.0.1" ||
+    hostname === "localhost" ||
+    hostname === "[::1]" ||
+    hostname === "::1"
+  );
+}
+
+function isTrustedOrigin(origin: string | undefined): boolean {
+  if (origin == null) return true;
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && isLoopbackHost(url.host);
+  } catch {
+    return false;
+  }
 }
 
 function sendJson(
@@ -291,9 +321,14 @@ async function handleImport(
 
     const body = await readBody(req, maxImportBytes);
     const importsDir = path.join(tokenAnalyserHome(), "imports");
-    mkdirSync(importsDir, { recursive: true });
+    mkdirSync(importsDir, { recursive: true, mode: 0o700 });
+    try {
+      chmodSync(importsDir, 0o700);
+    } catch {
+      // Best-effort tightening of a pre-existing directory.
+    }
     const dest = uniqueImportPath(importsDir, filename);
-    writeFileSync(dest, body);
+    writeFileSync(dest, body, { mode: 0o600 });
 
     const id = store.ingestPath(dest, { skipExisting: true });
     if (!id) {
@@ -372,9 +407,14 @@ async function handleImport(
     }
 
     const importsDir = path.join(tokenAnalyserHome(), "imports");
-    mkdirSync(importsDir, { recursive: true });
+    mkdirSync(importsDir, { recursive: true, mode: 0o700 });
+    try {
+      chmodSync(importsDir, 0o700);
+    } catch {
+      // Best-effort tightening of a pre-existing directory.
+    }
     const dest = uniqueImportPath(importsDir, filename);
-    writeFileSync(dest, fileData, "binary");
+    writeFileSync(dest, fileData, { encoding: "binary", mode: 0o600 });
 
     const id = store.ingestPath(dest, { skipExisting: true });
     if (!id) {
@@ -434,7 +474,14 @@ function serveStatic(
     ...corsHeaders(),
     "Content-Type": types[ext] ?? "application/octet-stream",
   });
-  createReadStream(filePath).pipe(res);
+  const stream = createReadStream(filePath);
+  stream.on("error", () => {
+    // The file can disappear between the existence check and the read.
+    if (!res.headersSent) sendJson(res, 404, { error: "not_found" });
+    else res.destroy();
+  });
+  res.on("error", () => stream.destroy());
+  stream.pipe(res);
   return true;
 }
 
@@ -532,6 +579,13 @@ export async function startServer(opts?: {
   function broadcast(event: SseEvent, data: { id: string; reason?: string }): void {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const client of sseClients) {
+      // write() returning false does not throw: a client that stops reading
+      // must be disconnected instead of buffering updates without bound.
+      if (client.writableLength > MAX_SSE_BUFFER_BYTES) {
+        sseClients.delete(client);
+        client.destroy();
+        continue;
+      }
       try {
         client.write(payload);
       } catch {
@@ -555,6 +609,19 @@ export async function startServer(opts?: {
 
   const server = http.createServer(async (req, res) => {
     try {
+    if (!isLoopbackHost(req.headers.host)) {
+      sendJson(res, 403, { error: "forbidden" });
+      return;
+    }
+    if (
+      req.method !== "GET" &&
+      req.method !== "HEAD" &&
+      req.method !== "OPTIONS" &&
+      !isTrustedOrigin(req.headers.origin)
+    ) {
+      sendJson(res, 403, { error: "forbidden" });
+      return;
+    }
     if (req.method === "OPTIONS") {
       res.writeHead(204, corsHeaders());
       res.end();
@@ -587,10 +654,8 @@ export async function startServer(opts?: {
         return;
       }
 
-      const update = await runPricingUpdate(
-        store,
-        opts?.pricingUpdate,
-        opts?.qwenPricingUpdate,
+      const update = await withPricingLock(() =>
+        runPricingUpdate(store, opts?.pricingUpdate, opts?.qwenPricingUpdate),
       );
 
       if (update.error) {
@@ -717,7 +782,7 @@ export async function startServer(opts?: {
           error: result.error,
           timestamp: Date.now() / 1000,
           cpu: {
-            name: "AMD Ryzen 7 7700",
+            name: "未识别 CPU",
             status: "missing",
             temperatures: {
               tctl: { value: null },
@@ -880,6 +945,11 @@ export async function startServer(opts?: {
 
   heartbeatTimer = setInterval(() => {
     for (const client of sseClients) {
+      if (client.writableLength > MAX_SSE_BUFFER_BYTES) {
+        sseClients.delete(client);
+        client.destroy();
+        continue;
+      }
       try {
         client.write(": heartbeat\n\n");
       } catch {

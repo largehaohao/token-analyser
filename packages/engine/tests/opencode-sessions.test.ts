@@ -285,4 +285,88 @@ describe("OpenCode sessions", () => {
     writeFileSync(`${file}-wal`, "x");
     expect(fileFingerprint(file).walSize).toBe(1);
   });
+
+  it("keeps tool parts when text and tokens are stored inline on the message", () => {
+    const dir = home();
+    const file = path.join(dir, "opencode.db");
+    const db = new DatabaseSync(file);
+    db.exec(`
+      CREATE TABLE session_v2 (
+        id text PRIMARY KEY, parent_id text, directory text, title text,
+        time_created integer, time_updated integer, model text
+      );
+      CREATE TABLE session_message (
+        id text PRIMARY KEY, session_id text, type text, time_created integer, data text
+      );
+      CREATE TABLE part (
+        id text PRIMARY KEY, message_id text, session_id text, time_created integer, data text
+      );
+    `);
+    const created = 1_760_000_000_000;
+    db.prepare("INSERT INTO session_v2 VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+      "ses_inline", null, "/tmp/demo", "Inline", created, created + 5_000, null,
+    );
+    db.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)").run(
+      "msg_inline", "ses_inline", "assistant", created + 4_000,
+      JSON.stringify({
+        model: { id: "claude-sonnet-4-6", providerID: "opencode" },
+        text: "Listed the directory.",
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 }, total: 120 },
+      }),
+    );
+    db.prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?)").run(
+      "part_tool", "msg_inline", "ses_inline", created + 3_000,
+      JSON.stringify({
+        type: "tool", tool: "bash", callID: "call-1",
+        state: { input: { command: "ls" }, output: "README.md", status: "completed" },
+      }),
+    );
+    try {
+      const snapshots = ingestSessions(file, { cacheHome: dir });
+      const snap = snapshots.find((item) => item.id === "opencode:ses_inline");
+      expect(snap?.turns).toHaveLength(1);
+      expect(snap?.turns[0].response).toBe("Listed the directory.");
+      expect(snap?.turns[0].tools[0]).toMatchObject({ name: "exec", input: "ls", outputPreview: "README.md" });
+      expect(snap?.turns[0].usage.output_tokens).toBe(20);
+    } finally { db.close(); }
+  });
+
+  it("timestamps assistant activity at recorded completion, not request creation", () => {
+    const dir = home();
+    const file = path.join(dir, "opencode.db");
+    const db = new DatabaseSync(file);
+    db.exec(`
+      CREATE TABLE session_v2 (
+        id text PRIMARY KEY, parent_id text, directory text, title text,
+        time_created integer, time_updated integer, model text
+      );
+      CREATE TABLE session_message (
+        id text PRIMARY KEY, session_id text, type text, time_created integer, data text
+      );
+      CREATE TABLE part (
+        id text PRIMARY KEY, message_id text, session_id text, time_created integer, data text
+      );
+    `);
+    // Request created 2025-10-09T23:59:00Z, completed 2025-10-10T00:01:00Z.
+    const created = Date.parse("2025-10-09T23:59:00Z");
+    const completed = Date.parse("2025-10-10T00:01:00Z");
+    db.prepare("INSERT INTO session_v2 VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+      "ses_midnight", null, "/tmp/demo", "Midnight", created, completed, null,
+    );
+    db.prepare("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)").run(
+      "msg_midnight", "ses_midnight", "assistant", created,
+      JSON.stringify({
+        model: { id: "claude-sonnet-4-6", providerID: "opencode" },
+        text: "Done after midnight.",
+        time: { created, completed },
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 }, total: 120 },
+      }),
+    );
+    try {
+      const snapshots = ingestSessions(file, { cacheHome: dir });
+      const snap = snapshots.find((item) => item.id === "opencode:ses_midnight");
+      expect(snap?.turns[0].endedAt).toBe(new Date(completed).toISOString());
+      expect(snap?.lastEventAt).toBe(new Date(completed).toISOString());
+    } finally { db.close(); }
+  });
 });

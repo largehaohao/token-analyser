@@ -3,6 +3,7 @@ import {
   durationClocks,
   extractTaskTimings,
   performanceDistribution,
+  performanceSamples,
   requestPerformance,
   requestTimings,
   summarizePerformance,
@@ -322,5 +323,89 @@ describe("per-request performance", () => {
     });
     expect(snap.turns[1].requestPerformance).toMatchObject({ ttftMs: null, outputTokensPerSecond: null });
     expect(snap.performance?.avgTtftMs).toBe(1200);
+  });
+
+  it("marks Codex ledger usage as recorded so request summaries keep their denominator", () => {
+    const first = count(1, 100);
+    first.payload!.request_performance = { duration_ms: 2000 };
+    const second = count(5, 50, 150);
+    second.payload!.request_performance = { duration_ms: 4000 };
+    const snap = analyseSession({
+      sessionId: "recorded",
+      path: "/tmp/recorded.jsonl",
+      events: [start(0), first, second, complete(10, "t1", { duration_ms: 10_000 })],
+    });
+    expect(snap.turns.length).toBeGreaterThan(0);
+    expect(snap.turns.every((turn) => turn.usageRecorded === true)).toBe(true);
+    const samples = requestTimings(snap.turns);
+    expect(samples.every((sample) => sample.outputTokens != null)).toBe(true);
+    const summary = summarizePerformance(samples.map((sample) => ({ ...sample, basis: "request" as const })));
+    expect(summary.speedSampleCount).toBeGreaterThan(0);
+    expect(summary.outputTokensPerSecond).not.toBeNull();
+  });
+
+  it("continues past null timing fields to a valid later measurement", () => {
+    const measured = requestPerformance(10, { durationMs: null, ttftMs: null }, { duration_ms: 1500, ttft_ms: 200 });
+    expect(measured.durationMs).toBe(1500);
+    expect(measured.ttftMs).toBe(200);
+    // A recorded zero stays authoritative (no usable window), while an
+    // invalid negative value falls through to the later measurement.
+    const zero = requestPerformance(10, { duration_ms: 0 }, { duration_ms: 1500 });
+    expect(zero.durationMs).toBeNull();
+    const negative = requestPerformance(10, { duration_ms: -5 }, { duration_ms: 1500 });
+    expect(negative.durationMs).toBe(1500);
+  });
+
+  it("aggregates recorded speed consistently in summaries and histograms", () => {
+    const turns = [2000, null].map((durationMs, index) => ({
+      id: String(index), startedAt: "2026-10-08T00:00:00Z", endedAt: "2026-10-08T00:00:02Z",
+      usageRecorded: true, usage: usage(10),
+      requestPerformance: requestPerformance(10, { tokens_per_second: 70, duration_ms: durationMs }),
+    } as Turn));
+    const samples = requestTimings(turns).map((sample) => ({ ...sample, basis: "request" as const }));
+    const summary = summarizePerformance(samples);
+    expect(summary.speedSampleCount).toBe(2);
+    expect(summary.outputTokensPerSecond).toBeCloseTo(70, 10);
+    const distribution = performanceDistribution(samples);
+    expect(distribution.tps[3]).toBe(2);
+  });
+
+  it("collects task windows and request timing from the whole session tree", () => {
+    const snap = (partial: Partial<SessionSnapshot> & { id: string }): SessionSnapshot => ({
+      parentId: null, nickname: partial.id, cwd: "/repo", live: false,
+      path: `/tmp/${partial.id}.jsonl`, startedAt: "2026-10-08T00:00:00Z",
+      lastEventAt: "2026-10-08T00:00:10Z", model: null, effort: null,
+      ledger_warning: false, parse_errors: [], rate_limits: null, rateLimitSnapshots: [],
+      rateCardAsOf: "2026-10-08", fastMode: false, cost: emptyCost(), waste: emptyCost(),
+      toggles: {} as SessionSnapshot["toggles"], tree: {} as SessionSnapshot["tree"],
+      turns: [], children: [], suggestions: [],
+      ...partial,
+    });
+    const grandchild = snap({
+      id: "grandchild",
+      turns: [{
+        id: "g1", sessionId: "grandchild", startedAt: "2026-10-08T00:00:01Z", endedAt: "2026-10-08T00:00:03Z",
+        usageRecorded: true, usage: usage(30),
+        requestPerformance: requestPerformance(30, { duration_ms: 2000 }),
+      } as Turn],
+    });
+    const childWithTasks = snap({
+      id: "child",
+      children: [grandchild],
+      taskTimings: [{
+        id: "t1", startedAt: "2026-10-08T00:00:00Z", endedAt: "2026-10-08T00:00:10Z",
+        durationMs: 10_000, ttftMs: 1000, outputTokens: 500,
+      }],
+    });
+    const root = snap({ id: "root", children: [childWithTasks] });
+    const withTasks = performanceSamples([root]);
+    expect(withTasks.basis).toBe("task");
+    expect(withTasks.samples).toHaveLength(1);
+    expect(withTasks.samples[0]).toMatchObject({ id: "t1", outputTokens: 500 });
+
+    const requestRoot = snap({ id: "root2", children: [snap({ id: "child2", children: [grandchild] })] });
+    const requestOnly = performanceSamples([requestRoot]);
+    expect(requestOnly.basis).toBe("request");
+    expect(requestOnly.samples.map((sample) => sample.id)).toEqual(["g1"]);
   });
 });

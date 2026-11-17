@@ -14,6 +14,7 @@ import { loadApiPrices } from "./native-pricing.ts";
 import {
   collectTaskTimings,
   durationClocks,
+  flattenSessionTurns,
   performanceDistribution,
   requestTimings,
   summarizePerformance,
@@ -314,13 +315,6 @@ function walkTurns(
   for (const child of session.children) walkTurns(child, visit, true);
 }
 
-function flattenTurns(session: SessionSnapshot): Turn[] {
-  return [
-    ...session.turns,
-    ...session.children.flatMap((child) => flattenTurns(child)),
-  ];
-}
-
 function turnMatchesModel(turn: Turn, model: string | undefined): boolean {
   if (model == null || model === "") return true;
   return turnModelKey(turn.model) === model;
@@ -527,11 +521,11 @@ export function buildOverview(
     chartDays.push(makeDay(OVERVIEW_LATER_DATE, later, laterFlagged, laterUnpriced));
   }
 
-  const timedSamples = included.flatMap((session) => {
+  const pooledSamples = included.flatMap((session) => {
     const ranged = filterSessionTurns(session, opts.sinceMs, opts.untilMs);
     // Model filters are turn-scoped; task windows are not attributed to a model.
     if (modelFilter) {
-      const turns = flattenTurns(ranged).filter((turn) =>
+      const turns = flattenSessionTurns(ranged).filter((turn) =>
         turnMatchesModel(turn, modelFilter),
       );
       return requestTimings(turns).map((sample) => ({
@@ -543,13 +537,21 @@ export function buildOverview(
     const hasTasks = taskSamples.length > 0;
     // Sources without agent-task windows time a single model request.
     // Request timing includes child sessions; cost and duration already do.
-    return (hasTasks ? taskSamples : requestTimings(flattenTurns(session)))
+    return (hasTasks ? taskSamples : requestTimings(flattenSessionTurns(session)))
       .map((sample) => ({ ...sample, basis: hasTasks ? ("task" as const) : ("request" as const) }))
       .filter((sample) =>
         (opts.sinceMs == null || (sample.endedAt != null && Date.parse(sample.endedAt) >= opts.sinceMs)) &&
           (opts.untilMs == null || (sample.endedAt != null && Date.parse(sample.endedAt) < opts.untilMs)),
       );
   });
+
+  // One figure never mixes agent-task windows with request decode windows:
+  // when any included session records tasks, the overview reports that basis
+  // and aggregates only task samples; request-only sources keep their basis.
+  const hasTaskSamples = pooledSamples.some((sample) => sample.basis === "task");
+  const timedSamples = hasTaskSamples
+    ? pooledSamples.filter((sample) => sample.basis === "task")
+    : pooledSamples;
 
   const card = loadRateCard();
   return {
@@ -571,12 +573,12 @@ export function buildOverview(
       parseErrors,
     },
     days: chartDays,
-    slices: OVERVIEW_SLICE_KEYS.map((key) => ({
-      key,
-      raw: slices[key].raw,
-      credits: slices[key].raw === 0 ? 0 : slices[key].credits,
-      usd: slices[key].raw === 0 ? 0 : slices[key].usd,
-    })),
+    slices: OVERVIEW_SLICE_KEYS.map((key) => {
+      // Zero measured tokens does not mean zero money: native sources record
+      // USD without token telemetry, and unmeasured slices must stay `—`.
+      const slice = normalizeCost(slices[key]);
+      return { key, raw: slice.raw, credits: slice.credits, usd: slice.usd };
+    }),
     models: [...models.entries()]
       .map(([model, entry]) => ({
         model,

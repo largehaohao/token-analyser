@@ -187,9 +187,10 @@ Compare overview and session detail in both light and dark themes (header toggle
 
 ## Hardware electricity preview
 
-`HardwarePowerPage.tsx` owns `#power`; `hardware-power.ts` owns deterministic demo samples,
-range validation, trapezoidal energy integration and CNY cost. It uses no hardware
-network requests. Every reading remains labelled as demo data, and electricity
+`HardwarePowerPage.tsx` owns `#power`; `hardware-power.ts` owns the power data adapter,
+range validation, trapezoidal energy integration and CNY cost. The engine queries a
+configured local Prometheus API; on failure the API reports `connected: false` and the
+adapter supplies deterministic demo samples, which the page labels as demo. Electricity
 never enters Token cost totals. CPU and GPU are components of the whole-machine
 reading, not additional totals. Range controls update trends, energy and cost;
 current watts remain current. Custom ranges are limited to 31 days. Missing

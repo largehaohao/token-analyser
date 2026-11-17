@@ -116,11 +116,13 @@ test("TTFT and tok/s render on overview and session details", async ({ page }, t
         avgTtftMs: 1250, outputTokensPerSecond: 42.5, totalDurationMs: 4000,
         requestDurationMs: 4000, requestDurationCount: 2,
         taskDurationMs: 90_000, taskDurationCount: 1,
+        basis: "task",
       } : {
         taskCount: 0, ttftSampleCount: 0, speedSampleCount: 0,
         avgTtftMs: null, outputTokensPerSecond: null, totalDurationMs: null,
         requestDurationMs: null, requestDurationCount: 0,
         taskDurationMs: null, taskDurationCount: 0,
+        basis: null,
       },
     } });
   });
@@ -154,6 +156,7 @@ test("TTFT and tok/s render on overview and session details", async ({ page }, t
         avgTtftMs: 0, outputTokensPerSecond: 0, totalDurationMs: 0,
         requestDurationMs: 0, requestDurationCount: 1,
         taskDurationMs: 0, taskDurationCount: 1,
+        basis: "task",
       },
     } });
   });
@@ -644,6 +647,18 @@ test("turn evidence and chart tooltips work with keyboard and Escape", async ({
   await page.getByRole("link", { name: "会话明细" }).focus();
   await page.keyboard.press("Control+k");
   await expect(page.getByRole("searchbox", { name: "筛选会话" })).toBeFocused();
+});
+
+test("trend tooltip day action is keyboard activatable", async ({ page }) => {
+  await page.goto("/#overview");
+  await expect(page.getByTestId("overview-page")).toBeVisible();
+  const day = page.locator(".trend-col").first();
+  await day.focus();
+  const action = day.getByRole("button", { name: /查看当日会话/ });
+  await expect(action).toBeVisible();
+  await action.focus();
+  await action.press("Enter");
+  await expect(page).toHaveURL(/#sessions/);
 });
 
 for (const width of [1280, 390]) {

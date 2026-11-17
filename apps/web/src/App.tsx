@@ -133,6 +133,8 @@ function AppShell() {
   const importedSnapshot = useRef<SessionSnapshot | null>(null);
   const listRequest = useRef(0);
   const sessionRequest = useRef(0);
+  /** Bumped by confirmed mutations so older in-flight reads cannot roll them back. */
+  const sessionMutationRev = useRef(0);
   const overviewRequest = useRef(0);
   const listInFlight = useRef<Promise<SessionListItem[]> | null>(null);
   const sessionInFlight = useRef<{
@@ -373,6 +375,7 @@ function AppShell() {
       return active.promise;
     }
     const requestId = ++sessionRequest.current;
+    const mutationRev = sessionMutationRev.current;
     setSessionLoad((current) =>
       current?.id === id && current.status === "error"
         ? current
@@ -385,14 +388,19 @@ function AppShell() {
           requestId === sessionRequest.current &&
           selectedIdRef.current === id
         ) {
-          setSnapshot(snap);
+          // A waste-toggle PATCH may have committed while this read was in
+          // flight; its server-confirmed snapshot outranks this older read.
+          if (mutationRev === sessionMutationRev.current) {
+            setSnapshot(snap);
+          }
           setSessionLoad({ id, status: "ready" });
         }
         return snap;
       } catch (err) {
         if (
           requestId !== sessionRequest.current ||
-          selectedIdRef.current !== id
+          selectedIdRef.current !== id ||
+          mutationRev !== sessionMutationRev.current
         ) {
           return;
         }
@@ -1112,11 +1120,12 @@ function AppShell() {
                       snapshot={snapshot}
                       selectedNodeId={selectedNodeId}
                       onSelectNode={setSelectedNodeId}
-                      onUpdate={(next) =>
-                        setSnapshot((current) =>
-                          current?.id === next.id ? next : current,
-                        )
-                      }
+                    onUpdate={(next) => {
+                      sessionMutationRev.current += 1;
+                      setSnapshot((current) =>
+                        current?.id === next.id ? next : current,
+                      );
+                    }}
                       contextOpen={contextOpen}
                       onContextOpen={setContextOpen}
                     />

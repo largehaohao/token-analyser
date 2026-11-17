@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { writeFileAtomically } from "./atomic-write.ts";
 import { loadUserConfig } from "./config.ts";
+import { withPricingLock } from "./pricing-lock.ts";
 import {
   API_PRICES_PATH,
   type ApiModelPrice,
@@ -410,7 +411,7 @@ export function startQwenPriceAutoRefresh(
     if (stopped) return;
     try {
       if (!isQwenPriceCardStale(qwenPriceAsOf(opts.apiPricesPath))) return;
-      const update = await refresh();
+      const update = await withPricingLock(() => refresh());
       if (stopped) {
         restoreApiPrices(update.previousContent, opts.apiPricesPath);
         return;

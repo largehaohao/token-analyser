@@ -21,10 +21,12 @@ import { formatChartNumber } from "./format";
 import { ModelFilterSelect } from "./ModelFilterSelect";
 import { useModelFilteredOverview } from "./useModelFilteredOverview";
 import { useFlashOnChange } from "./motion";
-import { BareButton, Icon, Panel, SegmentedControl, srTable } from "./ui";
+import { BareButton, Icon, Panel, SegmentedControl, StatePanel, srTable } from "./ui";
+import { Button } from "./components/ui/button";
 import {
   heatCalendar,
   metricSeries,
+  overlaySegments,
   trendOverlay,
   type TrendMode,
 } from "./visual-metrics";
@@ -71,6 +73,7 @@ export function TrendPanel({
     overview,
     loading,
     error,
+    retry,
   } = useModelFilteredOverview(baseOverview, filterScope, fetchOverviewForModel);
   const [mode, setMode] = useState<TrendMode>("daily");
   const barTip = useChartTooltip();
@@ -78,9 +81,10 @@ export function TrendPanel({
   const hovered = barTip.active;
   const hoveredHeat = heatTip.active;
   const metric = chartMetric;
-  const max = chartMax(overview.days.map((day) => dayMetricValue(day, metric)));
+  const days = overview?.days ?? [];
+  const max = chartMax(days.map((day) => dayMetricValue(day, metric)));
   const ticks = niceChartTicks(max);
-  const knownValues = overview.days
+  const knownValues = days
     .map((day) => dayMetricValue(day, metric))
     .filter((value): value is number => value != null);
   const hasData = knownValues.some((value) => value > 0);
@@ -90,17 +94,20 @@ export function TrendPanel({
       : null;
   const today = localDateString(new Date());
   const todayValue =
-    overview.days.find((day) => day.date === today) != null
+    days.find((day) => day.date === today) != null
       ? dayMetricValue(
-          overview.days.find((day) => day.date === today)!,
+          days.find((day) => day.date === today)!,
           metric,
         )
       : null;
   const todayFlash = useFlashOnChange(todayValue);
   const selectedMetric = metric;
-  const points = metricSeries(overview.days, metric);
+  const points = metricSeries(days, metric);
   const overlay = mode === "daily" ? null : trendOverlay(points, mode);
-  const calendar = heatCalendar(overview.days, metric);
+  // Moving averages share the bar scale; cumulative totals need their own
+  // explicitly labelled axis instead of a hidden second scale.
+  const overlayMax = mode === "cumulative" ? chartMax(overlay ?? []) : max;
+  const calendar = heatCalendar(days, metric);
   const label = (value: number | null) =>
     value == null ? "未定价" : formatChartNumber(value, metric);
   return (
@@ -146,12 +153,20 @@ export function TrendPanel({
           </div>
         </div>
       </div>
-      {error ? (
-        <p className="empty-inline" role="alert">
-          按模型筛选失败：{error}
-        </p>
-      ) : null}
-      {overview.days.length === 0 ? (
+      {overview == null ? (
+        <StatePanel
+          compact
+          kind={error ? "error" : "loading"}
+          title={error ? "按模型筛选失败" : "正在加载所选模型数据"}
+          description={error ?? "数据就绪后自动显示，不会展示其他模型的数字。"}
+        >
+          {error ? (
+            <Button type="button" variant="outline" size="sm" onClick={retry}>
+              重试
+            </Button>
+          ) : null}
+        </StatePanel>
+      ) : overview.days.length === 0 ? (
         <p className="empty-inline">该时间范围内没有每日用量。</p>
       ) : (
         <>
@@ -164,15 +179,9 @@ export function TrendPanel({
                   preserveAspectRatio="none"
                   aria-hidden="true"
                 >
-                  <polyline
-                    pathLength={1}
-                    points={overlay
-                      .map((value, index) =>
-                        value == null ? null : `${index + 0.5},${Math.max(0, 100 - (100 * value) / Math.max(...overlay.filter((v): v is number => v != null), 1))}`,
-                      )
-                      .filter((point): point is string => point != null)
-                      .join(" ")}
-                  />
+                  {overlaySegments(overlay, overlayMax).map((points, index) => (
+                    <polyline key={index} pathLength={1} points={points} />
+                  ))}
                 </svg>
               )}
               {hasData ? (
@@ -239,7 +248,13 @@ export function TrendPanel({
                       onFocus={(e) => barTip.show(day.date, e.currentTarget)}
                       onBlur={barTip.scheduleHide}
                       onKeyDown={(e) => {
-                        if (e.key === "Escape") barTip.hide();
+                        if (e.key === "Escape") {
+                          barTip.hide();
+                          return;
+                        }
+                        // Let nested controls (the tooltip action) receive
+                        // their own native Enter/Space activation.
+                        if (e.target !== e.currentTarget) return;
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           barTip.show(day.date, e.currentTarget);
@@ -263,6 +278,8 @@ export function TrendPanel({
                           position={barTip.position}
                           onMouseEnter={barTip.cancelHide}
                           onMouseLeave={barTip.scheduleHide}
+                          onFocus={barTip.cancelHide}
+                          onBlur={barTip.scheduleHide}
                         >
                           <b>{day.date}</b>
                           <span>总计 {label(value)}</span>
@@ -354,7 +371,9 @@ export function TrendPanel({
             {mode !== "daily" && (
               <span>
                 <i style={{ display: "inline-block", width: 14, height: 0, borderTop: "2px solid var(--chart-violet)", marginRight: 4, verticalAlign: "3px" }} />
-                {mode === "cumulative" ? "累计用量" : "7 日移动均值"}
+                {mode === "cumulative"
+                  ? `累计用量（独立轴 0–${label(overlayMax)}）`
+                  : "7 日移动均值"}
               </span>
             )}
           </div>
@@ -368,7 +387,7 @@ export function TrendPanel({
                       key={cell.date}
                       role="button"
                       tabIndex={0}
-                      className={`heat-cell${hoveredHeat === cell.date ? " hot" : ""}`}
+                      className={`heat-cell${hoveredHeat === cell.date ? " hot" : ""}${cell.value == null ? " unknown" : ""}`}
                       data-level={cell.level}
                       data-date={cell.date}
                       aria-label={`${cell.date} · ${label(cell.value)}${onDrillDay ? "，回车查看当日会话" : ""}`}
@@ -378,7 +397,11 @@ export function TrendPanel({
                       onBlur={heatTip.scheduleHide}
                       onClick={(e) => heatTip.show(cell.date!, e.currentTarget)}
                       onKeyDown={(e) => {
-                        if (e.key === "Escape") heatTip.hide();
+                        if (e.key === "Escape") {
+                          heatTip.hide();
+                          return;
+                        }
+                        if (e.target !== e.currentTarget) return;
                         if (e.key === "Enter" && onDrillDay) {
                           heatTip.hide();
                           onDrillDay(cell.date!);
@@ -390,6 +413,8 @@ export function TrendPanel({
                           position={heatTip.position}
                           onMouseEnter={heatTip.cancelHide}
                           onMouseLeave={heatTip.scheduleHide}
+                          onFocus={heatTip.cancelHide}
+                          onBlur={heatTip.scheduleHide}
                         >
                           <b>{cell.date}</b>
                           <span>{label(cell.value)}</span>

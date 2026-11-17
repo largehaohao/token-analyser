@@ -71,12 +71,28 @@ export function worstGpuStatus(
   return "normal";
 }
 
-/** 后来的样本覆盖同一时间戳；结果按时间升序。incoming 为空时保留原数组。 */
-export function mergeTempSamples<T extends { timestamp: number }>(base: T[], incoming: T[]): T[] {
+const MAX_RETAINED_WINDOW_SEC = 7 * 24 * 60 * 60;
+
+/**
+ * Later samples replace the same timestamp; results stay sorted. Retention
+ * is bounded to the largest selectable window plus one sample so a page left
+ * open for days does not accumulate and resort unbounded history.
+ */
+export function mergeTempSamples<T extends { timestamp: number }>(
+  base: T[],
+  incoming: T[],
+  options: { maxWindowSec?: number } = {},
+): T[] {
   if (incoming.length === 0) return base;
   const byTimestamp = new Map<number, T>();
   for (const sample of base) byTimestamp.set(sample.timestamp, sample);
   for (const sample of incoming) byTimestamp.set(sample.timestamp, sample);
+  let newest = -Infinity;
+  for (const timestamp of byTimestamp.keys()) newest = Math.max(newest, timestamp);
+  const cutoff = newest - (options.maxWindowSec ?? MAX_RETAINED_WINDOW_SEC);
+  for (const timestamp of [...byTimestamp.keys()]) {
+    if (timestamp < cutoff) byTimestamp.delete(timestamp);
+  }
   return [...byTimestamp.values()].sort((a, b) => a.timestamp - b.timestamp);
 }
 

@@ -187,6 +187,9 @@ function buildSessionEvents(
     const data = parseJson(message.data);
     const role = text(message.type) || text(data.role);
     const at = iso(message.time_created) || iso(record(data.time).created);
+    // Activity ends when the request completes, not when it was created:
+    // spend bucketing and session spans must use the recorded completion.
+    const completedAt = iso(record(data.time).completed) || iso(record(data.time).streamed);
     const parts = partsByMessage.get(text(message.id)) ?? [];
     if (role === "user") {
       const next = messageText(data, parts);
@@ -211,7 +214,7 @@ function buildSessionEvents(
     }
     const timing = requestTiming(data, parts);
     events.push({
-      type: "message", source: "opencode", sessionId: id, timestamp: at, role: "assistant",
+      type: "message", source: "opencode", sessionId: id, timestamp: completedAt || at, role: "assistant",
       message: {
         role: "assistant", id: text(message.id),
         model: text(model.id) || text(data.modelID) || text(modelRecord.id) || null,
@@ -282,6 +285,16 @@ export function readOpenCodeSessions(databasePath: string): RolloutLine[][] {
         if (data.tokens != null && (text(data.text) || visibleText(data.content))) complete += 1;
       }
       if (assistants === 0 || complete < assistants) needsParts.add(id);
+    }
+    // Inline text/tokens do not prove tool or timing parts are absent: a
+    // message can keep its body inline while its tools live in the part
+    // table. Any session with stored parts must load them.
+    for (const table of ["session_part", "part"] as const) {
+      if (!tables.has(table)) continue;
+      for (const row of db.prepare(`SELECT DISTINCT session_id FROM ${table}`).all()) {
+        const sessionId = text(row.session_id);
+        if (sessionId) needsParts.add(sessionId);
+      }
     }
     // Newer rows keep tokens on the message; only read the part table when a
     // session still needs step-finish / tool parts.

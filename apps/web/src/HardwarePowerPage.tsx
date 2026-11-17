@@ -394,6 +394,24 @@ export function HardwarePowerPage({
       };
     }, [samples, activeWindow.startMs, activeWindow.endMs]);
 
+  // Composition shares divide integrals measured on the SAME coverage:
+  // independently covered components cannot be compared against a partially
+  // covered machine total. Statistics above keep their own full integrals.
+  const composition: Record<"cpu" | "gpu" | "machine" | "other", SeriesIntegral> =
+    useMemo(() => {
+      const common = samples.filter(
+        (sample) => sample.cpu != null && sample.gpu != null && sample.machine != null,
+      );
+      const integrate = (points: SeriesPoint[]) =>
+        integrateSeries(points, activeWindow.startMs, activeWindow.endMs);
+      return {
+        cpu: integrate(seriesPoints(common, "cpu")),
+        gpu: integrate(seriesPoints(common, "gpu")),
+        machine: integrate(seriesPoints(common, "machine")),
+        other: integrate(otherPoints(common)),
+      };
+    }, [samples, activeWindow.startMs, activeWindow.endMs]);
+
   // 曲线展示把原始采样聚成可读的列（桶内均值 + 桶内峰值）；用电量、平均
   // 功率与峰值积分始终跑原始采样，分桶不会把尖峰抹平。
   const buckets: PowerBucket[] = useMemo(
@@ -583,14 +601,14 @@ export function HardwarePowerPage({
   const rangeSub =
     mode.kind === "quick" ? activeWindow.label : "自定义范围";
 
-  // 整机用电量 = CPU + GPU + 其他硬件（同一采样上的差值），可直接拆成占比。
+  // 整机用电量 = CPU + GPU + 其他硬件（共同覆盖区间上的差值），可直接拆成占比。
   const energyParts = [
-    { key: "cpu", label: "CPU", integral: integrals.cpu },
-    { key: "gpu", label: "GPU", integral: integrals.gpu },
-    { key: "other", label: "其他硬件", integral: integrals.other },
+    { key: "cpu", label: "CPU", integral: composition.cpu },
+    { key: "gpu", label: "GPU", integral: composition.gpu },
+    { key: "other", label: "其他硬件", integral: composition.other },
   ];
   const energySharePct = (kwh: number | null): number | null => {
-    const total = integrals.machine.kwh;
+    const total = composition.machine.kwh;
     if (kwh == null || total == null || total <= 0) return null;
     return (100 * kwh) / total;
   };
@@ -629,9 +647,9 @@ export function HardwarePowerPage({
         <Notice tone="info">正在连接功率采集源…</Notice>
       ) : (
         <Notice tone="warning">
-          演示数据，尚未接入
-          {feed.error ? `（采集源不可用：${feed.error}）` : ""}
-          。以下数值由内置示例序列生成，缺失读数显示 —；演示电费不计入 Token 成本。
+          {instantSample != null
+            ? `历史范围为演示数据${feed.error ? `（采集源不可用：${feed.error}）` : ""}，用电量与电费由内置示例序列生成；瞬时功率为实时采样。演示电费不计入 Token 成本。`
+            : `演示数据，尚未接入${feed.error ? `（采集源不可用：${feed.error}）` : ""}。以下数值由内置示例序列生成，缺失读数显示 —；演示电费不计入 Token 成本。`}
         </Notice>
       )}
 
@@ -725,7 +743,11 @@ export function HardwarePowerPage({
         <div className="power-energy-breakdown">
           <div className="power-energy-breakdown-head">
             <span>用电构成</span>
-            <span>整机 = CPU + GPU + 其他硬件</span>
+            <span
+              title={`构成占比按 CPU、GPU、整机同时有读数的区间计算（共同覆盖 ${formatDuration(composition.machine.coveredMs)}）。统计窗口 ${formatDuration(spanMs)}。`}
+            >
+              整机 = CPU + GPU + 其他硬件 · 共同覆盖区间
+            </span>
           </div>
           <div className="power-energy-bar" aria-hidden="true">
             {energyParts.map((part) => {

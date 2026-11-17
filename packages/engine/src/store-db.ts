@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   unlinkSync,
@@ -28,11 +29,22 @@ function openDb(home?: string): DatabaseSync {
   const dir = home ?? tokenAnalyserHome();
   const existing = connections.get(dir);
   if (existing) return existing;
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(dir, 0o700);
+  } catch {
+    // Best-effort tightening of a pre-existing directory.
+  }
   const { DatabaseSync } = createRequire(import.meta.url)(
     "node:sqlite",
   ) as typeof import("node:sqlite");
   const db = new DatabaseSync(storeDbPath(dir));
+  try {
+    // Session snapshots and prompts must not be readable by other local users.
+    chmodSync(storeDbPath(dir), 0o600);
+  } catch {
+    // Best-effort on filesystems without permission support.
+  }
   db.exec(`
     PRAGMA journal_mode=WAL;
     PRAGMA synchronous=NORMAL;
@@ -110,6 +122,24 @@ export function invalidateStoreDb(home?: string): void {
 }
 
 function readDumpFromDb(db: DatabaseSync): StoreDump | undefined {
+  // One read transaction keeps sources, fingerprints, toggles and meta on a
+  // single committed generation even if another process dumps concurrently.
+  db.exec("BEGIN");
+  try {
+    const dump = readDumpTables(db);
+    db.exec("COMMIT");
+    return dump;
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Connection may already be closed.
+    }
+    throw err;
+  }
+}
+
+function readDumpTables(db: DatabaseSync): StoreDump | undefined {
   const schemaRaw = metaGet(db, "schema_version");
   // Cache rows may exist before the first dump writes meta — not an error.
   if (schemaRaw == null) return undefined;
@@ -186,19 +216,89 @@ export function readStoreDumpDb(home?: string): StoreDump | undefined {
     const schemaRaw = metaGet(db, "schema_version");
     if (schemaRaw == null) return undefined;
     if (Number(schemaRaw) !== STORE_DB_SCHEMA_VERSION) {
-      invalidateStoreDb(home);
+      clearDerivedStoreData(home);
       return undefined;
     }
     const dump = readDumpFromDb(db);
     if (!dump || !Number.isFinite(dump.version)) {
-      invalidateStoreDb(home);
+      clearDerivedStoreData(home);
       return undefined;
     }
     return dump;
-  } catch {
-    invalidateStoreDb(home);
+  } catch (err) {
+    // Only genuine corruption justifies destroying the file. Transient lock
+    // or I/O failures must not delete cached state or saved preferences.
+    const errcode = (err as { errcode?: number }).errcode;
+    if (errcode === 11 /* SQLITE_CORRUPT */ || errcode === 26 /* SQLITE_NOTADB */) {
+      invalidateStoreDb(home);
+    }
     return undefined;
   }
+}
+
+/**
+ * Drop derived snapshots/fingerprints/meta while keeping the toggles table:
+ * waste preferences are user data that session logs cannot reconstruct.
+ */
+export function clearDerivedStoreData(home?: string): void {
+  const db = openDb(home);
+  db.exec("BEGIN");
+  try {
+    db.exec("DELETE FROM sources");
+    db.exec("DELETE FROM fingerprints");
+    db.exec("DELETE FROM meta");
+    db.exec("COMMIT");
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Connection may already be closed.
+    }
+    throw err;
+  }
+}
+
+export function readStoredToggles(
+  home?: string,
+): Record<string, Record<WasteToggleId, boolean>> {
+  const toggles: Record<string, Record<WasteToggleId, boolean>> = {};
+  try {
+    const db = openDb(home);
+    for (const row of db
+      .prepare("SELECT session_id, toggles_json FROM toggles")
+      .all() as { session_id: string; toggles_json: string }[]) {
+      try {
+        toggles[row.session_id] = JSON.parse(row.toggles_json) as Record<
+          WasteToggleId,
+          boolean
+        >;
+      } catch {
+        // Skip corrupt toggle rows.
+      }
+    }
+  } catch {
+    // Preferences are best-effort on read; never destroy the store for them.
+  }
+  return toggles;
+}
+
+export function writeStoredToggle(
+  home: string | undefined,
+  id: string,
+  toggles: Record<WasteToggleId, boolean>,
+): void {
+  const db = openDb(home);
+  db.prepare(
+    `INSERT INTO toggles(session_id, toggles_json) VALUES(?, ?)
+     ON CONFLICT(session_id) DO UPDATE SET toggles_json = excluded.toggles_json`,
+  ).run(id, JSON.stringify(toggles));
+}
+
+export function deleteStoredToggles(home: string | undefined, ids: string[]): void {
+  if (ids.length === 0) return;
+  const db = openDb(home);
+  const placeholders = ids.map(() => "?").join(", ");
+  db.prepare(`DELETE FROM toggles WHERE session_id IN (${placeholders})`).run(...ids);
 }
 
 export function writeStoreDumpDb(dump: StoreDump, home?: string): void {
@@ -211,7 +311,6 @@ export function writeStoreDumpDb(dump: StoreDump, home?: string): void {
 
     db.exec("DELETE FROM sources");
     db.exec("DELETE FROM fingerprints");
-    db.exec("DELETE FROM toggles");
 
     const insertSource = db.prepare(
       "INSERT INTO sources(id, snapshot_json) VALUES(?, ?)",
@@ -236,13 +335,6 @@ export function writeStoreDumpDb(dump: StoreDump, home?: string): void {
         fp.shmSize ?? 0,
         fp.shmMtimeMs ?? 0,
       );
-    }
-
-    const insertToggle = db.prepare(
-      "INSERT INTO toggles(session_id, toggles_json) VALUES(?, ?)",
-    );
-    for (const [id, value] of Object.entries(dump.toggles)) {
-      insertToggle.run(id, JSON.stringify(value));
     }
 
     db.exec("COMMIT");

@@ -8,16 +8,17 @@ import {
 import path from "node:path";
 import { tokenAnalyserHome } from "./config.ts";
 import {
-  invalidateStoreDb,
+  clearDerivedStoreData,
   readStoreDumpDb,
   storeDbPath,
   writeStoreDumpDb,
+  writeStoredToggle,
 } from "./store-db.ts";
 import type { SessionSnapshot, WasteToggleId } from "./types.ts";
 
 /** Bump when the dump shape or rebuild assumptions change. */
 /** Bump when persisted snapshots must be rebuilt (parser / schema changes). */
-export const STORE_DUMP_VERSION = 2;
+export const STORE_DUMP_VERSION = 3;
 
 export type FileFingerprint = {
   inode: number;
@@ -98,6 +99,9 @@ function migrateLegacyDump(home?: string): StoreDump | undefined {
       fingerprints: value.fingerprints as Record<string, FileFingerprint>,
     };
     writeStoreDumpDb(dump, home);
+    for (const [id, toggles] of Object.entries(dump.toggles)) {
+      writeStoredToggle(home, id, toggles);
+    }
     try {
       renameSync(file, `${file}.migrated`);
     } catch {
@@ -120,13 +124,13 @@ export function readStoreDump(
 ): StoreDump | undefined {
   let dump = readStoreDumpDb(home);
   if (dump && dump.version !== STORE_DUMP_VERSION) {
-    invalidateStoreDb(home);
+    clearDerivedStoreData(home);
     dump = undefined;
   }
   if (!dump) dump = migrateLegacyDump(home);
   if (!dump) return undefined;
   if (pricingContext != null && dump.pricingContext !== pricingContext) {
-    invalidateStoreDb(home);
+    clearDerivedStoreData(home);
     const legacy = storeDumpPath(home);
     for (const file of [legacy, `${legacy}.migrated`]) {
       if (!existsSync(file)) continue;
@@ -143,6 +147,8 @@ export function readStoreDump(
 
 export function writeStoreDump(dump: StoreDump, home?: string): void {
   writeStoreDumpDb(dump, home);
+  // Preferences are persisted on their own lifecycle; a dump rebuild that
+  // carries no toggles must not erase them.
 }
 
 export function fingerprintsMatch(

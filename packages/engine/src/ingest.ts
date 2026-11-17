@@ -36,14 +36,31 @@ function readJsonlFileDetailed(
   const events: RolloutLine[] = [];
   const parse_errors: ParseError[] = [];
   let offset = startOffset;
-  let pending = initialRest;
   let position = startOffset + initialRest.length;
+  // Keep chunks separately and remember how far each was scanned. Concatenating
+  // the whole pending line on every read made large tool-output records
+  // quadratic in both copying and newline search.
+  const chunks: Buffer<ArrayBufferLike>[] = initialRest.length > 0 ? [initialRest] : [];
+  let scannedInLast = 0;
+  let pendingLength = initialRest.length;
 
   const consumeCompleteLines = (): void => {
     while (true) {
-      const newline = pending.indexOf(0x0a);
+      let newline = -1;
+      let newlineInChunk = -1;
+      for (let index = 0; index < chunks.length; index += 1) {
+        const found = chunks[index]!.indexOf(0x0a, index === 0 ? scannedInLast : 0);
+        if (found !== -1) {
+          newline = found;
+          newlineInChunk = index;
+          break;
+        }
+      }
       if (newline === -1) return;
-      const lineBytes = pending.subarray(0, newline);
+      const lineBytes = Buffer.concat(chunks.slice(0, newlineInChunk).concat(chunks[newlineInChunk]!.subarray(0, newline)));
+      chunks.splice(0, newlineInChunk);
+      chunks[0] = chunks[0]!.subarray(newline + 1);
+      pendingLength -= lineBytes.length + 1;
       const line = lineBytes.toString("utf8");
       if (line.trim() !== "") {
         try {
@@ -56,7 +73,7 @@ function readJsonlFileDetailed(
         }
       }
       offset += newline + 1;
-      pending = pending.subarray(newline + 1);
+      scannedInLast = 0;
     }
   };
 
@@ -67,7 +84,8 @@ function readJsonlFileDetailed(
       const n = readSync(fd, buf, 0, buf.length, position);
       if (n === 0) break;
       position += n;
-      pending = Buffer.concat([pending, buf.subarray(0, n)]);
+      chunks.push(Buffer.from(buf.subarray(0, n)));
+      pendingLength += n;
       consumeCompleteLines();
     }
   } finally {
@@ -76,17 +94,19 @@ function readJsonlFileDetailed(
 
   // A complete JSON object is valid without a trailing newline. A failed
   // parse is kept as a tail because a live writer may still append to it.
-  if (pending.length > 0 && pending[pending.length - 1] !== 0x0a) {
+  if (pendingLength > 0) {
+    const pending = Buffer.concat(chunks);
     try {
       events.push(parseJsonlLine(pending.toString("utf8").replace(/\r$/, "")));
       offset += pending.length;
-      pending = Buffer.alloc(0);
+      chunks.length = 0;
+      pendingLength = 0;
     } catch {
       // Wait for the next write to complete the final line.
     }
   }
 
-  return { events, parse_errors, offset, rest: pending };
+  return { events, parse_errors, offset, rest: Buffer.concat(chunks) };
 }
 
 export function readJsonlFile(
@@ -160,9 +180,16 @@ export function ingestFile(
   // DSH session files are concatenated zstd frames; always reread the whole file.
   if (isZstdSessionFile(filePath)) {
     liveReadStates.delete(filePath);
-    ({ events, parse_errors } = readZstdJsonlFile(filePath));
+    const read = readZstdJsonlFile(filePath);
+    events = read.events;
+    parse_errors = read.parse_errors;
+    if (read.truncated && !live) {
+      // A closed file with an incomplete final frame is corrupt; a live tail
+      // is a normal write-in-progress and completes on the next update.
+      parse_errors.push({ offset: read.truncatedAt, message: "zstd_frame_incomplete" });
+    }
     const snapshot = analyseSession({ events, path: filePath, live, parse_errors });
-    if (!live) writeCache(key, snapshot, opts?.cacheHome);
+    if (!live && !read.truncated) writeCache(key, snapshot, opts?.cacheHome);
     return snapshot;
   }
   if (live && opts?.allowAppend) {
@@ -221,7 +248,10 @@ export function ingestFile(
     ...(builder ? { ledgerBuilder: builder } : {}),
   });
 
-  if (!live) {
+  // A pi fork's inherited spend depends on whether its parent file exists.
+  // Caching the child alone can make a parent arriving later invisible forever.
+  const dependsOnParent = snapshot.forkedFrom != null;
+  if (!live && !dependsOnParent) {
     writeCache(key, snapshot, opts?.cacheHome);
   }
 

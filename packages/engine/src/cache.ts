@@ -17,8 +17,8 @@ import {
   writeCacheRow,
 } from "./store-db.ts";
 
-// v16 splits duration clocks: requestDurationMs vs taskDurationMs.
-export const CACHE_VERSION = 16;
+// v17 marks Codex ledger usage as recorded and timestamps OpenCode completion.
+export const CACHE_VERSION = 17;
 
 export function cacheDir(home?: string): string {
   return legacyCacheDir(home ?? tokenAnalyserHome());

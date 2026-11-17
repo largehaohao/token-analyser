@@ -75,7 +75,12 @@ function taskClocksFrom(
   };
 }
 
-/** Prefer the summary; if a dump left TTFT/speed/duration empty, rebuild from turns. */
+/**
+ * A summary with a stated basis is authoritative: missing measurements stay
+ * missing (`—`), and request-derived values never enter a task-basis figure.
+ * Only legacy payloads without a basis rebuild request figures from turns,
+ * using the engine's eligibility rules.
+ */
 export function resolvePerformance(
   performance: PerformanceSummary | undefined,
   turns: Turn[] | undefined,
@@ -83,6 +88,19 @@ export function resolvePerformance(
 ): PerformanceSummary {
   const fromTurns = requestClocksFromTurns(turns);
   const taskClocks = taskClocksFrom(turns, tasks);
+  const clocks = {
+    requestDurationMs: performance?.requestDurationMs ?? fromTurns.requestDurationMs,
+    requestDurationCount: performance?.requestDurationMs != null
+      ? (performance.requestDurationCount ?? 0)
+      : (performance?.requestDurationCount || fromTurns.requestDurationCount),
+    taskDurationMs: performance?.taskDurationMs ?? taskClocks.taskDurationMs,
+    taskDurationCount: performance?.taskDurationMs != null
+      ? (performance.taskDurationCount ?? 0)
+      : taskClocks.taskDurationCount,
+  };
+  if (performance != null && performance.basis != null) {
+    return { ...performance, ...clocks };
+  }
   let ttftSum = 0;
   let ttftSampleCount = 0;
   let outputSum = 0;
@@ -94,36 +112,36 @@ export function resolvePerformance(
       ttftSum += sample.ttftMs;
       ttftSampleCount += 1;
     }
-    const duration = positiveMs(sample?.durationMs);
+    if (turn.usageRecorded === false) continue;
     const output = turn.usage?.output_tokens;
-    if (duration == null || output == null || !Number.isFinite(output)) continue;
-    const ttft = sample?.ttftMs;
-    const generation = ttft != null && ttft < duration ? duration - ttft : duration;
-    if (generation <= 0) continue;
+    if (output == null || !Number.isFinite(output)) continue;
+    const recorded = sample?.outputTokensPerSecond;
+    let generation: number | null;
+    if (recorded != null) {
+      // Recorded speed is authoritative; it implies its own generation window.
+      generation = recorded > 0 ? (output * 1000) / recorded : null;
+    } else {
+      const duration = positiveMs(sample?.durationMs);
+      if (duration == null) continue;
+      const ttft = sample?.ttftMs;
+      // TTFT at or beyond the logged window leaves no decode window: the
+      // request keeps its TTFT but contributes no speed.
+      generation = ttft != null ? (ttft < duration ? duration - ttft : null) : duration;
+    }
+    if (generation == null || generation <= 0) continue;
     outputSum += output;
     generationSum += generation;
     speedSampleCount += 1;
   }
-  const requestDurationMs = performance?.requestDurationMs ?? fromTurns.requestDurationMs;
-  const requestDurationCount = performance?.requestDurationCount
-    || (requestDurationMs == null ? 0 : fromTurns.requestDurationCount);
   return {
     taskCount: performance?.taskCount ?? turns?.length ?? 0,
-    ttftSampleCount: performance?.ttftSampleCount || ttftSampleCount,
-    speedSampleCount: performance?.speedSampleCount || speedSampleCount,
-    avgTtftMs: performance?.avgTtftMs ?? (ttftSampleCount > 0 ? ttftSum / ttftSampleCount : null),
-    outputTokensPerSecond: performance?.outputTokensPerSecond
-      ?? (generationSum > 0 ? outputSum * 1000 / generationSum : null),
-    totalDurationMs: performance?.totalDurationMs ?? (generationSum > 0 ? generationSum : null),
-    requestDurationMs,
-    requestDurationCount: performance?.requestDurationMs != null
-      ? (performance.requestDurationCount ?? 0)
-      : requestDurationCount,
-    taskDurationMs: performance?.taskDurationMs ?? taskClocks.taskDurationMs,
-    taskDurationCount: performance?.taskDurationMs != null
-      ? (performance.taskDurationCount ?? 0)
-      : taskClocks.taskDurationCount,
-    basis: performance?.basis ?? (ttftSampleCount > 0 || speedSampleCount > 0 ? "request" : null),
+    ttftSampleCount,
+    speedSampleCount,
+    avgTtftMs: ttftSampleCount > 0 ? ttftSum / ttftSampleCount : null,
+    outputTokensPerSecond: generationSum > 0 ? outputSum * 1000 / generationSum : null,
+    totalDurationMs: generationSum > 0 ? generationSum : null,
+    ...clocks,
+    basis: ttftSampleCount > 0 || speedSampleCount > 0 ? "request" : null,
   };
 }
 

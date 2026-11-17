@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { appendFileSync, readFileSync, writeFileSync, mkdtempSync, utimesSync } from "node:fs";
+import { zstdCompressSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,7 @@ import {
   readJsonlFile,
 } from "../src/ingest.ts";
 import { SessionStore } from "../src/store.ts";
+import { isZstdSessionFile } from "../src/zstd-jsonl.ts";
 
 const fixtures = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -179,5 +181,45 @@ describe("live LedgerBuilder", () => {
     const snap = store.get("child-1");
     expect(snap?.turns).toHaveLength(1);
     expect(snap?.cost.raw).toBe(540);
+  });
+});
+
+describe("compressed session files", () => {
+  function ageFile(filePath: string): void {
+    const aged = (Date.now() - 600_000) / 1000;
+    utimesSync(filePath, aged, aged);
+  }
+
+  it("dispatches .ndjson.zstd to the zstd reader and keeps valid frames on an incomplete tail", () => {
+    expect(isZstdSessionFile("/tmp/session.ndjson.zstd")).toBe(true);
+    expect(isZstdSessionFile("/tmp/session.jsonl.zstd")).toBe(true);
+    const lines = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8")
+      .trim()
+      .split("\n");
+    const half = Math.ceil(lines.length / 2);
+    const frame1 = zstdCompressSync(Buffer.from(lines.slice(0, half).join("\n") + "\n"));
+    const frame2 = zstdCompressSync(Buffer.from(lines.slice(half).join("\n") + "\n"));
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-zstd-"));
+
+    const complete = path.join(dir, "complete.ndjson.zstd");
+    writeFileSync(complete, Buffer.concat([frame1, frame2]));
+    ageFile(complete);
+    const full = ingestFile(complete, { cacheHome: dir });
+    expect(full.parse_errors).toEqual([]);
+    expect(full.turns.length).toBeGreaterThan(0);
+
+    const truncated = path.join(dir, "truncated.ndjson.zstd");
+    writeFileSync(truncated, Buffer.concat([frame1, frame2.subarray(0, 5)]));
+    ageFile(truncated);
+    const partial = ingestFile(truncated, { cacheHome: dir });
+    // The valid prefix survives instead of the whole read failing.
+    expect(partial.id).toBeTruthy();
+    expect(partial.parse_errors.some((err) => err.message === "zstd_frame_incomplete")).toBe(true);
+
+    const live = path.join(dir, "live.ndjson.zstd");
+    writeFileSync(live, Buffer.concat([frame1, frame2.subarray(0, 5)]));
+    const livePartial = ingestFile(live, { cacheHome: dir });
+    expect(livePartial.live).toBe(true);
+    expect(livePartial.parse_errors).toEqual([]);
   });
 });

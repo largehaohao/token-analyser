@@ -32,6 +32,11 @@ import {
   writeStoreDump,
   type FileFingerprint,
 } from "./store-dump.ts";
+import {
+  deleteStoredToggles,
+  readStoredToggles,
+  writeStoredToggle,
+} from "./store-db.ts";
 
 /** Coalesce dump writes after ingest bursts so a crash loses at most ~2s. */
 const DUMP_DEBOUNCE_MS = 2_000;
@@ -136,6 +141,14 @@ export class SessionStore {
   private dumpTimer: ReturnType<typeof setTimeout> | undefined;
   /** True after a mutation that should be persisted to the store dump. */
   private dumpDirty = false;
+  /** Single-flight batched ingests per resolved path. */
+  private batchedFlights = new Map<string, Promise<string | undefined>>();
+  private batchedRefreshPending = new Set<string>();
+  /** Last full scan of source mtimes; reads reuse it for up to one second. */
+  private lastLiveFlagScanAt = 0;
+  /** Dump generation fingerprint for incremental persistence. */
+  private lastDumpSourceIds = "";
+  private lastDumpFingerprintIds = "";
 
   constructor(opts?: SessionStoreOptions) {
     if (opts?.cacheDir) {
@@ -288,8 +301,16 @@ export class SessionStore {
    * historical files can be reused without re-parsing.
    */
   loadDump(): number {
+    // Preferences live independently of derived snapshots: they survive dump
+    // version bumps, pricing changes and cache rebuilds.
+    const storedToggles = readStoredToggles(this.cacheHome);
     const dump = readStoreDump(this.cacheHome, pricingCacheContext());
-    if (!dump) return 0;
+    if (!dump) {
+      for (const [id, toggles] of Object.entries(storedToggles)) {
+        this.toggles.set(id, { ...toggles });
+      }
+      return 0;
+    }
     this.sources.clear();
     this.toggles.clear();
     this.fingerprints.clear();
@@ -297,7 +318,7 @@ export class SessionStore {
       if (!snap?.id || typeof snap.path !== "string") continue;
       this.sources.set(snap.id, { ...snap, children: [] });
     }
-    for (const [id, toggles] of Object.entries(dump.toggles)) {
+    for (const [id, toggles] of Object.entries(storedToggles)) {
       if (this.sources.has(id)) this.toggles.set(id, { ...toggles });
     }
     const restoredAt = Date.now();
@@ -320,6 +341,18 @@ export class SessionStore {
       this.dumpTimer = undefined;
     }
     if (!opts?.force && !this.dumpDirty) return;
+    const sourceIds = [...this.sources.keys()].sort().join("|");
+    const fingerprintIds = [...this.fingerprints.keys()].sort().join("|");
+    if (
+      !opts?.force &&
+      sourceIds === this.lastDumpSourceIds &&
+      fingerprintIds === this.lastDumpFingerprintIds
+    ) {
+      // Only preference metadata changed; preferences already have their own
+      // durable table, so skip rewriting the full snapshot history.
+      this.dumpDirty = false;
+      return;
+    }
     const fingerprints: Record<string, FileFingerprint> = {};
     for (const [filePath, fingerprint] of this.fingerprints) {
       fingerprints[filePath] = fingerprint;
@@ -341,6 +374,8 @@ export class SessionStore {
       },
       this.cacheHome,
     );
+    this.lastDumpSourceIds = sourceIds;
+    this.lastDumpFingerprintIds = fingerprintIds;
     this.dumpDirty = false;
   }
 
@@ -404,6 +439,12 @@ export class SessionStore {
   }
 
   private refreshLiveFlags(): void {
+    // A session GET used to stat every source file on every call. Batching
+    // reads still detects final live→historical transitions within this
+    // interval, and the changes themselves schedule their own re-ingest.
+    const now = Date.now();
+    if (now - this.lastLiveFlagScanAt < 1_000) return;
+    this.lastLiveFlagScanAt = now;
     pruneInactiveLiveReadStates();
     let changed = false;
     for (const [id, source] of this.sources) {
@@ -636,11 +677,13 @@ export class SessionStore {
   ): string | undefined {
     const resolved = path.resolve(filePath);
     const ids = new Set(snapshots.map((snap) => snap.id));
+    const removedIds: string[] = [];
     for (const [id, source] of this.sources) {
       if (ids.has(id)) continue;
       if (path.resolve(source.path) !== resolved) continue;
       this.sources.delete(id);
       this.toggles.delete(id);
+      removedIds.push(id);
     }
     for (const snap of snapshots) {
       const existing = this.sources.get(snap.id);
@@ -649,6 +692,7 @@ export class SessionStore {
       if (!this.toggles.has(snap.id)) this.toggles.set(snap.id, { ...snap.toggles });
       this.sources.set(snap.id, { ...snap, children: [] });
     }
+    if (removedIds.length > 0) deleteStoredToggles(this.cacheHome, removedIds);
     this.rememberFingerprint(filePath);
     this.reindexPaths();
     this.rebuildAll();
@@ -694,6 +738,25 @@ export class SessionStore {
     },
   ): Promise<string | undefined> {
     const resolved = path.resolve(filePath);
+    const flight = this.batchedFlights.get(resolved);
+    if (flight) return flight;
+    const run = this.runBatchedIngest(filePath, resolved, opts);
+    this.batchedFlights.set(resolved, run);
+    try {
+      return await run;
+    } finally {
+      this.batchedFlights.delete(resolved);
+    }
+  }
+
+  private async runBatchedIngest(
+    filePath: string,
+    resolved: string,
+    opts?: SessionIngestOptions & {
+      batchSize?: number;
+      onBatch?: (ids: string[]) => void;
+    },
+  ): Promise<string | undefined> {
     try {
       const current = fileFingerprint(filePath);
       if (
@@ -706,23 +769,35 @@ export class SessionStore {
     } catch {
       // Fall through.
     }
+    let startFingerprint: FileFingerprint | undefined;
+    try {
+      startFingerprint = fileFingerprint(filePath);
+    } catch {
+      // Missing file: the parse below reports the failure.
+    }
     const groups = readMultiSessionEvents(filePath);
     if (!groups) return this.ingestPath(filePath, opts);
     const batchSize = Math.max(1, opts?.batchSize ?? 20);
-    const resolvedPath = path.resolve(filePath);
+    const previousIds = new Set(this.sourcesByPath.get(resolved) ?? []);
+    // Sources are replaced batch by batch; toggles stay until reconciliation
+    // so a refresh never resets preferences for sessions that survive it.
     for (const [id, source] of this.sources) {
-      if (path.resolve(source.path) !== resolvedPath) continue;
+      if (path.resolve(source.path) !== resolved) continue;
       this.sources.delete(id);
-      this.toggles.delete(id);
     }
     let firstId: string | undefined;
+    const surviving = new Set<string>();
     for (let offset = 0; offset < groups.length; offset += batchSize) {
       const batchIds: string[] = [];
       for (const events of groups.slice(offset, offset + batchSize)) {
         const snap = snapshotFromEvents(events, filePath);
-        if (opts?.skipExisting && this.sources.has(snap.id)) continue;
+        if (opts?.skipExisting && this.sources.has(snap.id)) {
+          surviving.add(snap.id);
+          continue;
+        }
         if (!this.toggles.has(snap.id)) this.toggles.set(snap.id, { ...snap.toggles });
         this.sources.set(snap.id, { ...snap, children: [] });
+        surviving.add(snap.id);
         batchIds.push(snap.id);
         firstId ??= snap.id;
       }
@@ -731,9 +806,49 @@ export class SessionStore {
       opts?.onBatch?.(batchIds);
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    this.rememberFingerprint(filePath);
+    // Finalize even when the database yielded zero sessions, so stale
+    // snapshots cannot outlive an emptied source.
+    this.reindexPaths();
+    this.rebuildAll();
+    const removedIds = [...previousIds].filter((id) => !surviving.has(id));
+    for (const id of removedIds) this.toggles.delete(id);
+    if (removedIds.length > 0) deleteStoredToggles(this.cacheHome, removedIds);
+    let changedDuringRun = startFingerprint == null;
+    try {
+      changedDuringRun =
+        startFingerprint == null ||
+        !fingerprintsMatch(startFingerprint, fileFingerprint(filePath));
+    } catch {
+      changedDuringRun = true;
+    }
+    if (changedDuringRun) {
+      // Commits landed while batches were processing: keep the input
+      // fingerprint so the change is detected, and refresh once more.
+      if (startFingerprint) this.fingerprints.set(resolved, startFingerprint);
+      else this.fingerprints.delete(resolved);
+      this.scheduleBatchedRefresh(filePath, opts);
+    } else {
+      this.rememberFingerprint(filePath);
+    }
     this.scheduleDump();
     return firstId;
+  }
+
+  private scheduleBatchedRefresh(
+    filePath: string,
+    opts?: SessionIngestOptions & {
+      batchSize?: number;
+      onBatch?: (ids: string[]) => void;
+    },
+  ): void {
+    const resolved = path.resolve(filePath);
+    if (this.batchedRefreshPending.has(resolved)) return;
+    this.batchedRefreshPending.add(resolved);
+    const timer = setTimeout(() => {
+      this.batchedRefreshPending.delete(resolved);
+      void this.ingestPathBatched(filePath, opts).catch(() => undefined);
+    }, 0);
+    timer.unref?.();
   }
 
   /** True when dump/refresh already knows this file — startup watch can skip re-parse. */
@@ -801,6 +916,9 @@ export class SessionStore {
     if (!this.sources.has(id)) return;
     const previous = this.toggles.get(id) ?? { ...DEFAULT_WASTE_TOGGLES };
     this.toggles.set(id, { ...previous, ...toggles });
+    // Persist preferences immediately on their own lifecycle; the derived
+    // snapshot dump may be rebuilt or invalidated without touching them.
+    writeStoredToggle(this.cacheHome, id, this.toggles.get(id)!);
     this.rebuildAll();
     this.scheduleDump();
   }

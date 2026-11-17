@@ -47,7 +47,10 @@ export function requestPerformance(
   });
   function field(...names: string[]): number | null {
     for (const item of containers) for (const name of names) {
-      if (item[name] !== undefined) return nonnegative(item[name]);
+      // A defined-but-unusable value (null, negative, NaN) must not mask a
+      // valid measurement in a later container; a valid zero stays authoritative.
+      const value = nonnegative(item[name]);
+      if (value != null) return value;
     }
     return null;
   }
@@ -189,6 +192,14 @@ export function collectTaskTimings(session: SessionSnapshot): TaskTiming[] {
  * One sample per recorded model request, from the timing the log recorded for
  * that request. Sources without task windows (pi, Cursor, Claude) report here.
  */
+/** Every turn in a session tree, root first. */
+export function flattenSessionTurns(session: SessionSnapshot): Turn[] {
+  return [
+    ...session.turns,
+    ...session.children.flatMap((child) => flattenSessionTurns(child)),
+  ];
+}
+
 export function requestTimings(turns: Turn[]): TimedSample[] {
   return turns.map((turn) => {
     const performance = turn.requestPerformance;
@@ -214,13 +225,16 @@ export function performanceSamples(
 ): { basis: PerformanceBasis | null; samples: TimedSample[] } {
   const samples: TimedSample[] = [];
   for (const session of sessions) {
-    const own = session.taskTimings ?? [];
-    if (own.length > 0) samples.push(...own.map((sample) => ({ ...sample, basis: "task" as const })),
-      ...session.children.flatMap(collectTaskTimings));
-    else samples.push(
-      ...requestTimings(session.turns).map((sample) => ({ ...sample, basis: "request" as const })),
-      ...session.children.flatMap((child) => requestTimings(child.turns).map((sample) => ({ ...sample, basis: "request" as const }))),
-    );
+    // Task windows anywhere in the tree win; otherwise every descendant's
+    // request timing counts, so session and overview figures agree.
+    const taskSamples = collectTaskTimings(session);
+    if (taskSamples.length > 0) {
+      samples.push(...taskSamples.map((sample) => ({ ...sample, basis: "task" as const })));
+    } else {
+      samples.push(
+        ...requestTimings(flattenSessionTurns(session)).map((sample) => ({ ...sample, basis: "request" as const })),
+      );
+    }
   }
   return { basis: summarizePerformance(samples).basis, samples };
 }
@@ -448,6 +462,13 @@ export function requestGenerationMs(
  * Task samples keep the full window (tools and waits stay in the denominator). */
 function sampleGenerationMs(sample: TimedSample): number | null {
   if (sample.basis === "request") {
+    // Recorded speed is authoritative: express it as the generation window it
+    // implies so summaries and histograms aggregate the same measurement.
+    if (sample.outputTokensPerSecond != null) {
+      return sample.outputTokensPerSecond > 0 && sample.outputTokens != null
+        ? (sample.outputTokens * 1000) / sample.outputTokensPerSecond
+        : null;
+    }
     return requestGenerationMs(sample.durationMs, sample.ttftMs, sample.outputTokens ?? null);
   }
   if (sample.durationMs == null || sample.durationMs <= 0) return null;

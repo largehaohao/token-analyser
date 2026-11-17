@@ -545,6 +545,7 @@ export class LedgerBuilder {
           prompt,
           tools: this.window.tools,
           usage: lastUsage,
+          usageRecorded: true,
           requestPerformance: requestPerformance(lastUsage.output_tokens, payload, info?.last_token_usage),
           cost: priceUsage(
             lastUsage,

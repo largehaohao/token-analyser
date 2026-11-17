@@ -1027,4 +1027,60 @@ describe("buildOverview", () => {
     );
     expect(empty.rateLimits).toBeNull();
   });
+
+  it("keeps recorded money and unmeasured state in zero-token slices", () => {
+    const zeroCost = { raw: 0, uncached_input: 0, cached_input: 0, output: 0 };
+    const recorded: Turn = {
+      ...turn({ id: "t1", bucket: "code", raw: 0 }),
+      cost: { ...zeroCost, credits: null, usd: 2.5 },
+    };
+    const unmeasured: Turn = {
+      ...turn({ id: "t2", bucket: "reading", raw: 0 }),
+      cost: { ...zeroCost, credits: null, usd: null, unmeasured: 1 },
+    };
+    const snap = session({
+      id: "s",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      turns: [recorded, unmeasured],
+    });
+    const overview = buildOverview([snap], {
+      watchPath: "/tmp",
+      now: "2026-08-28T12:00:00.000Z",
+    });
+    const code = overview.slices.find((slice) => slice.key === "code")!;
+    expect(code.raw).toBe(0);
+    expect(code.usd).toBe(2.5);
+    const reading = overview.slices.find((slice) => slice.key === "reading")!;
+    expect(reading.usd).toBeNull();
+    expect(reading.credits).toBeNull();
+    const empty = overview.slices.find((slice) => slice.key === "planning")!;
+    expect(empty.usd).toBe(0);
+  });
+
+  it("never mixes task windows and request decode windows in one overview figure", () => {
+    const taskSession = session({
+      id: "tasks",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      turns: [],
+      taskTimings: [{
+        id: "t1", startedAt: "2026-08-27T10:00:00.000Z", endedAt: "2026-08-27T10:00:10.000Z",
+        durationMs: 10_000, ttftMs: 1000, outputTokens: 500,
+      }],
+    });
+    const requestSession = session({
+      id: "requests",
+      startedAt: "2026-08-27T10:00:00.000Z",
+      turns: [turn({
+        id: "r1", bucket: "code", raw: 100,
+        requestPerformance: { ttftMs: 200, durationMs: 2000, outputTokensPerSecond: 50, speedSource: "decode" },
+      })],
+    });
+    const opts = { watchPath: "/tmp", now: "2026-08-28T12:00:00.000Z" };
+    const mixed = buildOverview([taskSession, requestSession], opts);
+    expect(mixed.performance.basis).toBe("task");
+    expect(mixed.performance.speedSampleCount).toBe(1);
+    expect(mixed.performance.outputTokensPerSecond).toBe(50);
+    const requestOnly = buildOverview([requestSession], opts);
+    expect(requestOnly.performance.basis).toBe("request");
+  });
 });

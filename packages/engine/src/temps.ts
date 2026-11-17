@@ -13,19 +13,85 @@ export type { FetchLike };
 
 export const TEMP_LIMITS = { edge: 85, junction: 100, memory: 96 } as const;
 
-const GPU_NAME = "AMD Radeon RX 7900 XTX";
-const CPU_NAME = "AMD Ryzen 7 7700";
+const DEFAULT_GPU_NAME = "AMD Radeon RX 7900 XTX";
+const DEFAULT_CPU_NAME = "AMD Ryzen 7 7700";
+const DEFAULT_GPU_QUERY = "amdgpu_temperature_celsius";
 
-const PROM_QUERIES = {
-  gpuTemp: `amdgpu_temperature_celsius{name="${GPU_NAME}"}`,
-  fan: `amdgpu_fan_rpm{name="${GPU_NAME}"}`,
-  power: `amdgpu_gfx_power_watts{name="${GPU_NAME}"}`,
-  busy: `amdgpu_gpu_busy_percent{name="${GPU_NAME}"}`,
-  vramUsed: `amdgpu_vram_used_bytes{name="${GPU_NAME}"}`,
-  vramTotal: `amdgpu_vram_total_bytes{name="${GPU_NAME}"}`,
-  powerCap: `amdgpu_power_cap_watts{name="${GPU_NAME}"}`,
+type TempQueries = {
+  gpuTemp: string;
+  fan: string;
+  power: string;
+  busy: string;
+  vramUsed: string;
+  vramTotal: string;
+  powerCap: string;
+  cpuTemp: string;
+};
+
+const DEFAULT_TEMP_QUERIES: TempQueries = {
+  gpuTemp: `amdgpu_temperature_celsius{name="${DEFAULT_GPU_NAME}"}`,
+  fan: `amdgpu_fan_rpm{name="${DEFAULT_GPU_NAME}"}`,
+  power: `amdgpu_gfx_power_watts{name="${DEFAULT_GPU_NAME}"}`,
+  busy: `amdgpu_gpu_busy_percent{name="${DEFAULT_GPU_NAME}"}`,
+  vramUsed: `amdgpu_vram_used_bytes{name="${DEFAULT_GPU_NAME}"}`,
+  vramTotal: `amdgpu_vram_total_bytes{name="${DEFAULT_GPU_NAME}"}`,
+  powerCap: `amdgpu_power_cap_watts{name="${DEFAULT_GPU_NAME}"}`,
   cpuTemp: 'node_hwmon_temp_celsius{chip="pci0000:00_0000:00:18_3"}',
-} as const;
+};
+
+type TempRuntimeConfig = {
+  queries: TempQueries;
+  gpuNames: string[];
+  cpuName: string;
+  maxComponents: number;
+};
+
+const runtimeConfigs = new WeakMap<PowerQueryConfig, TempRuntimeConfig>();
+
+function labelFromQuery(query: string, fallback: string): string {
+  const match = query.match(/name\s*=\s*"([^"]+)"/);
+  return match?.[1] ?? fallback;
+}
+
+function tempRuntimeConfig(config?: PowerQueryConfig): TempRuntimeConfig {
+  const base = config ?? DEFAULT_POWER_CONFIG;
+  const existing = runtimeConfigs.get(base);
+  if (existing) return existing;
+  const rawTemps = (base as PowerQueryConfig & { temps?: Record<string, unknown> }).temps;
+  const gpuQueries = Array.isArray(rawTemps?.gpu)
+    ? rawTemps.gpu.filter((query): query is string => typeof query === "string" && query.length > 0)
+    : [];
+  const cpuQueries = Array.isArray(rawTemps?.cpu)
+    ? rawTemps.cpu.filter((query): query is string => typeof query === "string" && query.length > 0)
+    : [];
+  const gpuQuery = gpuQueries[0] ?? DEFAULT_TEMP_QUERIES.gpuTemp;
+  const queries: TempQueries = {
+    ...DEFAULT_TEMP_QUERIES,
+    gpuTemp: gpuQuery,
+    fan: gpuQueries[1] ?? DEFAULT_TEMP_QUERIES.fan,
+    power: gpuQueries[2] ?? DEFAULT_TEMP_QUERIES.power,
+    busy: gpuQueries[3] ?? DEFAULT_TEMP_QUERIES.busy,
+    vramUsed: gpuQueries[4] ?? DEFAULT_TEMP_QUERIES.vramUsed,
+    vramTotal: gpuQueries[5] ?? DEFAULT_TEMP_QUERIES.vramTotal,
+    powerCap: gpuQueries[6] ?? DEFAULT_TEMP_QUERIES.powerCap,
+    cpuTemp: cpuQueries[0] ?? DEFAULT_TEMP_QUERIES.cpuTemp,
+  };
+  const gpuNames = Object.values(queries)
+    .map((query) => labelFromQuery(query, DEFAULT_GPU_NAME))
+    .filter((name) => name !== DEFAULT_GPU_NAME || gpuQuery === DEFAULT_TEMP_QUERIES.gpuTemp);
+  const resolved: TempRuntimeConfig = {
+    queries,
+    gpuNames: [...new Set([labelFromQuery(gpuQuery, DEFAULT_GPU_NAME), ...gpuNames])],
+    cpuName: labelFromQuery(queries.cpuTemp, DEFAULT_CPU_NAME),
+    maxComponents: rawTemps?.max_components_per_device != null
+      && Number.isFinite(Number(rawTemps.max_components_per_device))
+      && Number(rawTemps.max_components_per_device) > 0
+      ? Math.floor(Number(rawTemps.max_components_per_device))
+      : 16,
+  };
+  runtimeConfigs.set(base, resolved);
+  return resolved;
+}
 
 type RangeValue = [number, string];
 type RangeSeries = { metric?: Record<string, string>; values?: RangeValue[] };
@@ -126,11 +192,13 @@ export function gpuStatus(temps: GpuStatusInput): TempGpu["status"] {
 function seriesByCard(
   series: RangeSeries[] | undefined,
   opts?: { requireSensor?: boolean },
+  config?: TempRuntimeConfig,
 ): Map<string, RangeSeries[]> {
+  const names = config?.gpuNames ?? [DEFAULT_GPU_NAME];
   const map = new Map<string, RangeSeries[]>();
   for (const entry of series ?? []) {
     const metric = entry.metric ?? {};
-    if (metric.name !== GPU_NAME) continue;
+    if (!names.includes(metric.name ?? "")) continue;
     const card = metric.card;
     if (!card) continue;
     if (opts?.requireSensor && !metric.sensor) continue;
@@ -147,9 +215,9 @@ function valueAtLastTs(entry: RangeSeries): number | null {
   return parseNumber(values[values.length - 1]![1]);
 }
 
-function scalarByCard(series: RangeSeries[] | undefined): Map<string, number | null> {
+function scalarByCard(series: RangeSeries[] | undefined, config: TempRuntimeConfig): Map<string, number | null> {
   const map = new Map<string, number | null>();
-  for (const [card, entries] of seriesByCard(series)) {
+  for (const [card, entries] of seriesByCard(series, undefined, config)) {
     let v: number | null = null;
     for (const entry of entries) {
       const parsed = valueAtLastTs(entry);
@@ -162,11 +230,13 @@ function scalarByCard(series: RangeSeries[] | undefined): Map<string, number | n
 
 function tempByCardAndSensor(
   series: RangeSeries[] | undefined,
+  config: TempRuntimeConfig,
 ): Map<string, Map<string, number | null>> {
   const map = new Map<string, Map<string, number | null>>();
+  const names = config.gpuNames;
   for (const entry of series ?? []) {
     const metric = entry.metric ?? {};
-    if (metric.name !== GPU_NAME) continue;
+    if (!names.includes(metric.name ?? "")) continue;
     const card = metric.card;
     const sensor = metric.sensor;
     if (!card || !sensor) continue;
@@ -215,9 +285,12 @@ function buildGpusFromMaps(options: {
   vramUsed: Map<string, number | null>;
   vramTotal: Map<string, number | null>;
   powerCap: Map<string, number | null>;
+  config: TempRuntimeConfig;
 }): TempGpu[] {
-  const cards = [...options.tempMap.keys()].sort();
+  const cards = [...options.tempMap.keys()].sort().slice(0, options.config.maxComponents);
+  const names = options.config.gpuNames;
   return cards.map((card, id) => {
+    const rawName = [...options.tempMap.values()].length > 0 ? names[0] ?? DEFAULT_GPU_NAME : DEFAULT_GPU_NAME;
     const temperatures = buildGpuTemps(options.tempMap.get(card));
     const status = gpuStatus({
       edge: { value: temperatures.edge.value, limit: TEMP_LIMITS.edge },
@@ -229,7 +302,7 @@ function buildGpusFromMaps(options: {
     return {
       id,
       card,
-      name: GPU_NAME,
+      name: rawName,
       status,
       temperatures,
       fan_rpm: options.fan.get(card) ?? null,
@@ -242,19 +315,19 @@ function buildGpusFromMaps(options: {
   });
 }
 
-function buildCpu(cpuSeries: RangeSeries[] | undefined): TempCpu {
+function buildCpu(cpuSeries: RangeSeries[] | undefined, name = DEFAULT_CPU_NAME): TempCpu {
   const { tctl, tccd1 } = cpuTempsAtLast(cpuSeries);
   const hasAny = tctl != null || tccd1 != null;
   return {
-    name: CPU_NAME,
+    name,
     status: hasAny ? "available" : "missing",
     temperatures: { tctl: { value: tctl }, tccd1: { value: tccd1 } },
   };
 }
 
 type QueryPart =
-  | { ok: true; key: keyof typeof PROM_QUERIES; series: RangeSeries[] }
-  | { ok: false; key: keyof typeof PROM_QUERIES; error: string };
+  | { ok: true; key: keyof typeof DEFAULT_TEMP_QUERIES; series: RangeSeries[] }
+  | { ok: false; key: keyof typeof DEFAULT_TEMP_QUERIES; error: string };
 
 async function queryRange(options: {
   config: PowerQueryConfig;
@@ -265,8 +338,8 @@ async function queryRange(options: {
   fetchImpl: FetchLike;
   timeoutMs: number;
 }): Promise<QueryPart & { query: string }> {
-  const key = (Object.entries(PROM_QUERIES).find(([, q]) => q === options.query)?.[0] ??
-    "gpuTemp") as keyof typeof PROM_QUERIES;
+  const key = (Object.entries(DEFAULT_TEMP_QUERIES).find(([, q]) => q === options.query)?.[0] ??
+    "gpuTemp") as keyof typeof DEFAULT_TEMP_QUERIES;
   const url =
     `${options.config.prometheus_url.replace(/\/+$/, "")}/api/v1/query_range` +
     `?query=${encodeURIComponent(options.query)}` +
@@ -297,7 +370,7 @@ function resolveConfig(config?: PowerQueryConfig): PowerQueryConfig {
   return config ?? DEFAULT_POWER_CONFIG;
 }
 
-function sampleTimestampSec(parts: Map<keyof typeof PROM_QUERIES, RangeSeries[]>): number {
+function sampleTimestampSec(parts: Map<keyof typeof DEFAULT_TEMP_QUERIES, RangeSeries[]>): number {
   let ts = 0;
   for (const series of parts.values()) {
     for (const entry of series) {
@@ -307,26 +380,27 @@ function sampleTimestampSec(parts: Map<keyof typeof PROM_QUERIES, RangeSeries[]>
   return ts;
 }
 
-function aggregateSnapshot(parts: Map<keyof typeof PROM_QUERIES, RangeSeries[]>): TempSample {
-  const tempMap = tempByCardAndSensor(parts.get("gpuTemp"));
+function aggregateSnapshot(parts: Map<keyof typeof DEFAULT_TEMP_QUERIES, RangeSeries[]>, runtime: TempRuntimeConfig): TempSample {
+  const tempMap = tempByCardAndSensor(parts.get("gpuTemp"), runtime);
   const gpus = buildGpusFromMaps({
     tempMap,
-    fan: scalarByCard(parts.get("fan")),
-    power: scalarByCard(parts.get("power")),
-    busy: scalarByCard(parts.get("busy")),
-    vramUsed: scalarByCard(parts.get("vramUsed")),
-    vramTotal: scalarByCard(parts.get("vramTotal")),
-    powerCap: scalarByCard(parts.get("powerCap")),
+    fan: scalarByCard(parts.get("fan"), runtime),
+    power: scalarByCard(parts.get("power"), runtime),
+    busy: scalarByCard(parts.get("busy"), runtime),
+    vramUsed: scalarByCard(parts.get("vramUsed"), runtime),
+    vramTotal: scalarByCard(parts.get("vramTotal"), runtime),
+    powerCap: scalarByCard(parts.get("powerCap"), runtime),
+    config: runtime,
   });
   const ts = sampleTimestampSec(parts);
   return {
     timestamp: ts,
-    cpu: buildCpu(parts.get("cpuTemp")),
+    cpu: buildCpu(parts.get("cpuTemp"), runtime.cpuName),
     gpus,
   };
 }
 
-function allTimestamps(parts: Map<keyof typeof PROM_QUERIES, RangeSeries[]>): number[] {
+function allTimestamps(parts: Map<keyof typeof DEFAULT_TEMP_QUERIES, RangeSeries[]>): number[] {
   const set = new Set<number>();
   for (const series of parts.values()) {
     for (const entry of series) {
@@ -344,10 +418,14 @@ function valueAtTs(entry: RangeSeries, ts: number): number | null {
 }
 
 function tempMapAtTs(gpuTemp: RangeSeries[] | undefined, ts: number): Map<string, Map<string, number | null>> {
+  return tempMapAtTsWithConfig(gpuTemp, ts, tempRuntimeConfig());
+}
+
+function tempMapAtTsWithConfig(gpuTemp: RangeSeries[] | undefined, ts: number, config: TempRuntimeConfig): Map<string, Map<string, number | null>> {
   const map = new Map<string, Map<string, number | null>>();
   for (const entry of gpuTemp ?? []) {
     const metric = entry.metric ?? {};
-    if (metric.name !== GPU_NAME) continue;
+    if (!config.gpuNames.includes(metric.name ?? "")) continue;
     const card = metric.card;
     const sensor = metric.sensor;
     if (!card || !sensor) continue;
@@ -362,10 +440,14 @@ function tempMapAtTs(gpuTemp: RangeSeries[] | undefined, ts: number): Map<string
 }
 
 function scalarByCardAtTs(series: RangeSeries[] | undefined, ts: number): Map<string, number | null> {
+  return scalarByCardAtTsWithConfig(series, ts, tempRuntimeConfig());
+}
+
+function scalarByCardAtTsWithConfig(series: RangeSeries[] | undefined, ts: number, config: TempRuntimeConfig): Map<string, number | null> {
   const map = new Map<string, number | null>();
   for (const entry of series ?? []) {
     const metric = entry.metric ?? {};
-    if (metric.name !== GPU_NAME) continue;
+    if (!config.gpuNames.includes(metric.name ?? "")) continue;
     const card = metric.card;
     if (!card) continue;
     const v = valueAtTs(entry, ts);
@@ -374,7 +456,7 @@ function scalarByCardAtTs(series: RangeSeries[] | undefined, ts: number): Map<st
   return map;
 }
 
-function cpuAtTs(series: RangeSeries[] | undefined, ts: number): TempCpu {
+function cpuAtTs(series: RangeSeries[] | undefined, ts: number, name = DEFAULT_CPU_NAME): TempCpu {
   let tctl: number | null = null;
   let tccd1: number | null = null;
   for (const entry of series ?? []) {
@@ -385,7 +467,7 @@ function cpuAtTs(series: RangeSeries[] | undefined, ts: number): TempCpu {
   }
   const hasAny = tctl != null || tccd1 != null;
   return {
-    name: CPU_NAME,
+    name,
     status: hasAny ? "available" : "missing",
     temperatures: { tctl: { value: tctl }, tccd1: { value: tccd1 } },
   };
@@ -393,19 +475,21 @@ function cpuAtTs(series: RangeSeries[] | undefined, ts: number): TempCpu {
 
 function aggregateAtTimestamp(
   ts: number,
-  parts: Map<keyof typeof PROM_QUERIES, RangeSeries[]>,
+  parts: Map<keyof typeof DEFAULT_TEMP_QUERIES, RangeSeries[]>,
+  runtime: TempRuntimeConfig,
 ): TempSample {
-  const tempMap = tempMapAtTs(parts.get("gpuTemp"), ts);
+  const tempMap = tempMapAtTsWithConfig(parts.get("gpuTemp"), ts, runtime);
   const gpus = buildGpusFromMaps({
     tempMap,
-    fan: scalarByCardAtTs(parts.get("fan"), ts),
-    power: scalarByCardAtTs(parts.get("power"), ts),
-    busy: scalarByCardAtTs(parts.get("busy"), ts),
-    vramUsed: scalarByCardAtTs(parts.get("vramUsed"), ts),
-    vramTotal: scalarByCardAtTs(parts.get("vramTotal"), ts),
-    powerCap: scalarByCardAtTs(parts.get("powerCap"), ts),
+    fan: scalarByCardAtTsWithConfig(parts.get("fan"), ts, runtime),
+    power: scalarByCardAtTsWithConfig(parts.get("power"), ts, runtime),
+    busy: scalarByCardAtTsWithConfig(parts.get("busy"), ts, runtime),
+    vramUsed: scalarByCardAtTsWithConfig(parts.get("vramUsed"), ts, runtime),
+    vramTotal: scalarByCardAtTsWithConfig(parts.get("vramTotal"), ts, runtime),
+    powerCap: scalarByCardAtTsWithConfig(parts.get("powerCap"), ts, runtime),
+    config: runtime,
   });
-  return { timestamp: ts, cpu: cpuAtTs(parts.get("cpuTemp"), ts), gpus };
+  return { timestamp: ts, cpu: cpuAtTs(parts.get("cpuTemp"), ts, runtime.cpuName), gpus };
 }
 
 async function fetchAllQueries(options: {
@@ -416,18 +500,19 @@ async function fetchAllQueries(options: {
   fetchImpl: FetchLike;
   timeoutMs: number;
 }): Promise<
-  | { ok: true; parts: Map<keyof typeof PROM_QUERIES, RangeSeries[]> }
+  | { ok: true; parts: Map<keyof typeof DEFAULT_TEMP_QUERIES, RangeSeries[]> }
   | { ok: false; error: string }
 > {
-  const entries = Object.entries(PROM_QUERIES) as [keyof typeof PROM_QUERIES, string][];
+  const entries = Object.entries(DEFAULT_TEMP_QUERIES) as [keyof typeof DEFAULT_TEMP_QUERIES, string][];
+  const runtime = tempRuntimeConfig(options.config);
   const results = await Promise.all(
-    entries.map(([key, query]) =>
-      queryRange({ ...options, query }).then((part) => ({ ...part, key })),
+    entries.map(([key]) =>
+      queryRange({ ...options, query: runtime.queries[key] }).then((part) => ({ ...part, key })),
     ),
   );
   let successCount = 0;
   let firstError: string | null = null;
-  const parts = new Map<keyof typeof PROM_QUERIES, RangeSeries[]>();
+  const parts = new Map<keyof typeof DEFAULT_TEMP_QUERIES, RangeSeries[]>();
   for (const part of results) {
     if (part.ok) {
       successCount += 1;
@@ -465,7 +550,7 @@ export async function fetchTempSnapshot(options: {
     timeoutMs,
   });
   if (!fetched.ok) return { ok: false, config, error: fetched.error };
-  return { ok: true, config, sample: aggregateSnapshot(fetched.parts) };
+  return { ok: true, config, sample: aggregateSnapshot(fetched.parts, tempRuntimeConfig(config)) };
 }
 
 /** 最长历史窗口：对应温度页「最近 7 天」档位。 */
@@ -513,6 +598,7 @@ export async function fetchTempHistory(options: {
   }
 
   const timestamps = allTimestamps(fetched.parts);
-  const samples = timestamps.map((ts) => aggregateAtTimestamp(ts, fetched.parts));
+  const runtime = tempRuntimeConfig(config);
+  const samples = timestamps.map((ts) => aggregateAtTimestamp(ts, fetched.parts, runtime));
   return { ok: true, config, seconds, step, samples };
 }

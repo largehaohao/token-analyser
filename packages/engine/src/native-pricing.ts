@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Cost, TokenPricing, TokenUsage } from "./types.ts";
 
@@ -57,6 +57,29 @@ export function loadApiPrices(): ApiPrices {
   return JSON.parse(readFileSync(API_PRICES_PATH, "utf8")) as ApiPrices;
 }
 
+let priceSnapshot: { mtimeMs: number; size: number; prices: ApiPrices } | null = null;
+
+/** Parse the price card once per analysis run, invalidated on any file change. */
+function cachedApiPrices(): ApiPrices {
+  let stamp: { mtimeMs: number; size: number };
+  try {
+    const stat = statSync(API_PRICES_PATH);
+    stamp = { mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch {
+    return loadApiPrices();
+  }
+  if (
+    priceSnapshot &&
+    priceSnapshot.mtimeMs === stamp.mtimeMs &&
+    priceSnapshot.size === stamp.size
+  ) {
+    return priceSnapshot.prices;
+  }
+  const prices = loadApiPrices();
+  priceSnapshot = { ...stamp, prices };
+  return prices;
+}
+
 /**
  * Rates for a logged model ID, and the canonical ID it was declared as an
  * alias of. Alias IDs live under `qwen.models[*].aliases`: naming a relay's
@@ -88,7 +111,7 @@ export function nativeCost(
   model: string | null,
   opts: { recordedUsd?: number | null; provider?: string; fast?: boolean; cacheWrite1h?: number } = {},
 ): { cost: Cost; pricing: TokenPricing | null } {
-  const source = apiRateSource(model, loadApiPrices());
+  const source = apiRateSource(model, cachedApiPrices());
   // A relay that bills nothing records 0 for a model with published rates; that
   // is "not billed", so the official rate estimate fills the ledger. A 0 on an
   // unpriced model stays the logged fact.

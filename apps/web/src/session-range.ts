@@ -70,7 +70,10 @@ export function filterSessionsByDay<T extends DatedSession>(
 ): T[] {
   const start = Date.parse(`${day}T00:00:00`);
   if (!Number.isFinite(start)) return sessions;
-  const end = start + 24 * 60 * 60 * 1000;
+  // Next local calendar midnight, not +24h: DST days are 23 or 25 hours long.
+  const nextMidnight = new Date(start);
+  nextMidnight.setDate(nextMidnight.getDate() + 1);
+  const end = nextMidnight.getTime();
   return sessions.filter((session) => {
     const began = session.startedAt ? Date.parse(session.startedAt) : null;
     const ended = sessionTimeMs(session);

@@ -21,7 +21,8 @@ import { arrayHistogram, TPS_LABELS, TPS_TICKS, TTFT_LABELS, TTFT_TICKS } from "
 import { HistogramPair } from "./Histogram";
 import { sourceLabel } from "./format";
 import { useModelFilteredOverview } from "./useModelFilteredOverview";
-import { BareButton, Panel, srTable } from "./ui";
+import { BareButton, Panel, StatePanel, srTable } from "./ui";
+import { Button } from "./components/ui/button";
 import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
 import {
   TableBody,
@@ -528,8 +529,9 @@ export function PerformancePanel({
     overview,
     loading,
     error,
+    retry,
   } = useModelFilteredOverview(baseOverview, filterScope, fetchOverviewForModel);
-  const dist = overview.performanceDistribution;
+  const dist = overview?.performanceDistribution;
   return (
     <Panel role="region" className="chart-card perf-card" data-testid="performance-panel" aria-label="响应性能分布">
       <div className="chart-head">
@@ -549,22 +551,34 @@ export function PerformancePanel({
           />
         </div>
       </div>
-      {error ? (
-        <p className="empty-inline" role="alert">
-          按模型筛选失败：{error}
-        </p>
-      ) : null}
-      <PerformanceMetrics performance={overview.performance} />
-      {dist ? (
-        <HistogramPair
-          ttft={arrayHistogram(TTFT_LABELS, dist.ttft, "s", dist.sampleCount ?? overview.performance?.taskCount ?? overview.turnCount, TTFT_TICKS)}
-          speed={arrayHistogram(TPS_LABELS, dist.tps, " tok/s", dist.sampleCount ?? overview.performance?.taskCount ?? overview.turnCount, TPS_TICKS)}
-        />
+      {overview == null ? (
+        <StatePanel
+          compact
+          kind={error ? "error" : "loading"}
+          title={error ? "按模型筛选失败" : "正在加载所选模型数据"}
+          description={error ?? "数据就绪后自动显示，不会展示其他模型的数字。"}
+        >
+          {error ? (
+            <Button type="button" variant="outline" size="sm" onClick={retry}>
+              重试
+            </Button>
+          ) : null}
+        </StatePanel>
       ) : (
-        <p className="chart-desc">
-          耗时直方图需要引擎开启请求性能统计
-          <code> TOKEN_ANALYSER_ENABLE_REQUEST_PERFORMANCE=1</code>。
-        </p>
+        <>
+          <PerformanceMetrics performance={overview.performance} />
+          {dist ? (
+            <HistogramPair
+              ttft={arrayHistogram(TTFT_LABELS, dist.ttft, "s", dist.sampleCount ?? overview.performance?.taskCount ?? overview.turnCount, TTFT_TICKS)}
+              speed={arrayHistogram(TPS_LABELS, dist.tps, " tok/s", dist.sampleCount ?? overview.performance?.taskCount ?? overview.turnCount, TPS_TICKS)}
+            />
+          ) : (
+            <p className="chart-desc">
+              耗时直方图需要引擎开启请求性能统计
+              <code> TOKEN_ANALYSER_ENABLE_REQUEST_PERFORMANCE=1</code>。
+            </p>
+          )}
+        </>
       )}
     </Panel>
   );

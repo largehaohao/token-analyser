@@ -31,7 +31,7 @@ describe("resolvePerformance", () => {
       taskCount: 2, ttftSampleCount: 0, speedSampleCount: 0,
       avgTtftMs: null, outputTokensPerSecond: null, totalDurationMs: null,
       requestDurationMs: null, requestDurationCount: 0,
-      taskDurationMs: 5_000, taskDurationCount: 1, basis: "request",
+      taskDurationMs: 5_000, taskDurationCount: 1, basis: null,
     };
     const resolved = resolvePerformance(stale, [
       turn({ ttftMs: 500, durationMs: 1_500, output: 20 }),
@@ -43,5 +43,40 @@ describe("resolvePerformance", () => {
     expect(resolved.outputTokensPerSecond).toBeCloseTo(44 * 1000 / 2_000, 10);
     expect(resolved.ttftSampleCount).toBe(2);
     expect(resolved.speedSampleCount).toBe(2);
+  });
+
+  it("keeps authoritative missing measurements when the summary states a basis", () => {
+    const authoritative: PerformanceSummary = {
+      taskCount: 1, ttftSampleCount: 0, speedSampleCount: 0,
+      avgTtftMs: null, outputTokensPerSecond: null, totalDurationMs: null,
+      requestDurationMs: null, requestDurationCount: 0,
+      taskDurationMs: 5_000, taskDurationCount: 1, basis: "task",
+    };
+    const resolved = resolvePerformance(authoritative, [
+      turn({ ttftMs: 500, durationMs: 1_500, output: 20 }),
+    ]);
+    expect(resolved.outputTokensPerSecond).toBeNull();
+    expect(resolved.avgTtftMs).toBeNull();
+    expect(resolved.basis).toBe("task");
+  });
+
+  it("leaves tok/s missing when TTFT leaves no decode window", () => {
+    const resolved = resolvePerformance(undefined, [
+      turn({ ttftMs: 2_000, durationMs: 1_000, output: 20 }),
+    ]);
+    expect(resolved.avgTtftMs).toBe(2_000);
+    expect(resolved.ttftSampleCount).toBe(1);
+    expect(resolved.speedSampleCount).toBe(0);
+    expect(resolved.outputTokensPerSecond).toBeNull();
+  });
+
+  it("aggregates recorded speed through its implied generation window", () => {
+    const recorded = turn({ durationMs: 2_000, output: 10 });
+    recorded.requestPerformance = {
+      ttftMs: null, durationMs: 2_000, outputTokensPerSecond: 70, speedSource: "recorded",
+    };
+    const resolved = resolvePerformance(undefined, [recorded]);
+    expect(resolved.outputTokensPerSecond).toBeCloseTo(70, 10);
+    expect(resolved.speedSampleCount).toBe(1);
   });
 });

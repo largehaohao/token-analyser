@@ -49,6 +49,43 @@ describe("gpuStatus", () => {
 });
 
 describe("fetchTempSnapshot", () => {
+  it("uses configured Prometheus queries and accepts custom device names", async () => {
+    const requested: string[] = [];
+    const impl: FetchLike = async (url) => {
+      const query = new URL(url).searchParams.get("query") ?? "";
+      requested.push(query);
+      if (query.includes("custom_gpu_temperature")) {
+        return okJson(matrixResult([{
+          metric: { card: "gpu0", name: "Vendor GX", sensor: "edge" },
+          values: [[T0, "57"]],
+        }]));
+      }
+      return okJson(matrixResult([]));
+    };
+    const result = await fetchTempSnapshot({
+      config: {
+        prometheus_url: "http://prom.test",
+        queries: { cpu: "x", gpu: "y", machine: "z" },
+        temps: {
+          gpu: [
+            "custom_gpu_temperature{name=\"Vendor GX\"}",
+            "custom_gpu_fan{name=\"Vendor GX\"}",
+          ],
+          cpu: ["custom_cpu_temperature{sensor=\"chip0\"}"],
+          max_components_per_device: 4,
+        },
+      },
+      fetchImpl: impl,
+      nowMs: T0 * 1000,
+    });
+    expect(result.ok).toBe(true);
+    expect(requested.some((query) => query.includes("custom_gpu_temperature"))).toBe(true);
+    expect(requested.some((query) => query.includes("custom_cpu_temperature"))).toBe(true);
+    if (!result.ok) return;
+    expect(result.sample.gpus).toHaveLength(1);
+    expect(result.sample.gpus[0]!.temperatures.edge.value).toBe(57);
+  });
+
   it("aggregates two XTX cards and CPU Tctl/Tccd1 from Prometheus fixtures", async () => {
     const impl: FetchLike = async (url) => {
       if (url.includes(encodeURIComponent("amdgpu_temperature_celsius"))) {

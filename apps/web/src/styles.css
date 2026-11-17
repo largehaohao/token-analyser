@@ -7733,6 +7733,7 @@ button.rail-rank:hover {
   box-shadow: 0 0 0 1px var(--accent);
 }
 .heat-cell.empty { border-color: transparent; background: transparent; }
+.heat-cell.unknown { background: transparent; border-style: dashed; }
 .heat-scale {
   display: flex;
   align-items: center;

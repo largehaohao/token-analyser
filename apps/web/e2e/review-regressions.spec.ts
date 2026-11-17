@@ -115,7 +115,7 @@ for (const scope of ["source", "range"] as const) {
     });
     await page.goto("/#overview");
     const comparison = page.locator(".ledger-delta").first();
-    await expect(comparison).toContainText("0%");
+    await expect(comparison).toContainText(/持平|0\.0%/);
     try {
       if (scope === "source") {
         await page.getByRole("combobox", { name: "会话来源", exact: true }).selectOption("pi");
@@ -125,7 +125,7 @@ for (const scope of ["source", "range"] as const) {
       await expect(page.locator(".ledger-value").first()).toContainText("200");
       await expect(comparison).toContainText("—");
     } finally { release(); }
-    await expect(comparison).toContainText("▼ 50%");
+    await expect(comparison).toContainText(/▼ 200（50\.0%）/);
   });
 }
 

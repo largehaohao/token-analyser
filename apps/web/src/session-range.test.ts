@@ -19,6 +19,32 @@ function localAt(day: string, hour: number): string {
 }
 
 describe("filterSessionsByDay", () => {
+  it("uses calendar midnight across DST transitions", () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      // Spring forward: 2026-03-08 is 23 hours long; 04:30Z on Mar 9 is
+      // already 00:30 local on Mar 9 and must not join the Mar 8 drill-down.
+      const nextDayEarly = {
+        id: "next",
+        startedAt: "2026-03-09T04:30:00.000Z",
+        lastEventAt: "2026-03-09T04:30:00.000Z",
+      };
+      expect(filterSessionsByDay([nextDayEarly], "2026-03-08")).toEqual([]);
+      // Fall back: 2026-11-01 is 25 hours long; 04:30Z on Nov 2 is still
+      // 23:30 local on Nov 1 and must join the Nov 1 drill-down.
+      const lateFallBack = {
+        id: "late",
+        startedAt: "2026-11-02T04:30:00.000Z",
+        lastEventAt: "2026-11-02T04:30:00.000Z",
+      };
+      expect(filterSessionsByDay([lateFallBack], "2026-11-01")).toEqual([lateFallBack]);
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  });
+
   it("keeps a session whose activity overlaps the day", () => {
     const spanning = {
       id: "span",

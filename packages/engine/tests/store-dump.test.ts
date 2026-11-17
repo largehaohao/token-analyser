@@ -24,7 +24,12 @@ import {
   writeStoreDump,
   STORE_DUMP_VERSION,
 } from "../src/store-dump.ts";
-import { closeStoreDb } from "../src/store-db.ts";
+import {
+  closeStoreDb,
+  readStoredToggles,
+  writeStoredToggle,
+} from "../src/store-db.ts";
+import { DEFAULT_WASTE_TOGGLES } from "../src/types.ts";
 import { pricingCacheContext } from "../src/ingest.ts";
 
 const fixtures = path.resolve(
@@ -149,7 +154,7 @@ describe("SessionStore dump", () => {
     expect(second.get(id)).toBeDefined();
   });
 
-  it("deletes the on-disk dump when pricing context no longer matches", () => {
+  it("clears derived data but keeps the store and preferences when pricing context no longer matches", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "store-dump-price-"));
     writeStoreDump(
       {
@@ -161,10 +166,14 @@ describe("SessionStore dump", () => {
       },
       dir,
     );
+    writeStoredToggle(dir, "s-kept", { ...DEFAULT_WASTE_TOGGLES, poll: false });
     expect(existsSync(storeDbPath(dir))).toBe(true);
     expect(readStoreDump(dir, pricingCacheContext())).toBeUndefined();
     closeStoreDb(dir);
-    expect(existsSync(storeDbPath(dir))).toBe(false);
+    // Preferences are user data: a pricing refresh rebuilds derived snapshots
+    // without destroying the database file or the saved toggles.
+    expect(existsSync(storeDbPath(dir))).toBe(true);
+    expect(readStoredToggles(dir)["s-kept"]).toMatchObject({ poll: false });
   });
 
   it("treats .vscdb WAL growth as a fingerprint change", () => {

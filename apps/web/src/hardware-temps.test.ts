@@ -154,3 +154,23 @@ describe("readSeries", () => {
     ]);
   });
 });
+
+describe("mergeTempSamples retention", () => {
+  it("bounds retained samples to the largest selectable window", () => {
+    const now = 1_800_000;
+    const base = Array.from({ length: 20 }, (_, index) => ({
+      timestamp: now - 20 * 86400 + index * 86400,
+      value: index,
+    }));
+    const incoming = [{ timestamp: now, value: 100 }];
+    const merged = mergeTempSamples(base, incoming, { maxWindowSec: 7 * 86400 });
+    expect(merged.length).toBeLessThanOrEqual(9);
+    expect(merged.at(-1)).toEqual(incoming[0]);
+    expect(merged.every((sample) => sample.timestamp >= now - 7 * 86400)).toBe(true);
+  });
+
+  it("keeps an unchanged array when no new samples arrive", () => {
+    const base = [{ timestamp: 1, value: 1 }];
+    expect(mergeTempSamples(base, [])).toBe(base);
+  });
+});

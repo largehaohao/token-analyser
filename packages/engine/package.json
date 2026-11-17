@@ -5,6 +5,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "analyse": "tsx src/analyse-cli.ts",
     "start": "node ../../scripts/start-engine.mjs"
   },

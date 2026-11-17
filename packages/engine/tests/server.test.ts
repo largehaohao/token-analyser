@@ -709,4 +709,51 @@ describe("startServer", () => {
     expect(order.indexOf("dump-start")).toBeGreaterThan(order.indexOf("close"));
     expect(order.at(-1)).toBe("exit");
   });
+
+  it("rejects non-loopback Host headers and cross-origin state changes", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-guard-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    homes.push(dir);
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    seedStore(store, dir);
+    const server = await startServer({ port: 0, store });
+    try {
+      const target = new URL(`${server.url}/sessions`);
+      const rebinding = await new Promise<number>((resolve, reject) => {
+        const request = http.request(
+          {
+            hostname: target.hostname,
+            port: target.port,
+            path: target.pathname,
+            method: "GET",
+            headers: { Host: "attacker.example" },
+          },
+          (response) => {
+            response.resume();
+            response.on("end", () => resolve(response.statusCode ?? 0));
+          },
+        );
+        request.on("error", reject);
+        request.end();
+      });
+      expect(rebinding).toBe(403);
+
+      const crossOrigin = await fetch(`${server.url}/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "multipart/form-data; boundary=x",
+          Origin: "https://evil.example",
+        },
+        body: "--x--",
+      });
+      expect(crossOrigin.status).toBe(403);
+
+      const loopbackOrigin = await fetch(`${server.url}/sessions`, {
+        headers: { Origin: "http://127.0.0.1:7788" },
+      });
+      expect(loopbackOrigin.status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
 });

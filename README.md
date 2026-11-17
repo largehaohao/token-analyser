@@ -198,11 +198,21 @@ bucket** only aggregates those samples into per-column means (30 s / 10 min /
 power and peak power therefore never use the bucketed series, so a spike
 between two old 15-minute points is no longer averaged away.
 
-This page currently uses deterministic **demo data, not measured hardware data**.
-It makes no Grafana, Prometheus, or SSH connections. Missing samples break the
-integral and produce a clearly labelled lower bound; absent readings show `—`.
-Demo electricity costs never enter Token cost totals. The data adapter in
-`apps/web/src/hardware-power.ts` is the boundary for a future real data source.
+The engine reads power samples from a configured local Prometheus HTTP API
+(`~/.token-analyser/config.json` → `power.prometheus_url`, optional `queries`).
+Only that configured address is contacted; session data never leaves the
+machine. When the collector is unreachable the API returns `connected: false`
+and the page falls back to deterministic **demo data** with a visible notice.
+Missing samples break the integral and produce a clearly labelled lower bound;
+absent readings show `—`. Demo electricity costs never enter Token cost totals.
+`apps/web/src/hardware-power.ts` is the adapter boundary for both series.
+
+The hardware temperature page (`#hardware-temp`) uses the same Prometheus
+configuration. It polls a current snapshot every two seconds, loads a longer
+history for the selected window, and accepts custom metric queries and device
+names via `power.temps`. A failed history read is labelled and retryable
+without blocking live samples; no fabricated temperatures are inserted when
+the collector is unavailable.
 
 ## Test
 

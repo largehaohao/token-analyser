@@ -270,8 +270,9 @@ describe("Qwen official price updates", () => {
       update,
       onUpdate: (result) => (updated = result),
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    // The shared pricing lock schedules the update through a promise chain;
+    // wait for the task queue rather than a fixed number of microtasks.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(refreshed).toBe(1);
     expect(updated).toEqual({ asOf: localToday(), modelCount: 1 });

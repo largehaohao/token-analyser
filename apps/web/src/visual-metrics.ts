@@ -69,19 +69,27 @@ export function heatCalendar(days: OverviewDay[], metric: ChartMetric): Array<{
   level: number;
 }> {
   const dated = days.filter(
-    (day) => /^\d{4}-\d{2}-\d{2}$/.test(day.date) && dayMetricValue(day, metric) != null,
+    (day) => /^\d{4}-\d{2}-\d{2}$/.test(day.date),
   );
   if (dated.length === 0) return [];
   const first = new Date(`${dated[0]!.date}T00:00:00`);
   const lead = (first.getDay() + 6) % 7;
-  const values = dated.map((day) => dayMetricValue(day, metric) ?? 0);
+  // Unknown readings keep their calendar slot: dropping them would shift
+  // every later date into the wrong weekday column.
+  const values = dated
+    .map((day) => dayMetricValue(day, metric))
+    .filter((value): value is number => value != null);
   const max = Math.max(...values, 1);
   const cells: Array<{ date: string | null; value: number | null; level: number }> = [];
   for (let i = 0; i < lead; i += 1) {
     cells.push({ date: null, value: null, level: 0 });
   }
   for (const day of dated) {
-    const value = dayMetricValue(day, metric) ?? 0;
+    const value = dayMetricValue(day, metric);
+    if (value == null) {
+      cells.push({ date: day.date, value: null, level: 0 });
+      continue;
+    }
     const ratio = max > 0 ? value / max : 0;
     const level = value <= 0 ? 0 : ratio > 0.75 ? 4 : ratio > 0.5 ? 3 : ratio > 0.25 ? 2 : 1;
     cells.push({ date: day.date, value, level });
@@ -90,4 +98,28 @@ export function heatCalendar(days: OverviewDay[], metric: ChartMetric): Array<{
     cells.push({ date: null, value: null, level: 0 });
   }
   return cells;
+}
+
+/**
+ * Overlay polyline segments on a shared 0..100 viewBox height. Known runs are
+ * split at missing readings so gaps are never bridged, and every segment uses
+ * the caller's scale so the overlay is comparable to the bars (or to its own
+ * explicitly labelled axis).
+ */
+export function overlaySegments(values: Array<number | null>, max: number): string[] {
+  const scale = max > 0 ? max : 1;
+  const segments: string[] = [];
+  let current: string[] = [];
+  values.forEach((value, index) => {
+    if (value == null) {
+      if (current.length > 0) {
+        segments.push(current.join(" "));
+        current = [];
+      }
+      return;
+    }
+    current.push(`${index + 0.5},${Math.max(0, 100 - (100 * value) / scale)}`);
+  });
+  if (current.length > 0) segments.push(current.join(" "));
+  return segments;
 }

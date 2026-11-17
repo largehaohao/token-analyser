@@ -180,8 +180,10 @@ whole-machine interval energy and CNY cost, and that pair is the page's primary
 reading: a two-figure hero panel in the largest ledger type on the page, echoed
 by a compact energy/cost summary under the page title. The price field starts at
 0.6629 CNY/kWh and its label keeps four decimals for prices finer than a cent.
-The demo notice stays visible and
-component readings never add to the whole-machine total. Three line styles
+Live Prometheus and demo fallback are distinguished by an explicit status notice;
+when the collector fails, the notice names the failure and every affected energy
+and cost reading is labelled demo. Component readings never add to the whole-machine
+total. Three line styles
 supplement color; overflowing charts and tables give an explicit scroll cue.
 The trend keeps its 24px columns: at most 150 columns per range, each column a
 sampling bucket's mean, so finer sampling scrolls the plot instead of shrinking

@@ -172,6 +172,22 @@ describe("native session adapters", () => {
     expect(store.overview({ watchPath: dir }).cost.raw).toBe(720);
   });
 
+  it("re-evaluates a pi fork when its parent becomes available later", () => {
+    const dir = home();
+    const parentPath = path.join(dir, "parent-later.jsonl");
+    const events = fixture("pi").trim().split("\n").map((line) => JSON.parse(line));
+    events[0].id = "fork-later"; events[0].parentSession = parentPath;
+    events.push({ ...events[3], id: "new-response", parentId: "r1" });
+    const fork = write(dir, "fork-later.jsonl", events.map((event) => JSON.stringify(event)).join("\n"));
+    const first = ingestFile(fork, { cacheHome: dir });
+    expect(first.forkedFrom).toBe(parentPath);
+    expect(first.turns).toHaveLength(2);
+
+    writeFileSync(parentPath, fixture("pi"));
+    const second = ingestFile(fork, { cacheHome: dir });
+    expect(second.turns).toHaveLength(1);
+  });
+
   it("keeps Cursor transcript conversations and tools without inventing tokens, costs or performance", () => {
     const dir = home(); const snap = ingestFile(write(dir, "cursor.jsonl", fixture("cursor")), { cacheHome: dir });
     expect(snap.source).toBe("cursor"); expect(snap.turns).toHaveLength(1);
