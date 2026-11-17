@@ -60,6 +60,27 @@ export function filterSessionsByRange<T extends DatedSession>(
   });
 }
 
+/**
+ * Sessions whose recorded activity overlaps a local calendar day. Used by the
+ * trend / heat-calendar drill-down so a day's bar connects to its evidence.
+ */
+export function filterSessionsByDay<T extends DatedSession>(
+  sessions: T[],
+  day: string,
+): T[] {
+  const start = Date.parse(`${day}T00:00:00`);
+  if (!Number.isFinite(start)) return sessions;
+  const end = start + 24 * 60 * 60 * 1000;
+  return sessions.filter((session) => {
+    const began = session.startedAt ? Date.parse(session.startedAt) : null;
+    const ended = sessionTimeMs(session);
+    const from = began != null && Number.isFinite(began) ? began : ended;
+    const to = ended != null ? ended : from;
+    if (from == null || to == null) return false;
+    return from < end && to >= start;
+  });
+}
+
 export type ComparisonWindow = {
   sinceMs: number;
   untilMs: number;

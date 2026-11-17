@@ -95,6 +95,24 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
 - Chart surfaces are never the only reading: trend, composition, ranking,
   models and histograms publish the same numbers as a screen-reader table, and the
   trend column exposes a focusable tooltip dismissed by `Escape`.
+- Trend columns, heat-calendar cells and the hero sparkline connect a total to its
+  evidence: their tooltip carries an explicit `查看当日会话` action that hands the
+  question to the session list filtered to sessions active on that local day
+  (range resets to `全部`, a dismissible day chip names the filter, and no filter is
+  applied silently). Hover/focus/first-touch still opens the read-only tooltip first;
+  `Escape` dismisses it. Heat-calendar cells are focusable buttons with the same
+  tooltip and a keyboard `Enter` drill-down; empty weekday slots stay inert.
+- The composition donut is interactive without becoming a filter: hovering or
+  focusing a segment (or its legend row) emphasises that segment, dims the others
+  and swaps the centre readout to the segment's exact value and share; clicking or
+  pressing `Enter`/`Space` locks that readout until toggled off. The donut always
+  remains the unfiltered token partition, and the legend rows are pressed buttons
+  mirroring the segments.
+- The hero sparkline scrubs: pointer movement or `ArrowLeft`/`ArrowRight`/`Home`/`End`
+  moves a crosshair and a per-day readout (with the equal-length previous window drawn
+  as a dashed ghost on the same scale); `Escape` clears it. A window with no recorded
+  usage states that plainly instead of drawing a zero axis, in both the hero and the
+  trend panel.
 - Trend annotations are redundant encodings of recorded data, not new data: a
   dashed window-average line (labelled with its value, drawn only with ≥2 known
   days), a dot and bold tick on today's column, weekend column shading, and
@@ -109,6 +127,9 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
   independently of waste rules. Dates align below bars, and the first touch opens
   a tooltip kept within the viewport. Model tables scroll inside their disclosure
   down to 320px and retain missing-usage notes and lower-bound token values.
+- Session rows carry a thin cached/uncached/output composition micro-bar drawn from
+  the same `--chart-*` tokens as the donut, so each row shows its token shape at a
+  glance; it is a reading, not a control, and doesn't replace the waste bar.
 - The overview quota is the latest quota event captured inside its window. Its
   capture time is retained in snapshots/cache and never replaced by session activity.
 

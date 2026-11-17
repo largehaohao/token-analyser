@@ -45,6 +45,7 @@ type Props = {
   refreshError?: boolean;
   onRetry: () => void;
   onInspectSlice: (key: string, label: string) => void;
+  onDrillDay?: (date: string) => void;
   /** Changes when range/source/now window changes so panel model filters re-query. */
   filterScope: string;
   fetchOverviewForModel: (model: string) => Promise<Overview>;
@@ -62,6 +63,7 @@ export function OverviewPage({
   refreshError,
   onRetry,
   onInspectSlice,
+  onDrillDay,
   filterScope,
   fetchOverviewForModel,
 }: Props) {
@@ -147,6 +149,7 @@ export function OverviewPage({
         previous={previous}
         previousLabel={previousLabel}
         unit={unit}
+        onDrillDay={onDrillDay}
       />
 
       <LedgerStrip
@@ -178,6 +181,7 @@ export function OverviewPage({
           filterScope={filterScope}
           fetchOverviewForModel={fetchOverviewForModel}
           onFocusSlice={setFocusedSlice}
+          onDrillDay={onDrillDay}
         />
         <CompositionPanel overview={overview} focusedSlice={focusedSlice} />
       </div>

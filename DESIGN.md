@@ -151,6 +151,19 @@ Use 140ms color/border transitions; motion never drives layout (tabular digits k
 
 The overview opens with a single primary reading: `LedgerHero` shows the total in the largest display type on the page alongside a 30-day sparkline, with the equal-window comparison and session/turn counts. `LedgerStrip` keeps all secondary figures and exact values. `CompositionPanel` adds a three-part SVG donut (cached input, uncached input, output) using the same `--chart-*` tokens as the tree and turns; its centre states the exact total and an accessible label duplicates every segment. `TrendPanel` offers daily / cumulative / 7-day moving-average overlays computed in `visual-metrics.ts` (a missing reading stays missing), plus a Monday-first heat calendar graded on the same daily scale. Hovering or activating a behaviour rank row focuses that slice across the panel pair; the composition card states that the donut remains the unfiltered token partition. These are data encodings, not decoration: no glow, remote font, or perpetual animation is added.
 
+Interactivity stays data-driven. Trend columns, heat-calendar cells and the hero
+sparkline share one fixed-position tooltip (`ChartTooltip.tsx`); its `查看当日会话`
+action drills into the session list filtered to sessions active on that local day
+(range resets to `全部`, a dismissible day chip names the filter). Donut segments and
+legend rows are hover/click/keyboard-focusable: focusing emphasises the segment, dims
+the others and swaps the centre readout to that segment's exact value and share,
+without filtering the partition. The hero sparkline scrubs with a crosshair and
+overlays the equal-length previous window as a dashed ghost on the same scale. A
+window with no recorded usage states that plainly rather than drawing a zero axis.
+Panels without a view-transition name enter with a capped `--stagger-bar` stagger
+(`panel-enter`); dark mode adds tonal card depth. Both stay static under reduced
+motion and introduce no glow or perpetual animation.
+
 ## Do's and Don'ts
 
 - Do keep totals, date range, display unit, and pricing limitations in view.

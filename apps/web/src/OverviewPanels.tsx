@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Cost, Overview, OverviewRateLimits } from "./api";
 import { SLICE_META } from "./buckets";
 import {
@@ -101,6 +102,12 @@ export function CompositionPanel({
   const donutTotal = Math.max(0, cost.raw);
   const radius = 48;
   let offset = 0;
+  const [hotKey, setHotKey] = useState<string | null>(null);
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
+  const activeKey = hotKey ?? pickedKey;
+  const activePart = parts.find((part) => part.key === activeKey) ?? null;
+  const togglePick = (key: string) =>
+    setPickedKey((current) => (current === key ? null : key));
 
   return (
     <Panel role="region" className="chart-card composition-panel" data-testid="composition-panel" aria-label="Token 构成">
@@ -118,9 +125,9 @@ export function CompositionPanel({
       {donutTotal > 0 && (
         <div className="donut-wrap">
           <svg
-            className="donut"
+            className={`donut${activeKey != null ? " has-hot" : ""}`}
             viewBox="0 0 128 128"
-            role="img"
+            role="group"
             aria-label={`Token 构成环图：${segments.map((seg) => `${seg.label} ${formatExactTokens(seg.value)}`).join("，")}`}
           >
             <circle className="donut-track" cx="64" cy="64" r={radius} />
@@ -132,30 +139,66 @@ export function CompositionPanel({
                 return (
                   <circle
                     key={seg.key}
-                    className="donut-seg"
+                    className={`donut-seg${activeKey === seg.key ? " hot" : ""}${activeKey != null && activeKey !== seg.key ? " dim" : ""}`}
                     cx="64"
                     cy="64"
                     r={radius}
                     stroke={seg.color}
                     strokeDasharray={`${arc.dash} ${arc.gap}`}
                     strokeDashoffset={dashOffset}
+                    tabIndex={0}
+                    role="button"
+                    aria-pressed={pickedKey === seg.key}
+                    aria-label={`${seg.label} ${formatExactTokens(seg.value)} tokens，占 ${formatPercent(pct(seg.value))}，回车锁定`}
+                    onMouseEnter={() => setHotKey(seg.key)}
+                    onMouseLeave={() => setHotKey(null)}
+                    onFocus={() => setHotKey(seg.key)}
+                    onBlur={() => setHotKey(null)}
+                    onClick={() => togglePick(seg.key)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        togglePick(seg.key);
+                      }
+                    }}
                   />
                 );
               })}
             </g>
-            <text className="donut-center-value" x="64" y="62">{formatCompactTokens(donutTotal)}</text>
-            <text className="donut-center-label" x="64" y="78">tokens</text>
+            <text className="donut-center-value" x="64" y="62">
+              {formatCompactTokens(activePart ? activePart.value : donutTotal)}
+            </text>
+            <text className="donut-center-label" x="64" y="78">
+              {activePart
+                ? `${activePart.label} · ${formatPercent(pct(activePart.value))}`
+                : "tokens"}
+            </text>
           </svg>
           <div className="donut-legend">
             {parts.map((part) => (
-              <div key={part.key}>
+              <button
+                key={part.key}
+                type="button"
+                className={activeKey === part.key ? "hot" : ""}
+                aria-pressed={pickedKey === part.key}
+                onMouseEnter={() => setHotKey(part.key)}
+                onMouseLeave={() => setHotKey(null)}
+                onFocus={() => setHotKey(part.key)}
+                onBlur={() => setHotKey(null)}
+                onClick={() => togglePick(part.key)}
+              >
                 <i style={{ background: part.color }} />
                 <span>{part.label}</span>
                 <b>{formatCompactTokens(part.value)}</b>
-              </div>
+              </button>
             ))}
           </div>
         </div>
+      )}
+      {pickedKey && (
+        <p className="focus-hint" role="status">
+          已锁定「{parts.find((part) => part.key === pickedKey)?.label}」的中心读数；再次点选该段或图例取消。
+        </p>
       )}
       {focusedSlice && (
         <p className="focus-hint" role="status">

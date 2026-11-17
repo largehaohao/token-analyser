@@ -1,5 +1,11 @@
-import type { CSSProperties } from "react";
+import {
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import type { Overview } from "./api";
+import { ChartTooltip, useChartTooltip } from "./ChartTooltip";
 import { localDateString } from "./chart-metric";
 import {
   costValue,
@@ -10,21 +16,25 @@ import {
 import { formatAnimatedCost } from "./LedgerStrip";
 import { useAnimatedNumber, useFlashOnChange } from "./motion";
 import { metricSeries } from "./visual-metrics";
+import { BareButton, Icon } from "./ui";
 
 const WIDTH = 240;
 const HEIGHT = 64;
 const PAD = 3;
 
-function sparkPath(values: number[]): { line: string; area: string; lastX: number; lastY: number } | null {
-  if (values.length < 2) return null;
-  const max = Math.max(...values, 1);
+function sparkPoints(values: number[], max: number): string[] {
   const innerW = WIDTH - PAD * 2;
   const innerH = HEIGHT - PAD * 2;
-  const points = values.map((value, index) => {
-    const x = PAD + (index / (values.length - 1)) * innerW;
+  return values.map((value, index) => {
+    const x = PAD + (index / Math.max(1, values.length - 1)) * innerW;
     const y = HEIGHT - PAD - (value / max) * innerH;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
+}
+
+function sparkShape(values: number[], max: number) {
+  if (values.length < 2) return null;
+  const points = sparkPoints(values, max);
   const last = points[points.length - 1]!.split(",");
   return {
     line: points.join(" "),
@@ -34,20 +44,18 @@ function sparkPath(values: number[]): { line: string; area: string; lastX: numbe
   };
 }
 
-/**
- * One primary reading plus the shape of the window. The exact value is still
- * in the title; the strip below keeps every comparison and secondary figure.
- */
 export function LedgerHero({
   overview,
   previous,
   previousLabel,
   unit,
+  onDrillDay,
 }: {
   overview: Overview;
   previous: Overview | null;
   previousLabel: string | null;
   unit: CostUnit;
+  onDrillDay?: (date: string) => void;
 }) {
   const current = costValue(overview.cost, unit);
   const prev = previous ? costValue(previous.cost, unit) : null;
@@ -56,9 +64,45 @@ export function LedgerHero({
   const flash = useFlashOnChange(overview.cost.raw);
   const today = localDateString(new Date());
   const values = metricSeries(overview.days, unit).map((point) => point.value ?? 0);
-  const shape = sparkPath(values);
+  const prevValues = previous
+    ? metricSeries(previous.days, unit).map((point) => point.value ?? 0)
+    : null;
+  const max = Math.max(...values, ...(prevValues ?? []), 1);
+  const hasData = values.some((value) => value > 0);
+  const shape = hasData ? sparkShape(values, max) : null;
+  const ghost =
+    prevValues && prevValues.length >= 2 && prevValues.some((value) => value > 0)
+      ? sparkPoints(prevValues, max).join(" ")
+      : null;
   const dated = overview.days.filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day.date));
   const lastIsToday = dated.length > 0 && dated[dated.length - 1]!.date === today;
+
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const tip = useChartTooltip();
+  const [scrub, setScrub] = useState<number | null>(null);
+
+  function scrubTo(index: number | null) {
+    if (index == null || values.length === 0) {
+      setScrub(null);
+      tip.hide();
+      return;
+    }
+    const clamped = Math.max(0, Math.min(values.length - 1, index));
+    setScrub(clamped);
+    if (wrapRef.current) tip.show(`scrub-${clamped}`, wrapRef.current);
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const ratio = (event.clientX - rect.left) / rect.width;
+    scrubTo(Math.round(ratio * (values.length - 1)));
+  }
+
+  const scrubDate = scrub != null ? overview.days[scrub]?.date : null;
+  const scrubPoint = scrub != null ? sparkPoints(values, max)[scrub] : null;
+  const scrubX = scrubPoint?.split(",")[0];
+  const scrubY = scrubPoint?.split(",")[1];
 
   return (
     <section className="ledger-hero" data-testid="ledger-hero" aria-label="当前范围总用量">
@@ -81,25 +125,79 @@ export function LedgerHero({
           <span>{overview.days.length} 天趋势</span>
         </span>
       </div>
-      {shape && (
-        <svg
-          className="ledger-hero-spark"
-          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          role="img"
-          aria-label="统计窗口内每日用量趋势"
+      {shape ? (
+        <div
+          ref={wrapRef}
+          className="ledger-hero-spark-wrap"
+          tabIndex={0}
+          role="group"
+          aria-label="统计窗口内每日用量趋势；左右方向键逐日读数，Esc 关闭"
+          onPointerMove={handlePointerMove}
+          onPointerLeave={() => scrubTo(null)}
+          onFocus={() => scrubTo(values.length - 1)}
+          onBlur={() => scrubTo(null)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") scrubTo(null);
+            else if (event.key === "ArrowLeft") scrubTo((scrub ?? values.length - 1) - 1);
+            else if (event.key === "ArrowRight") scrubTo((scrub ?? 0) + 1);
+            else if (event.key === "Home") scrubTo(0);
+            else if (event.key === "End") scrubTo(values.length - 1);
+          }}
         >
-          <polygon className="hero-spark-area" points={shape.area} />
-          <polyline className="hero-spark-line" points={shape.line} pathLength={1} />
-          {lastIsToday && (
-            <circle
-              className="hero-spark-today"
-              cx={shape.lastX}
-              cy={shape.lastY}
-              r={3}
-              style={{ "--i": 0 } as CSSProperties}
-            />
+          <svg
+            className="ledger-hero-spark"
+            viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+            aria-hidden="true"
+          >
+            <polygon className="hero-spark-area" points={shape.area} />
+            {ghost && <polyline className="hero-spark-ghost" points={ghost} />}
+            <polyline className="hero-spark-line" points={shape.line} pathLength={1} />
+            {scrubX != null && scrubY != null && (
+              <g className="hero-spark-scrub">
+                <line x1={scrubX} y1={PAD} x2={scrubX} y2={HEIGHT - PAD} />
+                <circle cx={scrubX} cy={scrubY} r={3} />
+              </g>
+            )}
+            {lastIsToday && scrub == null && (
+              <circle
+                className="hero-spark-today"
+                cx={shape.lastX}
+                cy={shape.lastY}
+                r={3}
+                style={{ "--i": 0 } as CSSProperties}
+              />
+            )}
+          </svg>
+          {scrub != null && scrubDate && (
+            <ChartTooltip
+              position={tip.position}
+              onMouseEnter={tip.cancelHide}
+              onMouseLeave={() => scrubTo(null)}
+            >
+              <b>{scrubDate}</b>
+              <span>{values[scrub]?.toLocaleString()} {unit}</span>
+              {ghost && prevValues?.[scrub] != null && (
+                <span className="sep">上一周期同序 {prevValues[scrub]?.toLocaleString()}</span>
+              )}
+              {onDrillDay && (
+                /^\d{4}-\d{2}-\d{2}$/.test(scrubDate) && (
+                <BareButton
+                  type="button"
+                  className="tooltip-action"
+                  onClick={() => {
+                    scrubTo(null);
+                    onDrillDay(scrubDate);
+                  }}
+                >
+                  查看当日会话 <Icon name="arrow" />
+                </BareButton>
+                )
+              )}
+            </ChartTooltip>
           )}
-        </svg>
+        </div>
+      ) : (
+        <span className="ledger-hero-empty">窗口内无已记录用量</span>
       )}
     </section>
   );

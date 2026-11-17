@@ -51,6 +51,8 @@ type Props = {
   loaded: boolean;
   error: string | null;
   onRetry: () => void;
+  dayFilter: string | null;
+  onClearDayFilter: () => void;
 };
 
 export function SessionList({
@@ -66,6 +68,8 @@ export function SessionList({
   loaded,
   error,
   onRetry,
+  dayFilter,
+  onClearDayFilter,
 }: Props) {
   const { unit } = useUnit();
   const now = useNow();
@@ -231,6 +235,20 @@ export function SessionList({
         </span>
       </div>
       <p className="session-list-guide">选择会话，追踪每一轮调用。</p>
+      {dayFilter && (
+        <div className="day-filter-chip" role="status">
+          <Icon name="clock" />
+          <span>仅显示 {dayFilter} 活跃的会话</span>
+          <BareButton
+            type="button"
+            className="day-filter-clear"
+            onClick={onClearDayFilter}
+            aria-label="清除日期筛选"
+          >
+            清除 <Icon name="close" />
+          </BareButton>
+        </div>
+      )}
       {totalCount > 0 && (
         <SearchField id="session-search" value={query} onChange={setQuery} />
       )}
@@ -325,13 +343,24 @@ export function SessionList({
         <StatePanel
           compact
           kind="empty"
-          title={sessions.length === 0 ? EMPTY_RANGE_COPY : "没有匹配的会话"}
+          title={
+            dayFilter && sessions.length === 0
+              ? "当日没有活跃会话"
+              : sessions.length === 0
+                ? EMPTY_RANGE_COPY
+                : "没有匹配的会话"
+          }
           description={
-            sessions.length === 0
-              ? "试试页顶的「全部」时间范围。"
-              : "换一个会话名称、目录或模型试试。"
+            dayFilter && sessions.length === 0
+              ? "该日没有会话活动。清除日期筛选查看全部会话。"
+              : sessions.length === 0
+                ? "试试页顶的「全部」时间范围。"
+                : "换一个会话名称、目录或模型试试。"
           }
         >
+          {dayFilter && (
+            <Button onClick={onClearDayFilter}>清除日期筛选</Button>
+          )}
           {query && (
             <Button
               onClick={() => {
@@ -420,6 +449,32 @@ export function SessionList({
                           </span>
                         )}
                       </div>
+                      {s.cost.raw > 0 && (
+                        <MixBar
+                          className="composition-bar"
+                          label="Token 构成"
+                          segments={[
+                            {
+                              key: "cached",
+                              label: "已缓存",
+                              value: s.cost.cached_input,
+                              className: "cached",
+                            },
+                            {
+                              key: "uncached",
+                              label: "未缓存",
+                              value: s.cost.uncached_input,
+                              className: "uncached",
+                            },
+                            {
+                              key: "output",
+                              label: "输出",
+                              value: s.cost.output,
+                              className: "output",
+                            },
+                          ]}
+                        />
+                      )}
                       {s.cost.unmeasured ? <span className="session-meta" title={usageNote(s.cost)}>用量未记录 · {s.cost.unmeasured} 次调用</span> : null}
                       {(s.unpricedRaw ?? 0) > 0 && (
                         <div className="session-meta">

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   filterSessionsByRange,
+  filterSessionsByDay,
   overviewQuery,
   previousWindow,
 } from "./session-range";
@@ -10,6 +11,45 @@ const NOW = Date.parse("2026-08-28T12:00:00.000Z");
 function session(iso: string | null, lastEventAt: string | null = iso) {
   return { id: iso ?? "undated", startedAt: iso, lastEventAt };
 }
+
+function localAt(day: string, hour: number): string {
+  const date = new Date(`${day}T00:00:00`);
+  date.setHours(hour);
+  return date.toISOString();
+}
+
+describe("filterSessionsByDay", () => {
+  it("keeps a session whose activity overlaps the day", () => {
+    const spanning = {
+      id: "span",
+      startedAt: localAt("2026-08-26", 22),
+      lastEventAt: localAt("2026-08-27", 9),
+    };
+    expect(filterSessionsByDay([spanning], "2026-08-27")).toEqual([spanning]);
+  });
+
+  it("keeps a session that starts on the day and ends later", () => {
+    const starting = {
+      id: "start",
+      startedAt: localAt("2026-08-27", 8),
+      lastEventAt: localAt("2026-08-28", 8),
+    };
+    expect(filterSessionsByDay([starting], "2026-08-27")).toEqual([starting]);
+  });
+
+  it("drops sessions entirely before or after the day", () => {
+    const before = session(localAt("2026-08-26", 12));
+    const after = session(localAt("2026-08-28", 12));
+    expect(filterSessionsByDay([before, after], "2026-08-27")).toEqual([]);
+  });
+
+  it("drops undated sessions and ignores an invalid day", () => {
+    const undated = session(null);
+    expect(filterSessionsByDay([undated], "2026-08-27")).toEqual([]);
+    const dated = session(localAt("2026-08-27", 12));
+    expect(filterSessionsByDay([dated], "not-a-day")).toEqual([dated]);
+  });
+});
 
 describe("filterSessionsByRange", () => {
   it("keeps a session from 4 hours ago in the 5-hour window", () => {

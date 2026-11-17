@@ -70,6 +70,7 @@ import {
 import {
   SESSION_RANGES,
   filterSessionsByRange,
+  filterSessionsByDay,
   previousWindow,
   type SessionRangeId,
 } from "./session-range";
@@ -117,6 +118,7 @@ function AppShell() {
   const [mobileSessionPane, setMobileSessionPane] = useState<"list" | "detail">("list");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [range, setRange] = useState<SessionRangeId>(initialNavigation.range);
+  const [dayFilter, setDayFilter] = useState<string | null>(null);
   const [source, setSource] = useState<SessionSourceFilter>(
     initialNavigation.source,
   );
@@ -264,8 +266,11 @@ function AppShell() {
   );
   const counts = useMemo(() => sourceCounts(sessions), [sessions]);
   const visibleSessions = useMemo(
-    () => filterSessionsByRange(matchingSource, range, now),
-    [matchingSource, range, now],
+    () => {
+      const ranged = filterSessionsByRange(matchingSource, range, now);
+      return dayFilter ? filterSessionsByDay(ranged, dayFilter) : ranged;
+    },
+    [matchingSource, range, now, dayFilter],
   );
   const rangeLabel =
     SESSION_RANGES.find((item) => item.id === range)?.label ?? range;
@@ -638,6 +643,7 @@ function AppShell() {
 
   function handleSourceChange(next: SessionSourceFilter) {
     if (next === source) return;
+    setDayFilter(null);
     const nextId = resolveSelectedSession(
       null,
       filterSessionsByRange(filterSessionsBySource(sessions, next), range, now),
@@ -686,6 +692,32 @@ function AppShell() {
     openSessions();
     setAppError(`已切到会话明细：按「${label}」查看会话，可在列表里搜索关键词。`);
     void key;
+  }
+
+  function drillToDay(date: string) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    mobileContextTarget.current = false;
+    setContextOpen(null);
+    setDayFilter(date);
+    rangeRef.current = "all";
+    setRange("all");
+    writeSessionListState({ query: "", limit: SESSION_PAGE_SIZE, scrollTop: 0 });
+    const pool = filterSessionsByDay(
+      filterSessionsBySource(sessions, source),
+      date,
+    );
+    const nextId = resolveSelectedSession(null, pool);
+    withViewTransition(() => {
+      pushSessionNavigation({
+        view: "sessions",
+        selectedId: nextId,
+        range: "all",
+        source,
+      });
+      setView("sessions");
+      setMobileSessionPane("list");
+      setSelectedId(nextId);
+    });
   }
 
   function openSessions() {
@@ -884,7 +916,13 @@ function AppShell() {
           <div className="scope-controls">
             <div className="filter-field">
               <span className="filter-label"><Icon name="clock" /> 时间范围</span>
-              <RangeSwitcher range={range} onChange={setRange} />
+              <RangeSwitcher
+                range={range}
+                onChange={(next) => {
+                  setDayFilter(null);
+                  setRange(next);
+                }}
+              />
             </div>
             <div className="filter-field">
               <span className="filter-label">显示单位</span>
@@ -964,6 +1002,7 @@ function AppShell() {
                   refreshError={overviewError != null}
                   onRetry={() => void refreshOverview().catch(() => undefined)}
                   onInspectSlice={inspectSlice}
+                  onDrillDay={drillToDay}
                   rangeLabel={
                     range === "all"
                       ? `${rangeLabel}（趋势为近 30 个本地日）`
@@ -1031,6 +1070,8 @@ function AppShell() {
                 source={source}
                 sessions={visibleSessions}
                 totalCount={matchingSource.length}
+                dayFilter={dayFilter}
+                onClearDayFilter={() => setDayFilter(null)}
                 selectedId={selectedId}
                 contextOpen={contextOpen}
                 onSelect={handleSelectSession}

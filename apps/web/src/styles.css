@@ -7724,7 +7724,10 @@ button.rail-rank:hover {
 .heat-cell[data-level="2"] { background: color-mix(in srgb, var(--accent) 45%, var(--bg-inset)); }
 .heat-cell[data-level="3"] { background: color-mix(in srgb, var(--accent) 68%, var(--bg-inset)); }
 .heat-cell[data-level="4"] { background: var(--accent); }
-.heat-cell[data-date]:hover { transform: scale(1.18); }
+.heat-cell[data-date]:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
 .heat-cell.empty { border-color: transparent; background: transparent; }
 .heat-scale {
   display: flex;
@@ -7779,3 +7782,218 @@ button.rail-rank:hover {
 }
 .context-meter-bar > span { transition: width var(--dur-morph) var(--ease-out); }
 .donut-wrap + .comp-rows { margin-top: 4px; }
+
+/* ---------- shared chart tooltip (trend / heat / hero scrub) ---------- */
+.chart-tooltip.chart-tooltip-fixed {
+  position: fixed;
+  bottom: auto;
+  width: 200px;
+  min-width: 0;
+  max-width: calc(100vw - 16px);
+  transform: none;
+  white-space: normal;
+  pointer-events: auto;
+  display: grid;
+  z-index: 6;
+}
+.chart-tooltip .tooltip-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-hot);
+  border-radius: var(--radius-control);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: 11px;
+  cursor: pointer;
+}
+.chart-tooltip .tooltip-action:hover {
+  border-color: var(--accent);
+}
+.chart-tooltip .tooltip-action .icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* ---------- trend zero-usage note (columns stay focusable, no fake axis) ---------- */
+.chart-empty-note {
+  position: absolute;
+  inset: 8px 8px auto 8px;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px dashed var(--border-hot);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font-size: 12px;
+  z-index: 2;
+}
+
+/* ---------- interactive heat calendar ---------- */
+.heat-cell {
+  position: relative;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  appearance: none;
+}
+.heat-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.heat-cell.hot {
+  border-color: var(--accent);
+}
+.heat-cell.empty {
+  cursor: default;
+}
+
+/* ---------- interactive composition donut ---------- */
+.donut-seg {
+  cursor: pointer;
+}
+.donut-track,
+.donut-center-value,
+.donut-center-label {
+  pointer-events: none;
+}
+.donut-seg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.donut-seg.hot {
+  stroke-width: 18;
+}
+.donut-seg.dim {
+  opacity: 0.4;
+}
+.donut-legend button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.donut-legend button.hot {
+  background: var(--accent-dim);
+}
+.donut-legend button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---------- hero sparkline scrub + previous-window ghost ---------- */
+.ledger-hero-spark-wrap {
+  position: relative;
+  cursor: crosshair;
+  border-radius: var(--radius-control);
+}
+.ledger-hero-spark-wrap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.hero-spark-ghost {
+  fill: none;
+  stroke: var(--text-dim);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  opacity: 0.7;
+}
+.hero-spark-scrub line {
+  stroke: var(--border-hot);
+  stroke-width: 1;
+}
+.hero-spark-scrub circle {
+  fill: var(--accent);
+  stroke: var(--bg-raised);
+  stroke-width: 1.5;
+}
+.ledger-hero-empty {
+  align-self: center;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* ---------- session day drill-down chip + composition micro-bar ---------- */
+.day-filter-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-hot);
+  border-radius: var(--radius-control);
+  background: var(--accent-dim);
+  color: var(--text);
+  font-size: 12px;
+}
+.day-filter-chip .icon {
+  color: var(--accent);
+}
+.day-filter-chip .day-filter-clear {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--accent);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.day-filter-chip .day-filter-clear:hover {
+  background: var(--bg-raised);
+}
+.composition-bar {
+  margin-top: 6px;
+  height: 5px;
+}
+
+/* ---------- staged panel entrance (skips view-transition-named cards) ---------- */
+@keyframes panel-enter {
+  from {
+    transform: translateY(8px);
+  }
+  to {
+    transform: none;
+  }
+}
+.overview > *:nth-child(1) { --enter-i: 0; }
+.overview > *:nth-child(2) { --enter-i: 1; }
+.overview > *:nth-child(3) { --enter-i: 2; }
+.overview > *:nth-child(4) { --enter-i: 3; }
+.overview > *:nth-child(5) { --enter-i: 4; }
+.overview > *:nth-child(6) { --enter-i: 5; }
+.overview > *:nth-child(7) { --enter-i: 6; }
+.overview > *:nth-child(8) { --enter-i: 7; }
+.overview > *:nth-child(9) { --enter-i: 8; }
+.overview > *:nth-child(10) { --enter-i: 9; }
+.overview .chart-card:not(.trend-panel):not(.composition-panel),
+.overview .ledger-strip,
+.overview details,
+.overview-layout .rail-panel {
+  animation: panel-enter var(--dur-enter) var(--ease-out) backwards;
+  animation-delay: calc(var(--enter-i, 0) * var(--stagger-bar));
+}
+
+/* ---------- dark tonal depth (no glow, no light-mode change) ---------- */
+[data-theme="dark"] .chart-card,
+[data-theme="dark"] .rail-panel,
+[data-theme="dark"] .ledger-strip,
+[data-theme="dark"] .ledger-hero {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 10px 28px rgba(0, 0, 0, 0.35);
+}

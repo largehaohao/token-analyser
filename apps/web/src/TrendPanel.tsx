@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import type { Overview } from "./api";
+import { ChartTooltip, useChartTooltip } from "./ChartTooltip";
 import {
   barHeightPct,
   chartMax,
@@ -20,7 +21,7 @@ import { formatChartNumber } from "./format";
 import { ModelFilterSelect } from "./ModelFilterSelect";
 import { useModelFilteredOverview } from "./useModelFilteredOverview";
 import { useFlashOnChange } from "./motion";
-import { Panel, SegmentedControl, srTable } from "./ui";
+import { BareButton, Icon, Panel, SegmentedControl, srTable } from "./ui";
 import {
   heatCalendar,
   metricSeries,
@@ -35,6 +36,7 @@ type Props = {
   filterScope: string;
   fetchOverviewForModel: (model: string) => Promise<Overview>;
   onFocusSlice: (key: string | null) => void;
+  onDrillDay?: (date: string) => void;
 };
 
 const METRICS: { id: ChartMetric; label: string }[] = [
@@ -61,6 +63,7 @@ export function TrendPanel({
   filterScope,
   fetchOverviewForModel,
   onFocusSlice,
+  onDrillDay,
 }: Props) {
   const {
     model,
@@ -69,15 +72,18 @@ export function TrendPanel({
     loading,
     error,
   } = useModelFilteredOverview(baseOverview, filterScope, fetchOverviewForModel);
-  const [hovered, setHovered] = useState<string | null>(null);
-  const [tooltipPosition, setTooltipPosition] = useState({ left: 8, top: 8 });
   const [mode, setMode] = useState<TrendMode>("daily");
+  const barTip = useChartTooltip();
+  const heatTip = useChartTooltip();
+  const hovered = barTip.active;
+  const hoveredHeat = heatTip.active;
   const metric = chartMetric;
   const max = chartMax(overview.days.map((day) => dayMetricValue(day, metric)));
   const ticks = niceChartTicks(max);
   const knownValues = overview.days
     .map((day) => dayMetricValue(day, metric))
     .filter((value): value is number => value != null);
+  const hasData = knownValues.some((value) => value > 0);
   const average =
     knownValues.length >= 2
       ? knownValues.reduce((sum, value) => sum + value, 0) / knownValues.length
@@ -97,41 +103,6 @@ export function TrendPanel({
   const calendar = heatCalendar(overview.days, metric);
   const label = (value: number | null) =>
     value == null ? "未定价" : formatChartNumber(value, metric);
-  const unfocusTimer = useRef<number | null>(null);
-  const tooltipTarget = useRef<HTMLButtonElement | null>(null);
-
-  function positionTooltip() {
-    const target = tooltipTarget.current;
-    if (!target) return;
-    const rect = target.getBoundingClientRect();
-    setTooltipPosition({
-      left: Math.max(8, Math.min(rect.left + rect.width / 2 - 100, window.innerWidth - 208)),
-      top: Math.max(8, Math.min(rect.top + 8, window.innerHeight - 180)),
-    });
-  }
-
-  useEffect(() => {
-    window.addEventListener("scroll", positionTooltip, { passive: true });
-    window.addEventListener("resize", positionTooltip);
-    return () => {
-      window.removeEventListener("scroll", positionTooltip);
-      window.removeEventListener("resize", positionTooltip);
-      if (unfocusTimer.current != null) window.clearTimeout(unfocusTimer.current);
-    };
-  }, []);
-
-  function show(date: string, target: HTMLButtonElement) {
-    if (unfocusTimer.current != null) window.clearTimeout(unfocusTimer.current);
-    tooltipTarget.current = target;
-    positionTooltip();
-    setHovered(date);
-  }
-
-  function scheduleHide() {
-    if (unfocusTimer.current != null) window.clearTimeout(unfocusTimer.current);
-    unfocusTimer.current = window.setTimeout(() => setHovered(null), 150);
-  }
-
   return (
     <Panel role="region" className="chart-card trend-panel" data-testid="trend-chart" aria-label="每日支出趋势">
       <div className="chart-head">
@@ -181,7 +152,7 @@ export function TrendPanel({
         <p className="empty-inline">该时间范围内没有每日用量。</p>
       ) : (
         <>
-          <div className="chart-body trend" onScroll={positionTooltip}>
+          <div className="chart-body trend" onScroll={barTip.reposition}>
             <div className="trend-content" style={{ minWidth: trendContentMinWidth(overview.days.length) }}>
               {overlay && (
                 <svg
@@ -201,6 +172,7 @@ export function TrendPanel({
                   />
                 </svg>
               )}
+              {hasData ? (
               <div className="grid">
                 {ticks.map((value) => (
                   <span
@@ -228,6 +200,11 @@ export function TrendPanel({
                   </span>
                 )}
               </div>
+              ) : (
+                <p className="chart-empty-note" role="status">
+                  该时间范围内没有已记录用量，仅保留可聚焦的日期列；切换范围或导入记录后显示坐标轴。
+                </p>
+              )}
               <div
                 className={`bars${hovered != null ? " has-hover" : ""}`}
                 role="group"
@@ -242,9 +219,10 @@ export function TrendPanel({
                       ? 0
                       : Math.min(100, Math.max(0, (100 * flagged) / value));
                   return (
-                    <button
+                    <div
                       key={day.date}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       className={`trend-col ${
                         hovered === day.date ? "hover" : ""
                       } ${dayHasMixedUnpriced(day, metric) ? "unpriced" : ""} ${
@@ -253,14 +231,18 @@ export function TrendPanel({
                         day.date === today && todayFlash ? "today-flash" : ""
                       }`}
                       style={{ "--i": Math.min(index, 14) } as CSSProperties}
-                      onMouseEnter={(e) => show(day.date, e.currentTarget)}
-                      onMouseLeave={() => setHovered(null)}
-                      onFocus={(e) => show(day.date, e.currentTarget)}
-                      onBlur={scheduleHide}
+                      onMouseEnter={(e) => barTip.show(day.date, e.currentTarget)}
+                      onMouseLeave={barTip.scheduleHide}
+                      onFocus={(e) => barTip.show(day.date, e.currentTarget)}
+                      onBlur={barTip.scheduleHide}
                       onKeyDown={(e) => {
-                        if (e.key === "Escape") setHovered(null);
+                        if (e.key === "Escape") barTip.hide();
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          barTip.show(day.date, e.currentTarget);
+                        }
                       }}
-                      onClick={(e) => show(day.date, e.currentTarget)}
+                      onClick={(e) => barTip.show(day.date, e.currentTarget)}
                       aria-label={trendColumnAriaLabel(day, metric)}
                     >
                       <i
@@ -274,7 +256,11 @@ export function TrendPanel({
                         />
                       </i>
                       {hovered === day.date && (
-                        <span className="chart-tooltip" style={tooltipPosition}>
+                        <ChartTooltip
+                          position={barTip.position}
+                          onMouseEnter={barTip.cancelHide}
+                          onMouseLeave={barTip.scheduleHide}
+                        >
                           <b>{day.date}</b>
                           <span>总计 {label(value)}</span>
                           {value != null && (
@@ -291,9 +277,23 @@ export function TrendPanel({
                               未定价 Token
                             </span>
                           )}
-                        </span>
+                          {onDrillDay && (
+                            /^\d{4}-\d{2}-\d{2}$/.test(day.date) && (
+                            <BareButton
+                              type="button"
+                              className="tooltip-action"
+                              onClick={() => {
+                                barTip.hide();
+                                onDrillDay(day.date);
+                              }}
+                            >
+                              查看当日会话 <Icon name="arrow" />
+                            </BareButton>
+                            )
+                          )}
+                        </ChartTooltip>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -359,15 +359,60 @@ export function TrendPanel({
             <div className="heat-calendar">
               <p className="heat-title">用量日历（按日强度）</p>
               <div className="heat-grid" role="group" aria-label="每日用量强度日历">
-                {calendar.map((cell, index) => (
-                  <span
-                    key={cell.date ?? `blank-${index}`}
-                    className={`heat-cell${cell.date ? "" : " empty"}`}
-                    data-level={cell.level}
-                    data-date={cell.date ?? undefined}
-                    title={cell.date ? `${cell.date} · ${label(cell.value)}` : undefined}
-                  />
-                ))}
+                {calendar.map((cell, index) =>
+                  cell.date ? (
+                    <div
+                      key={cell.date}
+                      role="button"
+                      tabIndex={0}
+                      className={`heat-cell${hoveredHeat === cell.date ? " hot" : ""}`}
+                      data-level={cell.level}
+                      data-date={cell.date}
+                      aria-label={`${cell.date} · ${label(cell.value)}${onDrillDay ? "，回车查看当日会话" : ""}`}
+                      onMouseEnter={(e) => heatTip.show(cell.date!, e.currentTarget)}
+                      onMouseLeave={heatTip.scheduleHide}
+                      onFocus={(e) => heatTip.show(cell.date!, e.currentTarget)}
+                      onBlur={heatTip.scheduleHide}
+                      onClick={(e) => heatTip.show(cell.date!, e.currentTarget)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") heatTip.hide();
+                        if (e.key === "Enter" && onDrillDay) {
+                          heatTip.hide();
+                          onDrillDay(cell.date!);
+                        }
+                      }}
+                    >
+                      {hoveredHeat === cell.date && (
+                        <ChartTooltip
+                          position={heatTip.position}
+                          onMouseEnter={heatTip.cancelHide}
+                          onMouseLeave={heatTip.scheduleHide}
+                        >
+                          <b>{cell.date}</b>
+                          <span>{label(cell.value)}</span>
+                          {onDrillDay && (
+                            <BareButton
+                              type="button"
+                              className="tooltip-action"
+                              onClick={() => {
+                                heatTip.hide();
+                                onDrillDay(cell.date!);
+                              }}
+                            >
+                              查看当日会话 <Icon name="arrow" />
+                            </BareButton>
+                          )}
+                        </ChartTooltip>
+                      )}
+                    </div>
+                  ) : (
+                    <span
+                      key={`blank-${index}`}
+                      className="heat-cell empty"
+                      aria-hidden="true"
+                    />
+                  ),
+                )}
               </div>
               <div className="heat-scale">
                 <span>低</span>
