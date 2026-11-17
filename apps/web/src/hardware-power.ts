@@ -2,7 +2,8 @@
  * 硬件用电 · 演示数据模块与统计纯函数。
  *
  * 页面优先展示后端 /power → Prometheus（192.168.1.102）的实时采集；采集
- * 不可达时回退到本模块的演示序列。所有曲线都是时间戳的确定性函数
+ * 不可达且引擎开启 ENABLE_POWER_PREVIEW 时，才回退到本模块的演示序列。
+ * 所有曲线都是时间戳的确定性函数
  * （固定锚点、无随机数），同一时刻重复渲染得到完全相同的数值。
  *
  * 语义约束：整机（machine）是含其他硬件的总表读数，CPU / GPU 是其中分项；
@@ -138,6 +139,21 @@ export function demoSampleAt(tMs: number): PowerSample {
     gpu: gpuMissing ? null : gpu,
     machine: machineMissing ? null : machine,
   };
+}
+
+/** Live samples win. Demo series are opt-in via the engine's runtime powerPreview flag. */
+export function selectPowerSamples(input: {
+  live: boolean;
+  loading: boolean;
+  knownCollector: boolean;
+  powerPreview: boolean;
+  liveSamples: PowerSample[] | null;
+  demoSamples: () => PowerSample[];
+}): PowerSample[] {
+  if (input.live && input.liveSamples) return input.liveSamples;
+  if (input.loading && input.knownCollector) return [];
+  if (input.powerPreview) return input.demoSamples();
+  return [];
 }
 
 export const demoPowerAdapter: PowerDataAdapter = {

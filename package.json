@@ -1,8 +1,24 @@
 {
   "name": "token-analyser",
+  "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "engines": { "node": ">=22.13.0" },
+  "bin": {
+    "token-analyser": "./bin/token-analyser.mjs"
+  },
+  "files": [
+    "bin",
+    "scripts/node-check.mjs",
+    "scripts/start-engine.mjs",
+    "packages/engine/src",
+    "packages/engine/package.json",
+    "packages/engine/tsconfig.json",
+    "apps/web/dist",
+    "config",
+    ".nvmrc",
+    "README.md"
+  ],
   "scripts": {
     "test": "pnpm --filter engine test && pnpm --filter web test && sh -c 'if [ \"$E2E\" = 1 ]; then pnpm --filter web test:e2e; fi'",
     "analyse": "pnpm --filter engine analyse",

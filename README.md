@@ -2,6 +2,14 @@
 
 Local dashboard for Codex, Claude Code, Cursor, pi, DeepSeek Harness, and OpenCode sessions. The Node engine reads local JSONL (and DSH's zstd-compressed JSONL) plus Cursor's and OpenCode's SQLite stores; the Vite UI talks to it over HTTP and SSE. Session data stays on the machine. Figures come from recorded usage or dated public API rates; they are not subscription bills.
 
+![Overview: tokens, estimated cost, and the daily trend](docs/screenshots/overview.png)
+
+![Session timing: TTFT, tok/s, and task duration](docs/screenshots/session-timing.png)
+
+![Cost breakdown: cached input, uncached input, and output](docs/screenshots/cost-breakdown.png)
+
+Screenshots use the redacted fixtures, not a subscription bill.
+
 ## Run
 
 ```bash
@@ -9,7 +17,7 @@ pnpm install
 pnpm dev
 ```
 
-Requires Node.js 22.13 or newer (Cursor SQLite uses `node:sqlite`).
+Requires Node.js 22.13 or newer (`engines` and `.nvmrc`). Cursor and OpenCode SQLite use `node:sqlite`. A startup check prints that requirement instead of a missing-module stack trace.
 
 `pnpm dev` waits until the engine is listening on `127.0.0.1:7789`, then starts the UI at [http://127.0.0.1:7788](http://127.0.0.1:7788).
 
@@ -18,6 +26,14 @@ Single-process production-style serve (engine hosts `apps/web/dist`):
 ```bash
 pnpm start
 ```
+
+The same server is the publishable CLI entry (`package.json` `bin` and `files`). Build the UI once, then:
+
+```bash
+pnpm exec token-analyser
+```
+
+That listens on [http://127.0.0.1:7788](http://127.0.0.1:7788). `token-analyser analyse path/to/session.jsonl` prints one snapshot. After the package is published, the same bin is what `npx token-analyser` and `npm i -g token-analyser` run. The workspace root stays `private` so a local `pnpm` install is not published by accident.
 
 Print a snapshot for one rollout file:
 
@@ -202,7 +218,11 @@ The engine reads power samples from a configured local Prometheus HTTP API
 (`~/.token-analyser/config.json` → `power.prometheus_url`, optional `queries`).
 Only that configured address is contacted; session data never leaves the
 machine. When the collector is unreachable the API returns `connected: false`
-and the page falls back to deterministic **demo data** with a visible notice.
+and the page keeps the reading empty. Deterministic demo data is off unless
+the engine process is started with `ENABLE_POWER_PREVIEW=1` (`true` and `yes`
+count too). The UI reads that single flag from `GET /config` in both `pnpm dev`
+and `pnpm start`, so a prebuilt bundle does not need a rebuild. `VITE_ENABLE_POWER_PREVIEW`
+is not read: Vite would freeze it at `pnpm build`.
 Missing samples break the integral and produce a clearly labelled lower bound;
 absent readings show `—`. Demo electricity costs never enter Token cost totals.
 `apps/web/src/hardware-power.ts` is the adapter boundary for both series.
@@ -213,6 +233,12 @@ history for the selected window, and accepts custom metric queries and device
 names via `power.temps`. A failed history read is labelled and retryable
 without blocking live samples; no fabricated temperatures are inserted when
 the collector is unavailable.
+
+## Adding a source
+
+New agent logs follow the pi JSONL adapter or the Cursor SQLite adapter.
+Steps, the files to touch, and where the fixture test goes are in
+[docs/adding-a-source.md](docs/adding-a-source.md).
 
 ## Test
 

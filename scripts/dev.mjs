@@ -2,6 +2,9 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertSupportedNode } from "./node-check.mjs";
+
+assertSupportedNode();
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const enginePort = Number.parseInt(process.env.PORT ?? "7789", 10) || 7789;

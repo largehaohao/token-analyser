@@ -419,6 +419,20 @@ export async function getTempsHistory(
   );
 }
 
+export type RuntimeConfig = {
+  powerPreview: boolean;
+};
+
+/** Engine feature flags. `powerPreview` follows ENABLE_POWER_PREVIEW at runtime. */
+export async function getRuntimeConfig(): Promise<RuntimeConfig> {
+  try {
+    const body = await requestJson<Partial<RuntimeConfig>>("/config", undefined, 5_000);
+    return { powerPreview: body.powerPreview === true };
+  } catch {
+    return { powerPreview: false };
+  }
+}
+
 /** 硬件用电：读取所选范围的功率采样；采集源不可达时 connected=false。 */
 export async function getPowerFeed(
   startMs: number,

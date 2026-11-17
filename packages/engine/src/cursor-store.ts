@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { assertSupportedNode } from "./node-guard.ts";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,6 +59,7 @@ function workspacePaths(databasePath: string): Map<string, string> {
 
 /** Read Cursor's own database without copying it or touching its WAL. */
 export function readCursorSessions(databasePath: string): RolloutLine[][] {
+  assertSupportedNode();
   const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
   const db = new DatabaseSync(databasePath, { readOnly: true });
   try {

@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { assertSupportedNode } from "./node-guard.ts";
 import { iso, record, text } from "./session-adapters.ts";
 import type { RolloutLine } from "./types.ts";
 
@@ -236,6 +237,7 @@ function buildSessionEvents(
 
 /** Read OpenCode's database without copying it or touching its WAL. */
 export function readOpenCodeSessions(databasePath: string): RolloutLine[][] {
+  assertSupportedNode();
   const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
   const db = new DatabaseSync(databasePath, { readOnly: true });
   try {

@@ -20,7 +20,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `mkdir -p ${quotedFixtureHome} && printf '{"power":{"prometheus_url":"http://127.0.0.1:1"}}' > ${quotedFixtureHome}/config.json && TOKEN_ANALYSER_HOME=${quotedFixtureHome} FIXTURE_DIR=fixtures/redacted PORT=${enginePort} pnpm --filter engine start`,
+      command: `mkdir -p ${quotedFixtureHome} && printf '{"power":{"prometheus_url":"http://127.0.0.1:1"}}' > ${quotedFixtureHome}/config.json && ENABLE_POWER_PREVIEW=1 TOKEN_ANALYSER_HOME=${quotedFixtureHome} FIXTURE_DIR=fixtures/redacted PORT=${enginePort} pnpm --filter engine start`,
       url: `http://127.0.0.1:${enginePort}/sessions`,
       cwd: repoRoot,
       // Never reuse a live user's engine for mutation tests.

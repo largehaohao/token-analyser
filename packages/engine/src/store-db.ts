@@ -6,6 +6,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { assertSupportedNode } from "./node-guard.ts";
 import { tokenAnalyserHome } from "./config.ts";
 import type { FileFingerprint, StoreDump } from "./store-dump.ts";
 import type { SessionSnapshot, WasteToggleId } from "./types.ts";
@@ -35,6 +36,7 @@ function openDb(home?: string): DatabaseSync {
   } catch {
     // Best-effort tightening of a pre-existing directory.
   }
+  assertSupportedNode();
   const { DatabaseSync } = createRequire(import.meta.url)(
     "node:sqlite",
   ) as typeof import("node:sqlite");

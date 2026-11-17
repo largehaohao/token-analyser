@@ -1,3 +1,4 @@
+import "./node-guard.ts";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Cost, TreeNode } from "./types.ts";

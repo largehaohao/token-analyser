@@ -756,4 +756,61 @@ describe("startServer", () => {
       await server.close();
     }
   });
+
+  it("serves the power preview flag and rejects cross-site imports without Origin", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-config-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    homes.push(dir);
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const server = await startServer({ port: 0, store });
+    const previousPreview = process.env.ENABLE_POWER_PREVIEW;
+    const target = new URL(server.url);
+    const status = (
+      headers: Record<string, string>,
+      method = "GET",
+      requestPath = "/sessions",
+    ) => new Promise<number>((resolve, reject) => {
+      const request = http.request(
+        {
+          hostname: target.hostname,
+          port: target.port,
+          path: requestPath,
+          method,
+          headers,
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve(response.statusCode ?? 0));
+        },
+      );
+      request.on("error", reject);
+      request.end();
+    });
+
+    try {
+      delete process.env.ENABLE_POWER_PREVIEW;
+      const off = await fetch(`${server.url}/config`);
+      expect(off.status).toBe(200);
+      expect(await off.json()).toEqual({ powerPreview: false });
+
+      process.env.ENABLE_POWER_PREVIEW = "1";
+      const on = await fetch(`${server.url}/config`);
+      expect(await on.json()).toEqual({ powerPreview: true });
+
+      expect(await status({ Host: "127.0.0.1:7789" })).toBe(200);
+      expect(await status({ Host: "localhost:7788" })).toBe(200);
+      expect(await status({ Host: "localhost.evil.com" })).toBe(403);
+      expect(await status({ Host: "localhost.evil.com:7789" })).toBe(403);
+
+      expect(await status(
+        { Host: target.host, "Sec-Fetch-Site": "cross-site", "Content-Type": "application/json" },
+        "POST",
+        "/import",
+      )).toBe(403);
+    } finally {
+      if (previousPreview === undefined) delete process.env.ENABLE_POWER_PREVIEW;
+      else process.env.ENABLE_POWER_PREVIEW = previousPreview;
+      await server.close();
+    }
+  });
 });

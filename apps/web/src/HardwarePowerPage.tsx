@@ -9,6 +9,7 @@ import {
   chartBucketMs,
   demoPowerAdapter,
   energyCostCny,
+  selectPowerSamples,
   formatClock,
   formatCoverage,
   formatCny,
@@ -31,7 +32,7 @@ import {
   type SeriesIntegral,
   type SeriesPoint,
 } from "./hardware-power";
-import { getPowerFeed } from "./api";
+import { getPowerFeed, getRuntimeConfig } from "./api";
 import { easeOutCubic, lerp, sameGapPattern, useAnimatedNumber } from "./motion";
 import { Button, Notice, Panel, SegmentedControl, srTable } from "./ui";
 import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
@@ -243,8 +244,8 @@ function parsePrice(raw: string): { value: number; error: string | null } {
 /**
  * 硬件用电页。整机是含其他硬件的总量（实时模式下为 Prometheus 的墙插
  * 估算），CPU / GPU 是分项：三条序列各自独立积分，任何统计都不把三者
- * 相加。数据优先来自后端 /power → Prometheus 实时采集；采集不可达时
- * 回退到演示适配器，并在页面显式标注“演示数据，尚未接入”。
+ * 相加。数据优先来自后端 /power → Prometheus 实时采集。采集不可达时
+ * 只有引擎运行时开启 ENABLE_POWER_PREVIEW 才回退演示序列。
  */
 export function HardwarePowerPage({
   now,
@@ -280,7 +281,18 @@ export function HardwarePowerPage({
   const stepMs = sampleStepMs(spanMs);
   const bucketMs = chartBucketMs(spanMs, stepMs);
 
-  // 后端 /power → Prometheus 实时采集；不可达或返回空时回退演示序列。
+  const [powerPreview, setPowerPreview] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void getRuntimeConfig().then((config) => {
+      if (!cancelled) setPowerPreview(config.powerPreview);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 后端 /power → Prometheus 实时采集。演示序列只在运行时 powerPreview 打开时使用。
   const [feed, setFeed] = useState<{
     loading: boolean;
     connected: boolean;
@@ -365,17 +377,22 @@ export function HardwarePowerPage({
   }, [now]);
 
   const live = feed.connected && feed.samples != null;
+  const usingDemo = !live && powerPreview;
   const samples = useMemo(() => {
-    if (live && feed.samples) return feed.samples;
-    // 已知采集地址时，重拉过程中不要闪回演示序列；首访（尚无 url）仍
-    // 可用演示数据填满首屏，避免离线 e2e / 冷启动空表。
-    if (feed.loading && feed.url) return [];
-    return adapter.series(activeWindow.startMs, activeWindow.endMs, stepMs);
+    return selectPowerSamples({
+      live,
+      loading: feed.loading,
+      knownCollector: feed.url != null,
+      powerPreview,
+      liveSamples: feed.samples,
+      demoSamples: () => adapter.series(activeWindow.startMs, activeWindow.endMs, stepMs),
+    });
   }, [
     live,
     feed.samples,
     feed.loading,
     feed.url,
+    powerPreview,
     adapter,
     activeWindow.startMs,
     activeWindow.endMs,
@@ -426,7 +443,8 @@ export function HardwarePowerPage({
   // 借用范围序列末点，避免历史自定义窗把“当前功率”显示成窗尾功率。
   const current: PowerSample = (() => {
     if (instantSample) return instantSample;
-    if (!live) return adapter.sampleAt(now);
+    if (usingDemo) return adapter.sampleAt(now);
+    if (!live) return { t: now, cpu: null, gpu: null, machine: null };
     if (
       feed.samples &&
       feed.samples.length > 0 &&
@@ -645,11 +663,15 @@ export function HardwarePowerPage({
         </Notice>
       ) : feed.loading && !feed.samples && !feed.error ? (
         <Notice tone="info">正在连接功率采集源…</Notice>
-      ) : (
+      ) : usingDemo ? (
         <Notice tone="warning">
           {instantSample != null
             ? `历史范围为演示数据${feed.error ? `（采集源不可用：${feed.error}）` : ""}，用电量与电费由内置示例序列生成；瞬时功率为实时采样。演示电费不计入 Token 成本。`
             : `演示数据，尚未接入${feed.error ? `（采集源不可用：${feed.error}）` : ""}。以下数值由内置示例序列生成，缺失读数显示 —；演示电费不计入 Token 成本。`}
+        </Notice>
+      ) : (
+        <Notice tone="warning">
+          采集源不可达{feed.error ? `（${feed.error}）` : ""}。未显示演示数据；启动引擎前设置 ENABLE_POWER_PREVIEW=1 可查看内置示例。示例电费不计入 Token 成本。
         </Notice>
       )}
 
@@ -682,7 +704,7 @@ export function HardwarePowerPage({
           </div>
           <div className="power-energy-cost">
             <span className="ledger-label">
-              {live ? "估算电费" : "演示电费"}
+              {usingDemo ? "演示电费" : "估算电费"}
             </span>
             <span className="ledger-value power-hero-value power-hero-cost">
               {formatCny(animatedCost, integrals.machine.complete)}
@@ -692,7 +714,7 @@ export function HardwarePowerPage({
                 ? "电价无效，电费显示 —"
                 : integrals.machine.kwh == null
                   ? `${rangeSub}无整机采样`
-                  : `电价 ${formatPricePerKwh(price.value)} 元/kWh · ${live ? "本地估算，不计入 Token 成本" : "演示值，不计入 Token 成本"}`}
+                  : `电价 ${formatPricePerKwh(price.value)} 元/kWh · ${usingDemo ? "演示值，不计入 Token 成本" : "本地估算，不计入 Token 成本"}`}
             </span>
           </div>
         </div>
@@ -1041,7 +1063,7 @@ export function HardwarePowerPage({
                           </span>
                           <span className="sep">
                             {b.count} 个采样（每 {formatDuration(stepMs)}）·{" "}
-                            {live ? "实时采集 · Prometheus" : "演示数据，尚未接入"}
+                            {live ? "实时采集 · Prometheus" : usingDemo ? "演示数据，尚未接入" : "采集源不可达"}
                           </span>
                         </span>
                       )}
@@ -1058,7 +1080,7 @@ export function HardwarePowerPage({
               </div>
             </div>
             <div className="visually-hidden">{srTable(
-              `功率趋势（${live ? "实时采集" : "演示数据"}，每 ${formatDuration(
+              `功率趋势（${live ? "实时采集" : usingDemo ? "演示数据" : "无采样"}，每 ${formatDuration(
                 stepMs,
               )} 一采样，曲线按每 ${formatDuration(bucketMs)} 取均值${
                 srStride > 1 ? `，表格每 ${srStride} 条取 1 条` : ""
@@ -1140,7 +1162,7 @@ export function HardwarePowerPage({
         <p className="power-note">
           “其他硬件”行是整机与两个分项在同一采样上的差值（内存、存储、风扇与电源转换损耗等），
           任一序列缺失时无法推算，显示 —；其余各行的用电量都来自各自序列的独立积分。
-          {live ? "电费" : "演示电费"}不会加入成本总览的 Token 成本。
+          {usingDemo ? "演示电费" : "电费"}不会加入成本总览的 Token 成本。
         </p>
       </Panel>
     </main>

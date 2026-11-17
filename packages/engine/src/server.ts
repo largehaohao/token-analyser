@@ -1,3 +1,4 @@
+import "./node-guard.ts";
 import http from "node:http";
 import {
   chmodSync,
@@ -28,7 +29,10 @@ import { withPricingLock } from "./pricing-lock.ts";
 import { fetchPowerRange } from "./power.ts";
 import { fetchTempSnapshot, fetchTempHistory } from "./temps.ts";
 import { watchSessions } from "./watch.ts";
-import { collectSessionFiles, isSessionFile } from "./session-files.ts";
+import { collectSessionFiles } from "./session-files.ts";
+import { resolveImportTarget } from "./import-path.ts";
+import { isLoopbackHost, isStateChangeAllowed } from "./request-guard.ts";
+import { powerPreviewEnabled } from "./runtime-config.ts";
 import type { SessionSnapshot, WasteToggleId } from "./types.ts";
 
 const CORS_ORIGIN = "http://127.0.0.1:7788";
@@ -71,33 +75,6 @@ function corsHeaders(extra: Record<string, string> = {}): Record<string, string>
     "Access-Control-Allow-Headers": "Content-Type, X-Filename",
     ...extra,
   };
-}
-
-/**
- * Loopback binding alone does not stop DNS rebinding: a remote page can resolve
- * its own hostname to 127.0.0.1 and become same-origin with this server. Only
- * loopback Host authorities are served, and state-changing requests must come
- * from a loopback Origin (or no Origin at all, e.g. a local CLI).
- */
-function isLoopbackHost(host: string | undefined): boolean {
-  if (!host) return false;
-  const hostname = host.replace(/:\d+$/, "").toLowerCase();
-  return (
-    hostname === "127.0.0.1" ||
-    hostname === "localhost" ||
-    hostname === "[::1]" ||
-    hostname === "::1"
-  );
-}
-
-function isTrustedOrigin(origin: string | undefined): boolean {
-  if (origin == null) return true;
-  try {
-    const url = new URL(origin);
-    return url.protocol === "http:" && isLoopbackHost(url.host);
-  } catch {
-    return false;
-  }
 }
 
 function sendJson(
@@ -353,13 +330,18 @@ async function handleImport(
       return;
     }
 
-    const filePath = body && typeof body.path === "string" ? body.path : undefined;
-    if (!filePath || !path.isAbsolute(filePath) || !isSessionFile(filePath)) {
+    const requestedPath = body && typeof body.path === "string" ? body.path : undefined;
+    if (!requestedPath) {
       sendJson(res, 400, { error: "invalid_path" });
       return;
     }
+    const resolved = resolveImportTarget(requestedPath);
+    if (!resolved.ok) {
+      sendJson(res, 400, { error: resolved.error });
+      return;
+    }
 
-    const id = store.ingestPath(filePath);
+    const id = store.ingestPath(resolved.path);
     if (!id) {
       sendJson(res, 500, { error: "ingest_failed" });
       return;
@@ -617,7 +599,7 @@ export async function startServer(opts?: {
       req.method !== "GET" &&
       req.method !== "HEAD" &&
       req.method !== "OPTIONS" &&
-      !isTrustedOrigin(req.headers.origin)
+      !isStateChangeAllowed(req.headers)
     ) {
       sendJson(res, 403, { error: "forbidden" });
       return;
@@ -632,6 +614,11 @@ export async function startServer(opts?: {
     let parts: string[];
     try { parts = pathname.split("/").filter(Boolean).map(decodeURIComponent); }
     catch { sendJson(res, 400, { error: "invalid_path" }); return; }
+
+    if (req.method === "GET" && parts[0] === "config" && parts.length === 1) {
+      sendJson(res, 200, { powerPreview: powerPreviewEnabled() });
+      return;
+    }
 
     if (req.method === "GET" && parts[0] === "sessions" && parts.length === 1) {
       sendJson(res, 200, { sessions: store.list() });

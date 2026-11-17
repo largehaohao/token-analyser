@@ -28,6 +28,7 @@ export default defineConfig({
       "/stream": { target: apiTarget, ws: false },
       "/import": apiTarget,
       "/pricing": apiTarget,
+      "/config": apiTarget,
     },
   },
   build: { outDir: "dist" },

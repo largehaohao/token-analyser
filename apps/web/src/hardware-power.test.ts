@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_POWER_RANGE_ID,
   DEFAULT_PRICE_CNY_PER_KWH,
@@ -8,6 +8,7 @@ import {
   bucketizeSamples,
   chartBucketMs,
   demoPowerAdapter,
+  selectPowerSamples,
   demoSampleAt,
   energyCostCny,
   formatCny,
@@ -334,6 +335,48 @@ describe("展示分桶（均值 / 峰值 / 缺失）", () => {
     const t = new Date(2026, 9, 20, 3, 4, 9).getTime();
     expect(formatClock(t)).toBe("10-20 03:04");
     expect(formatClock(t, true)).toBe("10-20 03:04:09");
+  });
+});
+
+describe("power preview selection", () => {
+  const liveSample = { t: 1, cpu: 1, gpu: 1, machine: 3 };
+  const demoSample = { t: 2, cpu: 9, gpu: 9, machine: 20 };
+
+  it("uses live samples and does not call the demo builder", () => {
+    const demoSamples = vi.fn(() => [demoSample]);
+    expect(selectPowerSamples({
+      live: true,
+      loading: false,
+      knownCollector: true,
+      powerPreview: true,
+      liveSamples: [liveSample],
+      demoSamples,
+    })).toEqual([liveSample]);
+    expect(demoSamples).not.toHaveBeenCalled();
+  });
+
+  it("keeps the chart empty when preview is off", () => {
+    const demoSamples = vi.fn(() => [demoSample]);
+    expect(selectPowerSamples({
+      live: false,
+      loading: false,
+      knownCollector: false,
+      powerPreview: false,
+      liveSamples: [],
+      demoSamples,
+    })).toEqual([]);
+    expect(demoSamples).not.toHaveBeenCalled();
+  });
+
+  it("uses demo samples only when the runtime flag is on", () => {
+    expect(selectPowerSamples({
+      live: false,
+      loading: false,
+      knownCollector: false,
+      powerPreview: true,
+      liveSamples: null,
+      demoSamples: () => [demoSample],
+    })).toEqual([demoSample]);
   });
 });
 
