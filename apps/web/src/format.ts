@@ -289,6 +289,7 @@ export function sourceLabel(source: SessionSource = "codex"): string {
     pi: "pi",
     dsh: "DeepSeek Harness",
     opencode: "OpenCode",
+    antigravity: "Antigravity",
   }[source];
 }
 

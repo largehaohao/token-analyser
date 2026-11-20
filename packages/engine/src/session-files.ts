@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
+import { isAntigravityDuplicateLog } from "./antigravity.ts";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -15,6 +16,9 @@ export function defaultSessionPaths(): string[] {
     path.join(process.env.PI_CODING_AGENT_DIR ?? path.join(home, ".pi/agent"), "sessions"),
     path.join(process.env.DSH_HOME ?? path.join(home, ".dsh"), "sessions"),
     opencodeDatabasePath(home),
+    path.join(home, ".gemini", "antigravity", "brain"),
+    path.join(home, ".gemini", "antigravity-cli", "brain"),
+    path.join(home, ".gemini", "antigravity-ide", "brain"),
     path.join(home, ".cursor/projects"), path.join(home, ".cursor/chats"),
     path.join(cursorUser, "globalStorage/state.vscdb"),
     path.join(cursorUser, "workspaceStorage"),
@@ -33,13 +37,17 @@ export function isSessionFile(name: string): boolean {
   return /\.(jsonl|ndjson)(\.zstd)?$/i.test(name) || path.basename(name) === "state.vscdb" || path.basename(name) === "opencode.db";
 }
 
+export function isDiscoveredSessionFile(filePath: string): boolean {
+  return isSessionFile(filePath) && !isAntigravityDuplicateLog(filePath);
+}
+
 export function collectSessionFiles(roots: string[]): string[] {
   const files = new Set<string>();
   const walk = (entry: string): void => {
     try {
       if (!existsSync(entry)) return;
       if (statSync(entry).isFile()) {
-        if (isSessionFile(entry)) files.add(path.resolve(entry));
+        if (isDiscoveredSessionFile(entry)) files.add(path.resolve(entry));
         return;
       }
       for (const child of readdirSync(entry, { withFileTypes: true })) {

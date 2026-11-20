@@ -1,4 +1,5 @@
 import { preview, sha256 } from "./hash.ts";
+import { nativeCost } from "./native-pricing.ts";
 import { effectiveRateCard, priceUsage, tokenPricingForModel } from "./rate-card.ts";
 import { formatArgv } from "./exec-command.ts";
 import { requestPerformance } from "./performance.ts";
@@ -529,6 +530,20 @@ export class LedgerBuilder {
         const prompt = this.window.promptParts.join("\n") || this.lastPrompt;
         if (this.window.promptParts.length > 0) this.lastPrompt = prompt;
 
+        const cardPricing = tokenPricingForModel(
+          this.turnContext.model,
+          this.card,
+          this.turnContext.fastMode,
+        );
+        const cardCost = priceUsage(
+          lastUsage,
+          this.turnContext.model,
+          this.card,
+          this.turnContext.fastMode,
+        );
+        // Codex credits stay on the rate card. A routed model the card does
+        // not list, such as Grok, falls back to the declared API catalog.
+        const api = cardPricing ? null : nativeCost(lastUsage, this.turnContext.model);
         const turn: Turn = {
           id: turnId,
           sessionId: this.sessionId,
@@ -537,22 +552,13 @@ export class LedgerBuilder {
           model: this.turnContext.model,
           effort: this.turnContext.effort,
           fastMode: this.turnContext.fastMode,
-          pricing: tokenPricingForModel(
-            this.turnContext.model,
-            this.card,
-            this.turnContext.fastMode,
-          ),
+          pricing: api?.pricing ?? cardPricing,
           prompt,
           tools: this.window.tools,
           usage: lastUsage,
           usageRecorded: true,
           requestPerformance: requestPerformance(lastUsage.output_tokens, payload, info?.last_token_usage),
-          cost: priceUsage(
-            lastUsage,
-            this.turnContext.model,
-            this.card,
-            this.turnContext.fastMode,
-          ),
+          cost: api?.pricing ? api.cost : cardCost,
           bucket: "other",
           labels: [],
           hasPatchApply: this.window.hasPatchApply,

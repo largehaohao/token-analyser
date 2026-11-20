@@ -41,6 +41,7 @@ function openDb(home?: string): DatabaseSync {
     "node:sqlite",
   ) as typeof import("node:sqlite");
   const db = new DatabaseSync(storeDbPath(dir));
+  db.exec("PRAGMA busy_timeout=15000");
   try {
     // Session snapshots and prompts must not be readable by other local users.
     chmodSync(storeDbPath(dir), 0o600);

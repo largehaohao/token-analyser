@@ -97,6 +97,28 @@ describe("pricing update notice", () => {
     });
   });
 
+  it("names every publisher that the catalog refresh reports", () => {
+    expect(
+      pricingUpdateNotice(
+        {
+          asOf: "2026-11-20",
+          modelCount: 6,
+          sources: [
+            { id: "codex", label: "Codex", status: "ok", asOf: "2026-11-20", modelCount: 6 },
+            { id: "deepseek", label: "DeepSeek", status: "ok", asOf: "2026-11-20", modelCount: 2 },
+            { id: "grok", label: "Grok", status: "grok_pricing_unavailable" },
+            { id: "gemini", label: "Gemini", status: "ok", asOf: "2026-11-20", modelCount: 3 },
+          ],
+        },
+        "all",
+      ),
+    ).toEqual({
+      tone: "warning",
+      message:
+        "已同步 Codex 6 种、DeepSeek 2 种与Gemini 3 种模型价格（2026-11-20），Grok价格未更新（官方价格页无法访问），价格保持不变，并重新计算本地成本。",
+    });
+  });
+
   it("falls back to the raw engine code for unlisted failures", () => {
     expect(pricingFailureCopy("api_prices_write_failed")).toBe(
       "千问价格配置写入失败",

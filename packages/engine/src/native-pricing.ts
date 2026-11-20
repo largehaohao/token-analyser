@@ -1,5 +1,11 @@
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import {
+  CATALOG_PATH,
+  loadPriceCatalog,
+  quoteCatalog,
+  type PriceCatalog,
+} from "./price-catalog.ts";
 import type { Cost, TokenPricing, TokenUsage } from "./types.ts";
 
 export const API_PRICES_PATH = fileURLToPath(new URL("../../../config/api-prices.json", import.meta.url));
@@ -51,33 +57,52 @@ const API_RATE_PROVIDERS = new Set([
   "dashscope",
   "aliyun",
   "bailian",
+  "deepseek",
+  "xai",
+  "grok",
+  "google",
+  "gemini",
 ]);
 
 export function loadApiPrices(): ApiPrices {
   return JSON.parse(readFileSync(API_PRICES_PATH, "utf8")) as ApiPrices;
 }
 
-let priceSnapshot: { mtimeMs: number; size: number; prices: ApiPrices } | null = null;
+type FileStamp = { mtimeMs: number; size: number };
 
-/** Parse the price card once per analysis run, invalidated on any file change. */
-function cachedApiPrices(): ApiPrices {
-  let stamp: { mtimeMs: number; size: number };
+function fileStamp(filePath: string): FileStamp | null {
   try {
-    const stat = statSync(API_PRICES_PATH);
-    stamp = { mtimeMs: stat.mtimeMs, size: stat.size };
+    const stat = statSync(filePath);
+    return { mtimeMs: stat.mtimeMs, size: stat.size };
   } catch {
-    return loadApiPrices();
+    return null;
   }
+}
+
+let priceSnapshot: {
+  api: FileStamp | null;
+  catalog: FileStamp | null;
+  prices: ApiPrices;
+  catalogData: PriceCatalog;
+} | null = null;
+
+/** Parse the price cards once per analysis run, invalidated on any file change. */
+function cachedPricing(): { prices: ApiPrices; catalog: PriceCatalog } {
+  const api = fileStamp(API_PRICES_PATH);
+  const catalog = fileStamp(CATALOG_PATH);
   if (
     priceSnapshot &&
-    priceSnapshot.mtimeMs === stamp.mtimeMs &&
-    priceSnapshot.size === stamp.size
+    priceSnapshot.api?.mtimeMs === api?.mtimeMs &&
+    priceSnapshot.api?.size === api?.size &&
+    priceSnapshot.catalog?.mtimeMs === catalog?.mtimeMs &&
+    priceSnapshot.catalog?.size === catalog?.size
   ) {
-    return priceSnapshot.prices;
+    return { prices: priceSnapshot.prices, catalog: priceSnapshot.catalogData };
   }
   const prices = loadApiPrices();
-  priceSnapshot = { ...stamp, prices };
-  return prices;
+  const catalogData = loadPriceCatalog();
+  priceSnapshot = { api, catalog, prices, catalogData };
+  return { prices, catalog: catalogData };
 }
 
 /**
@@ -89,8 +114,17 @@ function cachedApiPrices(): ApiPrices {
 export function apiRateSource(
   model: string | null,
   prices: ApiPrices,
-): { rates: ApiModelPrice; aliasOf?: string } | undefined {
+  opts?: { inputTokens?: number; catalog?: PriceCatalog },
+): { rates: ApiModelPrice; aliasOf?: string; declared?: boolean } | undefined {
   if (!model) return undefined;
+  const quoted = opts?.catalog ? quoteCatalog(model, opts.catalog, opts.inputTokens) : null;
+  if (quoted) {
+    return {
+      rates: quoted.rates,
+      aliasOf: quoted.canonicalId === model ? undefined : quoted.canonicalId,
+      declared: true,
+    };
+  }
   const direct = prices.models[model];
   if (direct) return { rates: direct };
   for (const [canonical, spec] of Object.entries(prices.qwen?.models ?? {})) {
@@ -111,7 +145,11 @@ export function nativeCost(
   model: string | null,
   opts: { recordedUsd?: number | null; provider?: string; fast?: boolean; cacheWrite1h?: number } = {},
 ): { cost: Cost; pricing: TokenPricing | null } {
-  const source = apiRateSource(model, cachedApiPrices());
+  const loaded = cachedPricing();
+  const source = apiRateSource(model, loaded.prices, {
+    inputTokens: usage?.input_tokens,
+    catalog: loaded.catalog,
+  });
   // A relay that bills nothing records 0 for a model with published rates; that
   // is "not billed", so the official rate estimate fills the ledger. A 0 on an
   // unpriced model stays the logged fact.
@@ -130,7 +168,8 @@ export function nativeCost(
   // cost, plus every model ID explicitly declared as an official-model alias.
   const providerPriced = !opts.provider
     || API_RATE_PROVIDERS.has(opts.provider)
-    || source?.aliasOf != null;
+    || source?.aliasOf != null
+    || source?.declared === true;
   if (cost.usd != null || !providerPriced) return { cost, pricing: null };
   const rates = source?.rates;
   if (!usage || !rates || (opts.fast && !rates.fast_multiplier)) return { cost, pricing: null };

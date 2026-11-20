@@ -9,7 +9,7 @@ assertSupportedNode();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const enginePort = Number.parseInt(process.env.PORT ?? "7789", 10) || 7789;
 
-function waitForPort(port, timeoutMs = 20_000) {
+function waitForPort(port, timeoutMs = 90_000) {
   const started = Date.now();
   return new Promise((resolve, reject) => {
     const attempt = () => {

@@ -4,6 +4,7 @@ import {
   type SessionRangeId,
 } from "./session-range";
 import { SESSION_PAGE_SIZE } from "./session-page";
+import { normalizeEnvironment, type SessionEnvironmentId } from "./session-environment";
 import { normalizeSourceFilter, type SessionSourceFilter } from "./session-source";
 
 export type SessionNavigationView = "overview" | "sessions" | "hardware";
@@ -15,6 +16,7 @@ export type SessionNavigation = {
   selectedId: string | null;
   range: SessionRangeId;
   source: SessionSourceFilter;
+  environment: SessionEnvironmentId;
   hardwareTab?: HardwareTab;
 };
 
@@ -24,6 +26,7 @@ const DEFAULT_NAVIGATION: SessionNavigation = {
   selectedId: null,
   range: DEFAULT_SESSION_RANGE,
   source: "all",
+  environment: "local",
 };
 
 function storage(): Storage | null {
@@ -96,6 +99,7 @@ export function readSessionNavigation(): SessionNavigation {
           SESSION_RANGES.find((item) => item.id === record.range)?.id ??
           DEFAULT_SESSION_RANGE,
         source: normalizeSourceFilter(record.source),
+        environment: normalizeEnvironment(record.environment),
         ...(hardwareTab ? { hardwareTab } : {}),
       };
     }

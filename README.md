@@ -51,6 +51,7 @@ Default sources are discovered recursively:
 | pi | `~/.pi/agent/sessions/**/*.jsonl` (`PI_CODING_AGENT_DIR` supported) | Input, cache read/write, output, recorded USD, tools, branch/fork context, per-request duration (tok/s); TTFT with the [pi request-timing extension](#pi-request-timing) |
 | DeepSeek Harness | `~/.dsh/sessions/**/session*.jsonl.zstd` (`DSH_HOME` supported) | Input, cache read, output, tools, subagent parent links; tok/s from per-message stream timing when present |
 | OpenCode | `$XDG_DATA_HOME/opencode/opencode.db`, otherwise `~/.local/share/opencode/opencode.db` (Windows: `%LOCALAPPDATA%/opencode/opencode.db`) | Input, cache read/write, output, reasoning, recorded USD or API-equivalent estimate, tools, parent sessions; TTFT and tok/s from message stream times when present |
+| Antigravity | `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl`, plus `antigravity-cli` and `antigravity-ide` | Input, cache read, output, tools; model from the Model Selection line. `transcript_full.jsonl` and `chunks/` are not counted again. TTFT and tok/s are not recorded |
 
 Cursor's User directory is `~/Library/Application Support/Cursor/User` on macOS,
 `%APPDATA%/Cursor/User` on Windows, and `$XDG_CONFIG_HOME/Cursor/User` (or
@@ -118,8 +119,8 @@ meter as a context size with its category breakdown. It is a context
 measurement, not billable token usage, so it never enters the token ledger, cost
 or cache-hit figures.
 
-Use the visible **会话来源** buttons below the header to select all sources,
-Codex, Claude Code, Cursor, pi, DeepSeek Harness, or OpenCode in both the overview and session detail views.
+Use the visible **环境** control to read sessions from this machine or from `192.168.1.102` (SSH as `john`, read-only). Use **会话来源** to select all sources,
+Codex, Claude Code, Cursor, pi, DeepSeek Harness, OpenCode, or Antigravity in both the overview and session detail views.
 Their counts include all discovered root sessions across all time. The default
 7-day range can hide older sessions; **查看全部时间** reveals that history.
 The selected source is restored on reload and browser back navigation.

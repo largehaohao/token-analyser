@@ -1,0 +1,25 @@
+{
+  "id": "grok",
+  "label": "Grok",
+  "page": "https://docs.x.ai/developers/models",
+  "markdown_url": "https://docs.x.ai/developers/models",
+  "default_tier": "short",
+  "models": {
+    "grok-4.7": {
+      "match": "grok-4.7",
+      "aliases": ["grok/grok-4.7", "grok/grok-4.7-build-fast"]
+    },
+    "grok-4.6": {
+      "match": "grok-4.6",
+      "aliases": ["grok/grok-4.6", "grok/grok-4.6-build-fast"]
+    },
+    "grok-4.5": {
+      "match": "grok-4.5",
+      "aliases": ["grok/grok-4.5", "grok/grok-4.5-build-fast"]
+    },
+    "grok-4.3": {
+      "match": "grok-4.3",
+      "aliases": ["grok/grok-4.3", "grok/grok-4.3-build-fast"]
+    }
+  }
+}

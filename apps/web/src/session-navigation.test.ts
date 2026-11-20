@@ -27,15 +27,15 @@ afterEach(() => vi.unstubAllGlobals());
 describe("source navigation persistence", () => {
   it("keeps old saved navigation compatible and defaults to all sources", () => {
     fakeWindow({ view: "sessions", selectedId: "old", range: "all" });
-    expect(readSessionNavigation()).toEqual({ view: "sessions", selectedId: "old", range: "all", source: "all" });
+    expect(readSessionNavigation()).toEqual({ view: "sessions", selectedId: "old", range: "all", source: "all", environment: "local" });
   });
   it("restores provider filters and prioritizes browser history", () => {
     fakeWindow({ range: "all", source: "pi" }, { range: "7d", source: "claude", selectedId: "claude:test" });
-    expect(readSessionNavigation()).toEqual({ view: "sessions", selectedId: "claude:test", range: "7d", source: "claude" });
+    expect(readSessionNavigation()).toEqual({ view: "sessions", selectedId: "claude:test", range: "7d", source: "claude", environment: "local" });
   });
   it("persists the selected source in both tab storage and history", () => {
     const win = fakeWindow();
-    const navigation = { view: "sessions", selectedId: "cursor:test", range: "all", source: "cursor" } as const;
+    const navigation = { view: "sessions", selectedId: "cursor:test", range: "all", source: "cursor", environment: "local" } as const;
     writeSessionNavigation(navigation);
     expect(readSessionNavigation()).toEqual(navigation);
     expect(win.history.replaceState).toHaveBeenCalledWith({ tokenAnalyser: navigation }, "", "#sessions");
@@ -69,6 +69,7 @@ describe("hardware navigation", () => {
       selectedId: null,
       range: "7d" as const,
       source: "all" as const,
+      environment: "local" as const,
       hardwareTab: "power" as const,
     };
     writeSessionNavigation(navigation);

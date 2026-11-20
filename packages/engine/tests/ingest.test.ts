@@ -70,6 +70,20 @@ describe("readJsonlFile", () => {
     expect(parse_errors).toEqual([]);
   });
 
+  it("resumes a live file after a line longer than the read chunk", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-long-line-"));
+    const filePath = path.join(dir, "rollout-long.jsonl");
+    const pad = "a".repeat(70_000);
+    const first = `{"type":"session_meta","payload":{"id":"long","pad":"${pad}"}}\n`;
+    const second = '{"type":"event_msg","timestamp":"2026-11-20T00:00:00.000Z","payload":{"type":"token_count"}}\n';
+    writeFileSync(filePath, first);
+    const initial = ingestFile(filePath, { allowAppend: true });
+    expect(initial.parse_errors).toEqual([]);
+    appendFileSync(filePath, second);
+    const appended = ingestFile(filePath, { allowAppend: true });
+    expect(appended.parse_errors).toEqual([]);
+  });
+
   it("parses a JSONL line whose non-ASCII character sits on a 64-byte chunk boundary", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "ingest-utf8-"));
     const filePath = path.join(dir, "rollout-utf8.jsonl");

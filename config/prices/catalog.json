@@ -1,0 +1,186 @@
+{
+  "as_of": "2026-11-20",
+  "sources": {
+    "deepseek": {
+      "label": "DeepSeek",
+      "as_of": "2026-11-20",
+      "page": "https://api-docs.deepseek.com/quick_start/pricing",
+      "model_count": 2
+    },
+    "gemini": {
+      "label": "Gemini",
+      "as_of": "2026-11-20",
+      "page": "https://ai.google.dev/gemini-api/docs/pricing",
+      "model_count": 7
+    },
+    "grok": {
+      "label": "Grok",
+      "as_of": "2026-11-20",
+      "page": "https://docs.x.ai/developers/models",
+      "model_count": 4
+    }
+  },
+  "models": {
+    "deepseek-flash": {
+      "input": 0.3,
+      "cached": 0.006,
+      "output": 1.2,
+      "tier": "peak",
+      "off_peak": {
+        "input": 0.15,
+        "cached": 0.003,
+        "output": 0.6
+      },
+      "source": "deepseek"
+    },
+    "deepseek-v4-pro": {
+      "input": 1.32,
+      "cached": 0.044,
+      "output": 3.96,
+      "tier": "peak",
+      "off_peak": {
+        "input": 0.66,
+        "cached": 0.022,
+        "output": 1.98
+      },
+      "source": "deepseek"
+    },
+    "gemini-3.5-flash-lite": {
+      "input": 0.3,
+      "cached": 0.03,
+      "output": 2.5,
+      "tier": "standard",
+      "source": "gemini"
+    },
+    "gemini-3.6-flash": {
+      "input": 0.75,
+      "cached": 0.075,
+      "output": 3.75,
+      "tier": "standard",
+      "source": "gemini"
+    },
+    "gemini-3.8-flash": {
+      "input": 0.75,
+      "cached": 0.075,
+      "output": 3.75,
+      "tier": "standard",
+      "source": "gemini"
+    },
+    "gemini-4-argon": {
+      "input": 2,
+      "cached": 0.1,
+      "output": 10,
+      "tier": "standard",
+      "source": "gemini"
+    },
+    "gemini-4-carbon": {
+      "input": 2,
+      "cached": 0.1,
+      "output": 10,
+      "tier": "standard",
+      "source": "gemini"
+    },
+    "gemini-4-hydrogen": {
+      "input": 1.5,
+      "cached": 0.075,
+      "output": 7.5,
+      "tier": "standard",
+      "source": "gemini"
+    },
+    "gemini-4-neon": {
+      "input": 3,
+      "cached": 0.15,
+      "output": 15,
+      "tier": "standard",
+      "source": "gemini"
+    },
+    "grok-4.3": {
+      "input": 1.25,
+      "cached": 0.2,
+      "output": 2.5,
+      "tier": "short",
+      "long_context": {
+        "from_tokens": 200000,
+        "input": 2.5,
+        "cached": 0.4,
+        "output": 5
+      },
+      "source": "grok"
+    },
+    "grok-4.5": {
+      "input": 2,
+      "cached": 0.3,
+      "output": 6,
+      "tier": "short",
+      "long_context": {
+        "from_tokens": 200000,
+        "input": 4,
+        "cached": 0.6,
+        "output": 12
+      },
+      "source": "grok"
+    },
+    "grok-4.6": {
+      "input": 2,
+      "cached": 0.5,
+      "output": 6,
+      "tier": "short",
+      "long_context": {
+        "from_tokens": 200000,
+        "input": 4,
+        "cached": 1,
+        "output": 12
+      },
+      "source": "grok"
+    },
+    "grok-4.7": {
+      "input": 2,
+      "cached": 0.5,
+      "output": 6,
+      "tier": "short",
+      "long_context": {
+        "from_tokens": 200000,
+        "input": 4,
+        "cached": 1,
+        "output": 12
+      },
+      "source": "grok"
+    }
+  },
+  "aliases": {
+    "deepseek-v4-flash": "deepseek-flash",
+    "DeepSeek-V4-Flash": "deepseek-flash",
+    "deepseek-v4-flash-free": "deepseek-flash",
+    "deepseek-v4-flash-vision-exp": "deepseek-flash",
+    "deepseek-v4.1-flash-free": "deepseek-flash",
+    "Gemini 3.5 Flash-Lite": "gemini-3.5-flash-lite",
+    "Gemini 3.6 Flash": "gemini-3.6-flash",
+    "Gemini 3.8 Flash": "gemini-3.8-flash",
+    "Gemini 4 Argon": "gemini-4-argon",
+    "Gemini 4 Carbon": "gemini-4-carbon",
+    "Gemini 4 Hydrogen": "gemini-4-hydrogen",
+    "Gemini 4 Neon": "gemini-4-neon",
+    "gemini-3.5-flash-lite-high": "gemini-3.5-flash-lite",
+    "gemini-3.5-flash-lite-low": "gemini-3.5-flash-lite",
+    "gemini-3.6-flash-high": "gemini-3.6-flash",
+    "gemini-3.6-flash-low": "gemini-3.6-flash",
+    "gemini-3.8-flash-high": "gemini-3.8-flash",
+    "gemini-3.8-flash-low": "gemini-3.8-flash",
+    "gemini-4-argon-high": "gemini-4-argon",
+    "gemini-4-argon-low": "gemini-4-argon",
+    "gemini-4-carbon-high": "gemini-4-carbon",
+    "gemini-4-carbon-low": "gemini-4-carbon",
+    "gemini-4-hydrogen-high": "gemini-4-hydrogen",
+    "gemini-4-hydrogen-low": "gemini-4-hydrogen",
+    "gemini-4-neon-high": "gemini-4-neon",
+    "gemini-4-neon-low": "gemini-4-neon",
+    "grok/grok-4.3": "grok-4.3",
+    "grok/grok-4.3-build-fast": "grok-4.3",
+    "grok/grok-4.5": "grok-4.5",
+    "grok/grok-4.5-build-fast": "grok-4.5",
+    "grok/grok-4.6": "grok-4.6",
+    "grok/grok-4.6-build-fast": "grok-4.6",
+    "grok/grok-4.7": "grok-4.7",
+    "grok/grok-4.7-build-fast": "grok-4.7"
+  }
+}

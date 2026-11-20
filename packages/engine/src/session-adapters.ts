@@ -4,6 +4,7 @@ import { preview, sha256 } from "./hash.ts";
 import { nativeCost } from "./native-pricing.ts";
 import { requestPerformance } from "./performance.ts";
 import type { ContextMeasurement, RolloutLine, SessionMeta, SessionSource, TaskTiming, TokenUsage, ToolCall, Turn } from "./types.ts";
+import { isAntigravityTranscript, parseAntigravitySession } from "./antigravity.ts";
 
 export function record(value: unknown): Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value)
@@ -43,6 +44,7 @@ export type NativeSession = {
 };
 
 export function detectSource(events: RolloutLine[], filePath = ""): SessionSource | null {
+  if (isAntigravityTranscript(events, filePath)) return "antigravity";
   // DSH session headers also have type/session + version/cwd; check before pi.
   if (
     /(?:^|[/\\])\.dsh(?:[/\\]|$)/.test(filePath) ||
@@ -265,6 +267,7 @@ function piEntryWindow(data: Record<string, unknown>): Record<string, unknown> {
 }
 
 export function parseNativeSession(events: RolloutLine[], filePath: string, source: SessionSource): NativeSession {
+  if (source === "antigravity") return parseAntigravitySession(events, filePath);
   if (source === "dsh") return parseDshSession(events, filePath);
   const header = events.find((event) => event.type === "session") ?? events[0];
   const agentId = events.find((event) => typeof event.agentId === "string")?.agentId ??

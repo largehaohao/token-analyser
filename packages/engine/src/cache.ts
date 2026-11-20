@@ -17,8 +17,8 @@ import {
   writeCacheRow,
 } from "./store-db.ts";
 
-// v17 marks Codex ledger usage as recorded and timestamps OpenCode completion.
-export const CACHE_VERSION = 17;
+// v18 records Antigravity request windows (previous step -> planner).
+export const CACHE_VERSION = 18;
 
 export function cacheDir(home?: string): string {
   return legacyCacheDir(home ?? tokenAnalyserHome());

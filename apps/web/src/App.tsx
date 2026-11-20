@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  bindSessionEnvironment,
   getOverview,
   getSession,
   importNdjson,
@@ -12,6 +13,11 @@ import {
   type StreamStatus,
   updateModelPrices as requestModelPriceUpdate,
 } from "./api";
+import { EnvironmentSwitcher } from "./EnvironmentSwitcher";
+import {
+  environmentLabel,
+  type SessionEnvironmentId,
+} from "./session-environment";
 import { errorMessage, isNotFound, streamErrorBanner } from "./app-errors";
 import { UnitProvider, useUnit } from "./UnitContext";
 import {
@@ -122,6 +128,10 @@ function AppShell() {
   const [source, setSource] = useState<SessionSourceFilter>(
     initialNavigation.source,
   );
+  const [environment, setEnvironment] = useState<SessionEnvironmentId>(
+    initialNavigation.environment ?? "local",
+  );
+  bindSessionEnvironment(environment);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const [appError, setAppError] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
@@ -157,10 +167,12 @@ function AppShell() {
   const viewRef = useRef<View>(view);
   const rangeRef = useRef<SessionRangeId>(range);
   const sourceRef = useRef<SessionSourceFilter>(source);
+  const environmentRef = useRef<SessionEnvironmentId>(environment);
   selectedIdRef.current = selectedId;
   viewRef.current = view;
   rangeRef.current = range;
   sourceRef.current = source;
+  environmentRef.current = environment;
 
   useEffect(() => {
     writeUnitPref(unit);
@@ -198,9 +210,10 @@ function AppShell() {
       selectedId,
       range,
       source,
+      environment,
       ...(view === "hardware" ? { hardwareTab } : {}),
     });
-  }, [selectedId, view, range, source, hardwareTab]);
+  }, [selectedId, view, range, source, environment, hardwareTab]);
 
   useEffect(() => {
     if (previousView.current === view) return;
@@ -285,7 +298,8 @@ function AppShell() {
   const refreshOverview = useCallback(async (force = false) => {
     const requestedRange = rangeRef.current;
     const requestedSource = sourceRef.current;
-    const requestedScope = `${requestedSource}:${requestedRange}`;
+    const requestedEnv = environmentRef.current;
+    const requestedScope = `${requestedEnv}:${requestedSource}:${requestedRange}`;
     const active = overviewInFlight.current;
     if (!force && active?.scope === requestedScope) return active.promise;
     const requestId = ++overviewRequest.current;
@@ -293,7 +307,14 @@ function AppShell() {
     const requestedAt = Date.now();
     const promise = (async () => {
       try {
-        const data = await getOverview(requestedRange, requestedAt, requestedSource);
+        const data = await getOverview(
+          requestedRange,
+          requestedAt,
+          requestedSource,
+          undefined,
+          undefined,
+          force,
+        );
         if (requestId !== overviewRequest.current) return data;
         setOverview(data);
         setAppliedScope(requestedScope);
@@ -336,14 +357,14 @@ function AppShell() {
       },
     );
     return promise;
-  }, []);
+  }, [environment]);
 
   const refreshList = useCallback(async (force = false) => {
     if (!force && listInFlight.current) return listInFlight.current;
     const requestId = ++listRequest.current;
     const promise = (async () => {
       try {
-        const list = await listSessions();
+        const list = await listSessions({ refresh: force });
         if (requestId === listRequest.current) {
           setSessions(list);
           setSessionsLoaded(true);
@@ -367,7 +388,7 @@ function AppShell() {
       },
     );
     return promise;
-  }, []);
+  }, [environment]);
 
   const refreshSession = useCallback(async (id: string) => {
     const active = sessionInFlight.current;
@@ -486,15 +507,11 @@ function AppShell() {
 
   useEffect(() => {
     void refreshOverview().catch(() => undefined);
-  }, [range, source, now, refreshOverview]);
+  }, [range, source, environment, refreshOverview]);
 
   useEffect(() => {
     void refreshList().catch(() => undefined);
-    const currentId = selectedIdRef.current;
-    if (currentId && viewRef.current === "sessions") {
-      void refreshSession(currentId).catch(() => undefined);
-    }
-  }, [now, refreshList, refreshSession]);
+  }, [refreshList]);
 
   useEffect(() => {
     if (!sessionsError) return;
@@ -543,6 +560,8 @@ function AppShell() {
 
   useEffect(() => {
     return openStream((event) => {
+      // Local file events must not pull the remote machine on every append.
+      if (environmentRef.current !== "local") return;
       const banner = streamErrorBanner(event);
       if (banner) setAppError(banner);
       void refreshOverview().catch(() => undefined);
@@ -554,6 +573,19 @@ function AppShell() {
     }, setStreamStatus);
   }, [refreshList, refreshOverview, refreshSession]);
 
+  useEffect(() => {
+    if (environment === "local") return;
+    const timer = window.setInterval(() => {
+      void refreshList().catch(() => undefined);
+      void refreshOverview().catch(() => undefined);
+      const currentId = selectedIdRef.current;
+      if (currentId && viewRef.current === "sessions") {
+        void refreshSession(currentId).catch(() => undefined);
+      }
+    }, 20_000);
+    return () => window.clearInterval(timer);
+  }, [environment, refreshList, refreshOverview, refreshSession]);
+
   function openImportedSession(snap: SessionSnapshot) {
     mobileContextTarget.current = false;
     if (viewRef.current !== "sessions")
@@ -562,6 +594,7 @@ function AppShell() {
         selectedId: snap.id,
         range: "all",
         source: snap.source ?? "codex",
+        environment,
       });
     sessionRequest.current += 1;
     preferredSessionIdRef.current = snap.id;
@@ -588,6 +621,12 @@ function AppShell() {
       const { filename, text } = await readDroppedFile(file);
       const snap = await importNdjson(filename, text);
       importedSnapshot.current = snap;
+      // Imports land in the local store. Show that machine, not the remote mirror.
+      if (environmentRef.current !== "local") {
+        environmentRef.current = "local";
+        bindSessionEnvironment("local");
+        setEnvironment("local");
+      }
       // A list read started before the import must not erase the confirmed record.
       listRequest.current += 1;
       listInFlight.current = null;
@@ -627,7 +666,7 @@ function AppShell() {
     };
     if (view !== "sessions") {
       withViewTransition(() => {
-        pushSessionNavigation({ view: "sessions", selectedId: id, range, source });
+        pushSessionNavigation({ view: "sessions", selectedId: id, range, source, environment });
         setView("sessions");
         select();
       });
@@ -649,6 +688,27 @@ function AppShell() {
     });
   }
 
+  function handleEnvironmentChange(next: SessionEnvironmentId) {
+    if (next === environment) return;
+    environmentRef.current = next;
+    bindSessionEnvironment(next);
+    setEnvironment(next);
+    setSessions([]);
+    setSessionsLoaded(false);
+    setSessionsError(null);
+    setOverview(null);
+    setPreviousOverview(null);
+    setSnapshot(null);
+    setSelectedId(null);
+    setSelectedNodeId(null);
+    setContextOpen(null);
+    setMobileSessionPane("list");
+    preferredSessionIdRef.current = null;
+    listRequest.current += 1;
+    overviewRequest.current += 1;
+    sessionRequest.current += 1;
+  }
+
   function handleSourceChange(next: SessionSourceFilter) {
     if (next === source) return;
     setDayFilter(null);
@@ -656,7 +716,7 @@ function AppShell() {
       null,
       filterSessionsByRange(filterSessionsBySource(sessions, next), range, now),
     );
-    pushSessionNavigation({ view, selectedId: nextId, range, source: next });
+    pushSessionNavigation({ view, selectedId: nextId, range, source: next, environment });
     writeSessionListState({ query: "", limit: SESSION_PAGE_SIZE, scrollTop: 0 });
     sourceRef.current = next;
     preferredSessionIdRef.current = null;
@@ -677,7 +737,7 @@ function AppShell() {
   }
 
   const overviewState = overviewDisplayState({
-    requestedRange: `${source}:${range}`,
+    requestedRange: `${environment}:${source}:${range}`,
     appliedRange: appliedScope,
     hasOverview: overview != null,
     error: overviewError,
@@ -721,6 +781,7 @@ function AppShell() {
         selectedId: nextId,
         range: "all",
         source,
+        environment,
       });
       setView("sessions");
       setMobileSessionPane("list");
@@ -734,7 +795,7 @@ function AppShell() {
     const nextId = resolveSelectedSession(selectedId, visibleSessions);
     withViewTransition(() => {
       if (view !== "sessions")
-        pushSessionNavigation({ view: "sessions", selectedId: nextId, range, source });
+        pushSessionNavigation({ view: "sessions", selectedId: nextId, range, source, environment });
       setView("sessions");
       setMobileSessionPane("list");
       setSelectedId(nextId);
@@ -761,6 +822,7 @@ function AppShell() {
           selectedId,
           range,
           source,
+          environment,
           ...(tab ? { hardwareTab: tab } : {}),
         });
         setView(next);
@@ -777,6 +839,7 @@ function AppShell() {
         selectedId,
         range,
         source,
+        environment,
         hardwareTab: tab,
       });
     });
@@ -892,7 +955,7 @@ function AppShell() {
             >
               <Icon name="refresh" /> 刷新
             </Button>
-            <span className="local-label"><Icon name="shield" /> 本地运行</span>
+            <span className="local-label"><Icon name="shield" /> {environment === "local" ? "本地运行" : environmentLabel(environment)}</span>
           </div>
         </header>
         {view !== "hardware" && (
@@ -905,13 +968,17 @@ function AppShell() {
           onClick={() => setFiltersOpen((open) => !open)}
         >
           <span className="mobile-filter-summary">
-            {SESSION_SOURCES.find((item) => item.id === source)?.label} · {rangeLabel} · {unit === "tokens" ? "Tokens" : unit === "credits" ? "Credits" : "USD"}
+            {environmentLabel(environment)} · {SESSION_SOURCES.find((item) => item.id === source)?.label} · {rangeLabel} · {unit === "tokens" ? "Tokens" : unit === "credits" ? "Credits" : "USD"}
           </span>
           <span className="mobile-filter-action">筛选 <Icon name="chevron" /></span>
         </Button>
         )}
         {view !== "hardware" && (
         <div id="workspace-filters" className="workspace-filters" data-expanded={filtersOpen}>
+        <EnvironmentSwitcher
+          environment={environment}
+          onChange={handleEnvironmentChange}
+        />
         <SourceSwitcher
           source={source}
           counts={counts}
@@ -1027,6 +1094,7 @@ function AppShell() {
                   onSelectSession={handleSelectSession}
                   onOpenSessions={openSessions}
                   watchPath={overview.watchPath}
+                  collectingLabel={environment === "local" ? "正在采集本地会话" : `正在采集 ${environmentLabel(environment)}`}
                 />
               </div>
             ) : overviewState === "error" ? (
@@ -1066,16 +1134,17 @@ function AppShell() {
                 </div>
                 <StatePanel
                   kind="loading"
-                  title="正在汇总本地用量"
-                  description={`${rangeLabel} · 首次读取较大的会话记录可能需要一些时间。`}
+                  title={environment === "local" ? "正在汇总本地用量" : `正在汇总 ${environmentLabel(environment)} 的用量`}
+                  description={`${rangeLabel} · ${environment === "local" ? "首次读取较大的会话记录可能需要一些时间。" : "首次从这台机器同步会话可能需要一两分钟。"}`}
                 />
               </main>
             )
           ) : (
             <div className="layout sessions-layout" data-mobile-pane={mobileSessionPane}>
               <SessionList
-                key={source}
+                key={`${environment}:${source}`}
                 source={source}
+                environmentLabel={environmentLabel(environment)}
                 sessions={visibleSessions}
                 totalCount={matchingSource.length}
                 dayFilter={dayFilter}
@@ -1215,12 +1284,14 @@ function OverviewRail({
   onSelectSession,
   onOpenSessions,
   watchPath,
+  collectingLabel,
 }: {
   overview: Overview;
   topSessions: SessionListItem[];
   onSelectSession: (id: string) => void;
   onOpenSessions: () => void;
   watchPath: string;
+  collectingLabel: string;
 }) {
   const { unit } = useUnit();
   const quality = overview.quality;
@@ -1268,7 +1339,7 @@ function OverviewRail({
             <div>
               <b>{overview.live ? "有实时会话" : "静态账本"}</b>
               <span>
-                {overview.collecting ? "正在采集本地会话" : "未开启自动采集"} ·{" "}
+                {overview.collecting ? collectingLabel : "未开启自动采集"} ·{" "}
                 {overview.sessionCount.toLocaleString("en-US")} 个会话
               </span>
             </div>

@@ -57,11 +57,29 @@ function sidecarStat(filePath: string): { size: number; mtimeMs: number } {
   }
 }
 
-/** Identity of a session file, including SQLite WAL/SHM for `.vscdb`. */
+function antigravitySidecar(filePath: string): { size: number; mtimeMs: number } {
+  if (path.basename(filePath) !== "transcript.jsonl") return { size: 0, mtimeMs: 0 };
+  const logs = path.dirname(filePath);
+  const system = path.dirname(logs);
+  const conv = path.dirname(system);
+  const brain = path.dirname(conv);
+  if (path.basename(logs) !== "logs" || path.basename(system) !== ".system_generated" || path.basename(brain) !== "brain") {
+    return { size: 0, mtimeMs: 0 };
+  }
+  const base = path.dirname(brain);
+  const id = path.basename(conv);
+  const annotation = sidecarStat(path.join(base, "annotations", `${id}.pbtxt`));
+  const summaries = sidecarStat(path.join(base, "conversation_summaries.db"));
+  // Bump when planner timing changes so an unchanged transcript is parsed again.
+  const parseRevision = 3;
+  return { size: annotation.size + summaries.size + parseRevision, mtimeMs: Math.max(annotation.mtimeMs, summaries.mtimeMs) };
+}
+
+/** Identity of a session file, including SQLite WAL/SHM and Antigravity title sidecars. */
 export function fileFingerprint(filePath: string): FileFingerprint {
   const st = statSync(filePath);
   const sqlite = filePath.endsWith(".vscdb") || path.basename(filePath) === "opencode.db";
-  const wal = sqlite ? sidecarStat(`${filePath}-wal`) : { size: 0, mtimeMs: 0 };
+  const wal = sqlite ? sidecarStat(`${filePath}-wal`) : antigravitySidecar(filePath);
   const shm = sqlite ? sidecarStat(`${filePath}-shm`) : { size: 0, mtimeMs: 0 };
   return {
     inode: st.ino,

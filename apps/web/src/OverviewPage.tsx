@@ -27,6 +27,7 @@ import {
 } from "./OverviewPanels";
 import { LedgerStrip } from "./LedgerStrip";
 import { LedgerHero } from "./LedgerHero";
+import { PriceSheet } from "./PriceSheet";
 import { TrendPanel } from "./TrendPanel";
 
 type Props = {
@@ -69,6 +70,15 @@ export function OverviewPage({
 }: Props) {
   const { unit, setUnit } = useUnit();
   const [focusedSlice, setFocusedSlice] = useState<string | null>(null);
+  const [priceSheetOpen, setPriceSheetOpen] = useState(false);
+  const [priceSheetReload, setPriceSheetReload] = useState(0);
+  const wasUpdatingPrices = useRef(false);
+  useEffect(() => {
+    if (wasUpdatingPrices.current && !updatingModelPrices) {
+      setPriceSheetReload((value) => value + 1);
+    }
+    wasUpdatingPrices.current = updatingModelPrices;
+  }, [updatingModelPrices]);
   const wastePct = wasteShare(overview.waste, overview.cost, unit);
   const unpriced = unpricedNote(overview.unpricedRaw ?? 0);
   const identity = tokenIdentity(overview.cost);
@@ -104,6 +114,14 @@ export function OverviewPage({
           <p>从总量到每轮调用，看清用量花在哪里。</p>
         </div>
         <div className="page-heading-actions">
+          <Button
+            aria-expanded={priceSheetOpen}
+            aria-controls="price-sheet"
+            onClick={() => setPriceSheetOpen((open) => !open)}
+          >
+            <Icon name="layers" />
+            模型价格
+          </Button>
           <Button onClick={onUpdateModelPrices} busy={updatingModelPrices}>
             <Icon name="refresh" />
             更新模型价格
@@ -113,6 +131,8 @@ export function OverviewPage({
           </Button>
         </div>
       </header>
+
+      <PriceSheet open={priceSheetOpen} reloadKey={priceSheetReload} />
 
       {pricingUpdateNotice && (
         <div className="app-notice">
@@ -303,4 +323,4 @@ export function OverviewPage({
     </main>
   );
 }
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";

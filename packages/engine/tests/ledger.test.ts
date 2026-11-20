@@ -352,4 +352,29 @@ describe("buildLedger", () => {
     );
     expect(split.ledger_warning).toBe(full.ledger_warning);
   });
+
+  it("prices a routed model from the API catalog when the Codex card has no rate", () => {
+    const usage = {
+      input_tokens: 1_000,
+      cached_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      output_tokens: 1_000,
+      reasoning_output_tokens: 0,
+      total_tokens: 2_000,
+    };
+    const { turns } = buildLedger([
+      { timestamp: "t0", type: "turn_context", payload: { model: "grok/grok-4.7-build-fast" } },
+      {
+        timestamp: "t1",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: { last_token_usage: usage, total_token_usage: usage },
+        },
+      },
+    ], "grok", { isSubagent: false });
+    expect(turns[0]?.cost.credits).toBeNull();
+    expect(turns[0]?.pricing).toMatchObject({ unit: "usd", input: 2, cached: 0.5, output: 6 });
+    expect(turns[0]?.cost.usd).toBeCloseTo((1_000 * 2 + 1_000 * 6) / 1e6, 8);
+  });
 });

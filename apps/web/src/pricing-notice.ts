@@ -30,7 +30,10 @@ const FAILURE_COPY: Record<string, string> = {
 };
 
 export function pricingFailureCopy(status: string): string {
-  return FAILURE_COPY[status] ?? status;
+  if (FAILURE_COPY[status]) return FAILURE_COPY[status];
+  if (status.endsWith("_unavailable")) return "官方价格页无法访问";
+  if (status.endsWith("_format_changed")) return "官方价格表格式已变化";
+  return status;
 }
 
 /**
@@ -43,30 +46,37 @@ export function pricingUpdateNotice(
 ): { tone: PricingUpdateTone; message: string } {
   const recalculation = RECALCULATION_COPY[refreshed];
 
-  const sources = [result.codex, result.qwen].filter(Boolean) as PricingSourceResult[];
-  if (sources.length === 0) {
+  const listed = result.sources ?? [];
+  const pairs: { label: string; source: PricingSourceResult }[] = listed.length > 0
+    ? listed.map((source) => ({ label: source.label, source }))
+    : (["codex", "qwen"] as const).flatMap((key) => {
+        const source = result[key];
+        return source ? [{ label: SOURCE_LABEL[key], source }] : [];
+      });
+  if (pairs.length === 0) {
     return {
       tone: refreshed === "all" ? "success" : "warning",
       message: `已同步 ${result.modelCount} 种模型价格（${result.asOf}）${recalculation}`,
     };
   }
 
-  const synced = (["codex", "qwen"] as const)
-    .map((key) => [SOURCE_LABEL[key], result[key]] as const)
-    .filter(([, source]) => source?.status === "ok")
-    .map(([label, source]) => `${label} ${source!.modelCount ?? 0} 种`);
-  const failed = (["codex", "qwen"] as const)
-    .map((key) => [SOURCE_LABEL[key], result[key]] as const)
-    .filter(([, source]) => source != null && source.status !== "ok")
-    .map(([label, source]) => `${label}价格未更新（${pricingFailureCopy(source!.status)}）`);
+  const synced = pairs
+    .filter(({ source }) => source.status === "ok")
+    .map(({ label, source }) => `${label} ${source.modelCount ?? 0} 种`);
+  const failed = pairs
+    .filter(({ source }) => source.status !== "ok")
+    .map(({ label, source }) => `${label}价格未更新（${pricingFailureCopy(source.status)}）`);
 
-  const asOf = (["codex", "qwen"] as const)
-    .map((key) => result[key])
-    .filter((source) => source?.status === "ok")
-    .map((source) => source!.asOf!)
-    .filter(Boolean)
+  const asOf = pairs
+    .map(({ source }) => source)
+    .filter((source) => source.status === "ok")
+    .map((source) => source.asOf)
+    .filter((date): date is string => Boolean(date))
     .sort()
     .at(-1);
+  const syncedText = synced.length <= 2
+    ? synced.join("与")
+    : `${synced.slice(0, -1).join("、")}与${synced.at(-1)}`;
   const tone: PricingUpdateTone =
     failed.length === 0 && refreshed === "all" ? "success" : "warning";
 
@@ -77,7 +87,7 @@ export function pricingUpdateNotice(
   return {
     tone,
     message:
-      `已同步 ${synced.join("与")}模型价格（${asOf}）` +
+      `已同步 ${syncedText}模型价格（${asOf}）` +
       (failed.length > 0 ? `，${failed.join("、")}，价格保持不变` : "") +
       recalculation,
   };

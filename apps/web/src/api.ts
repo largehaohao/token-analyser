@@ -1,5 +1,32 @@
 import { overviewQuery, type SessionRangeId } from "./session-range";
+import type { SessionEnvironmentId } from "./session-environment";
 import type { SessionSourceFilter } from "./session-source";
+
+let sessionEnvironment: SessionEnvironmentId = "local";
+
+/** The dashboard reads this when it builds session requests. */
+export function bindSessionEnvironment(id: SessionEnvironmentId): void {
+  sessionEnvironment = id;
+}
+
+function environmentQuery(params: URLSearchParams, refresh = false): URLSearchParams {
+  if (sessionEnvironment !== "local") params.set("env", sessionEnvironment);
+  if (refresh) params.set("refresh", "1");
+  return params;
+}
+
+function environmentTimeout(localMs: number): number {
+  return sessionEnvironment === "local" ? localMs : 180_000;
+}
+
+function rethrowEnvironment(error: unknown): never {
+  if (error instanceof Error && error.message.includes("environment_unavailable")) {
+    throw new Error(
+      "无法连接 192.168.1.102。请确认这台机器在线，并且本机可以用 SSH 登录 john@192.168.1.102。",
+    );
+  }
+  throw error;
+}
 
 export type Cost = {
   raw: number;
@@ -11,7 +38,7 @@ export type Cost = {
   unmeasured?: number;
 };
 
-export type SessionSource = "codex" | "claude" | "cursor" | "pi" | "dsh" | "opencode";
+export type SessionSource = "codex" | "claude" | "cursor" | "pi" | "dsh" | "opencode" | "antigravity";
 
 export type PerformanceBasis = "task" | "request";
 
@@ -452,13 +479,19 @@ export async function getPowerFeed(
   );
 }
 
-export async function listSessions(): Promise<SessionListItem[]> {
-  const body = await requestJson<{ sessions: SessionListItem[] }>(
-    "/sessions",
-    undefined,
-    45_000,
-  );
-  return body.sessions;
+export async function listSessions(opts?: { refresh?: boolean }): Promise<SessionListItem[]> {
+  const params = environmentQuery(new URLSearchParams(), opts?.refresh === true);
+  const query = params.toString();
+  try {
+    const body = await requestJson<{ sessions: SessionListItem[] }>(
+      query ? `/sessions?${query}` : "/sessions",
+      undefined,
+      environmentTimeout(45_000),
+    );
+    return body.sessions;
+  } catch (error) {
+    rethrowEnvironment(error);
+  }
 }
 
 export async function getOverview(
@@ -467,6 +500,7 @@ export async function getOverview(
   source: SessionSourceFilter = "all",
   window?: { sinceMs: number; untilMs: number; days: number },
   model?: string,
+  refresh = false,
 ): Promise<Overview> {
   const query = window
     ? {
@@ -487,7 +521,16 @@ export async function getOverview(
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (timezone) params.set("timezone", timezone);
   if (model) params.set("model", model);
-  return requestJson<Overview>(`/overview?${params.toString()}`);
+  environmentQuery(params, refresh);
+  try {
+    return await requestJson<Overview>(
+      `/overview?${params.toString()}`,
+      undefined,
+      environmentTimeout(20_000),
+    );
+  } catch (error) {
+    rethrowEnvironment(error);
+  }
 }
 
 export type PricingSourceResult = {
@@ -502,7 +545,34 @@ export type ModelPricingUpdate = {
   modelCount: number;
   codex?: PricingSourceResult;
   qwen?: PricingSourceResult;
+  sources?: Array<PricingSourceResult & { id: string; label: string }>;
 };
+
+export type PriceSheetRow = {
+  id: string;
+  input: number;
+  cached: number;
+  output: number;
+  note: string;
+};
+
+export type PriceSheetGroup = {
+  id: string;
+  label: string;
+  asOf: string;
+  unit: "credits" | "usd";
+  unitLabel: string;
+  note: string;
+  rows: PriceSheetRow[];
+};
+
+export type PriceSheet = {
+  groups: PriceSheetGroup[];
+};
+
+export function getPriceSheet(): Promise<PriceSheet> {
+  return requestJson<PriceSheet>("/prices");
+}
 
 export async function updateModelPrices(): Promise<ModelPricingUpdate> {
   try {
@@ -529,6 +599,12 @@ export async function updateModelPrices(): Promise<ModelPricingUpdate> {
     if (message.includes("qwen_pricing_format_changed")) {
       throw new Error("千问官方价格表格式发生变化，未修改本地价格配置。");
     }
+    if (message.includes("_pricing_unavailable")) {
+      throw new Error("无法连接官方价格页，请检查网络后重试。");
+    }
+    if (message.includes("_pricing_format_changed")) {
+      throw new Error("官方价格表格式发生变化，未修改本地价格配置。");
+    }
     if (
       message.includes("rate_card_read_failed") ||
       message.includes("api_prices_read_failed")
@@ -552,21 +628,36 @@ export async function updateModelPrices(): Promise<ModelPricingUpdate> {
 }
 
 export async function getSession(id: string): Promise<SessionSnapshot> {
-  return requestJson<SessionSnapshot>(`/sessions/${encodeURIComponent(id)}`);
+  const query = environmentQuery(new URLSearchParams()).toString();
+  try {
+    return await requestJson<SessionSnapshot>(
+      `/sessions/${encodeURIComponent(id)}${query ? `?${query}` : ""}`,
+      undefined,
+      environmentTimeout(20_000),
+    );
+  } catch (error) {
+    rethrowEnvironment(error);
+  }
 }
 
 export async function patchToggles(
   id: string,
   toggles: Partial<Record<WasteToggleId, boolean>>,
 ): Promise<SessionSnapshot> {
-  return requestJson<SessionSnapshot>(
-    `/sessions/${encodeURIComponent(id)}/waste-toggles`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(toggles),
-    },
-  );
+  const query = environmentQuery(new URLSearchParams()).toString();
+  try {
+    return await requestJson<SessionSnapshot>(
+      `/sessions/${encodeURIComponent(id)}/waste-toggles${query ? `?${query}` : ""}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toggles),
+      },
+      environmentTimeout(20_000),
+    );
+  } catch (error) {
+    rethrowEnvironment(error);
+  }
 }
 
 export async function importNdjson(
@@ -592,7 +683,7 @@ export async function importNdjson(
       throw new Error("文件超过引擎的导入上限，请选择较小的记录。");
     if (status && status < 500)
       throw new Error(
-        "无法识别会话记录，请确认文件来自 Codex、Claude Code、Cursor、pi、DeepSeek Harness 或 OpenCode，且包含有效的 JSONL 内容。",
+        "无法识别会话记录，请确认文件来自 Codex、Claude Code、Cursor、pi、DeepSeek Harness、OpenCode 或 Antigravity，且包含有效的 JSONL 内容。",
       );
     throw new Error(
       "导入结果尚未确认。请先检查会话列表，确认未导入后再重新选择文件。",

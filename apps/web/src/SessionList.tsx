@@ -55,6 +55,7 @@ type Props = {
   onRetry: () => void;
   dayFilter: string | null;
   onClearDayFilter: () => void;
+  environmentLabel?: string;
 };
 
 export function SessionList({
@@ -72,6 +73,7 @@ export function SessionList({
   onRetry,
   dayFilter,
   onClearDayFilter,
+  environmentLabel,
 }: Props) {
   const { unit } = useUnit();
   const now = useNow();
@@ -325,11 +327,15 @@ export function SessionList({
         <StatePanel
           compact
           kind={error ? "error" : "loading"}
-          title={error ? "会话列表加载失败" : "正在读取本地会话"}
+          title={error ? "会话列表加载失败" : environmentLabel && environmentLabel !== "本机" ? `正在读取 ${environmentLabel} 的会话` : "正在读取本地会话"}
           description={
             error
-              ? "请确认本地引擎正在运行，然后重试。"
-              : "首次读取较大的记录可能需要一些时间。"
+              ? environmentLabel && environmentLabel !== "本机"
+                ? "请确认 192.168.1.102 在线，并且本机可以 SSH 登录，然后重试。"
+                : "请确认本地引擎正在运行，然后重试。"
+              : environmentLabel && environmentLabel !== "本机"
+                ? "首次从这台机器同步会话可能需要一两分钟。"
+                : "首次读取较大的记录可能需要一些时间。"
           }
         >
           {error && <Button onClick={onRetry}>重试</Button>}

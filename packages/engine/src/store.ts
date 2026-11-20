@@ -12,6 +12,7 @@ import {
   snapshotFromEvents,
   type IngestOptions,
 } from "./ingest.ts";
+import { readCursorSessionsCooperative } from "./cursor-store.ts";
 import { isLive, pruneStaleCache } from "./cache.ts";
 import { isSessionFile } from "./session-files.ts";
 import { summarizeSessions } from "./performance.ts";
@@ -775,7 +776,9 @@ export class SessionStore {
     } catch {
       // Missing file: the parse below reports the failure.
     }
-    const groups = readMultiSessionEvents(filePath);
+    const groups = filePath.endsWith(".vscdb")
+      ? await readCursorSessionsCooperative(filePath)
+      : readMultiSessionEvents(filePath);
     if (!groups) return this.ingestPath(filePath, opts);
     const batchSize = Math.max(1, opts?.batchSize ?? 20);
     const previousIds = new Set(this.sourcesByPath.get(resolved) ?? []);
@@ -823,10 +826,15 @@ export class SessionStore {
     }
     if (changedDuringRun) {
       // Commits landed while batches were processing: keep the input
-      // fingerprint so the change is detected, and refresh once more.
+      // fingerprint so the change is detected. A live SQLite WAL never sits
+      // still, so an immediate refresh parses the same database forever and
+      // session requests wait behind it. The cooldown is the same one the
+      // watcher already uses.
       if (startFingerprint) this.fingerprints.set(resolved, startFingerprint);
       else this.fingerprints.delete(resolved);
-      this.scheduleBatchedRefresh(filePath, opts);
+      const sqlite = resolved.endsWith(".vscdb") || path.basename(resolved) === "opencode.db";
+      if (sqlite) this.sqliteIngestAt.set(resolved, Date.now());
+      this.scheduleBatchedRefresh(filePath, opts, sqlite ? SQLITE_WAL_REPARSE_COOLDOWN_MS : 0);
     } else {
       this.rememberFingerprint(filePath);
     }
@@ -840,6 +848,7 @@ export class SessionStore {
       batchSize?: number;
       onBatch?: (ids: string[]) => void;
     },
+    delayMs = 0,
   ): void {
     const resolved = path.resolve(filePath);
     if (this.batchedRefreshPending.has(resolved)) return;
@@ -847,7 +856,7 @@ export class SessionStore {
     const timer = setTimeout(() => {
       this.batchedRefreshPending.delete(resolved);
       void this.ingestPathBatched(filePath, opts).catch(() => undefined);
-    }, 0);
+    }, delayMs);
     timer.unref?.();
   }
 

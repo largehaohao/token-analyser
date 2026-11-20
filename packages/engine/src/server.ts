@@ -1,5 +1,6 @@
 import "./node-guard.ts";
 import http from "node:http";
+import { execFile } from "node:child_process";
 import {
   chmodSync,
   createReadStream,
@@ -24,7 +25,20 @@ import {
   updateQwenPricesFromOfficial,
   type QwenPricingUpdateOptions,
 } from "./qwen-pricing.ts";
+import {
+  restorePriceCatalog,
+  startCatalogAutoRefresh,
+  updateCatalogFromOfficial,
+  type CatalogUpdateOptions,
+} from "./price-catalog.ts";
+import { buildPriceSheet } from "./price-sheet.ts";
 import { SessionStore, type SessionIngestOptions } from "./store.ts";
+import {
+  EnvironmentRequestError,
+  RemoteEnvironmentHub,
+  SESSION_ENVIRONMENTS,
+  type SessionEnvironmentSource,
+} from "./environments.ts";
 import { withPricingLock } from "./pricing-lock.ts";
 import { fetchPowerRange } from "./power.ts";
 import { fetchTempSnapshot, fetchTempHistory } from "./temps.ts";
@@ -43,6 +57,61 @@ const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
 const MAX_SSE_BUFFER_BYTES = 1024 * 1024;
 
 type SseEvent = "session_added" | "session_updated" | "session_error";
+
+
+export function isTokenAnalyserEngineCommand(command: string): boolean {
+  return (
+    command.includes("start-engine.mjs") ||
+    command.includes("packages/engine/src/server.ts") ||
+    command.includes("--import tsx src/server.ts") ||
+    command.includes("--import tsx src\\server.ts")
+  );
+}
+
+function execFileText(command: string, args: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(command, args, { timeout: 2000 }, (err, stdout) => {
+      resolve(err ? "" : String(stdout));
+    });
+  });
+}
+
+/** A previous engine that never exited holds the port and the store lock. */
+export async function signalStaleEngine(port: number): Promise<string[]> {
+  if (process.platform === "win32") return [];
+  const stopped: string[] = [];
+  const listed = await execFileText("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
+  for (const pid of listed.split("\n").map((item) => item.trim()).filter(Boolean)) {
+    if (pid === String(process.pid) || pid === String(process.ppid)) continue;
+    const command = (await execFileText("ps", ["-p", pid, "-o", "command="])).trim();
+    if (!isTokenAnalyserEngineCommand(command)) continue;
+    try {
+      process.kill(Number(pid), "SIGTERM");
+      stopped.push(pid);
+      console.error(`token-analyser restart: stopping previous engine pid ${pid}`);
+    } catch {
+      // It already exited.
+    }
+  }
+  return stopped;
+}
+
+async function waitForExit(pids: string[], timeoutMs = 60_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const alive = pids.filter((pid) => {
+      try {
+        process.kill(Number(pid), 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (alive.length === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  console.error("token-analyser restart: previous engine is still exiting; continuing");
+}
 
 const WASTE_TOGGLE_IDS = new Set<WasteToggleId>([
   "poll",
@@ -483,61 +552,112 @@ async function runPricingUpdate(
   store: SessionStore,
   pricingUpdate?: PricingUpdateOptions,
   qwenPricingUpdate?: QwenPricingUpdateOptions,
+  catalogUpdate?: CatalogUpdateOptions,
 ): Promise<{ error?: string; body?: Record<string, unknown> }> {
-  let codex: PricingSourceResult;
-  let codexPrevious: string | undefined;
-  try {
-    const result = await updateRateCardFromOfficial(pricingUpdate);
-    codex = { status: "ok", asOf: result.asOf, modelCount: result.modelCount };
-    codexPrevious = result.previousContent;
-  } catch (err) {
-    codex = {
-      status: err instanceof Error && err.message
-        ? err.message
-        : "official_pricing_unavailable",
-    };
-  }
+  const catalogEnabled = catalogUpdate?.enabled !== false;
+  const [codexUpdate, qwenUpdate, catalogUpdateResult] = await Promise.all([
+    (async () => {
+      try {
+        const result = await updateRateCardFromOfficial(pricingUpdate);
+        return {
+          source: { status: "ok", asOf: result.asOf, modelCount: result.modelCount } satisfies PricingSourceResult,
+          previous: result.previousContent,
+        };
+      } catch (err) {
+        return {
+          source: {
+            status: err instanceof Error && err.message
+              ? err.message
+              : "official_pricing_unavailable",
+          } satisfies PricingSourceResult,
+          previous: undefined,
+        };
+      }
+    })(),
+    (async () => {
+      try {
+        const result = await updateQwenPricesFromOfficial(qwenPricingUpdate);
+        return {
+          source: { status: "ok", asOf: result.asOf, modelCount: result.modelCount } satisfies PricingSourceResult,
+          previous: result.previousContent,
+        };
+      } catch (err) {
+        return {
+          source: {
+            status: err instanceof Error && err.message
+              ? err.message
+              : "qwen_pricing_unavailable",
+          } satisfies PricingSourceResult,
+          previous: undefined,
+        };
+      }
+    })(),
+    (async () => {
+      if (!catalogEnabled) return null;
+      try {
+        return await updateCatalogFromOfficial(catalogUpdate);
+      } catch (err) {
+        return {
+          failed: err instanceof Error && err.message ? err.message : "catalog_read_failed",
+        };
+      }
+    })(),
+  ]);
 
-  let qwen: PricingSourceResult;
-  let qwenPrevious: string | undefined;
-  try {
-    const result = await updateQwenPricesFromOfficial(qwenPricingUpdate);
-    qwen = { status: "ok", asOf: result.asOf, modelCount: result.modelCount };
-    qwenPrevious = result.previousContent;
-  } catch (err) {
-    qwen = {
-      status: err instanceof Error && err.message
-        ? err.message
-        : "qwen_pricing_unavailable",
-    };
-  }
-
-  if (codex.status !== "ok" && qwen.status !== "ok") {
-    return { error: codex.status };
+  const codex = codexUpdate.source;
+  const qwen = qwenUpdate.source;
+  const catalogSources = catalogUpdateResult && "sources" in catalogUpdateResult
+    ? catalogUpdateResult.sources
+    : [];
+  const catalogOk = catalogSources.some((source) => source.status === "ok");
+  if (codex.status !== "ok" && qwen.status !== "ok" && !catalogOk) {
+    const catalogStatus = catalogUpdateResult && "failed" in catalogUpdateResult
+      ? catalogUpdateResult.failed
+      : catalogSources.find((source) => source.status !== "ok")?.status;
+    return { error: codex.status !== "ok" ? codex.status : catalogStatus ?? qwen.status };
   }
 
   try {
     store.refreshPricing();
   } catch {
     try {
-      if (codexPrevious) restoreRateCard(codexPrevious, pricingUpdate?.rateCardPath);
-      if (qwenPrevious) restoreApiPrices(qwenPrevious, qwenPricingUpdate?.apiPricesPath);
+      if (codexUpdate.previous) restoreRateCard(codexUpdate.previous, pricingUpdate?.rateCardPath);
+      if (qwenUpdate.previous) restoreApiPrices(qwenUpdate.previous, qwenPricingUpdate?.apiPricesPath);
+      if (catalogUpdateResult && "previousContent" in catalogUpdateResult && catalogUpdateResult.changed) {
+        restorePriceCatalog(catalogUpdateResult.previousContent, catalogUpdate?.catalogPath);
+      }
     } catch {
       return { error: "pricing_recalculation_rollback_failed" };
     }
     return { error: "pricing_recalculation_failed" };
   }
 
-  return { body: { asOf: codex.asOf, modelCount: codex.modelCount, codex, qwen } };
+  const body: Record<string, unknown> = {
+    asOf: codex.asOf ?? "",
+    modelCount: codex.modelCount ?? 0,
+    codex,
+    qwen,
+  };
+  if (catalogEnabled) {
+    body.sources = [
+      { id: "codex", label: "Codex", ...codex },
+      { id: "qwen", label: "千问", ...qwen },
+      ...catalogSources,
+    ];
+  }
+  return { body };
 }
 
 export async function startServer(opts?: {
   port?: number;
   store?: SessionStore;
+  /** Remote session mirrors. Tests inject a hub that does not open SSH. */
+  environmentHub?: SessionEnvironmentSource;
   staticDir?: string;
   maxImportBytes?: number;
   pricingUpdate?: PricingUpdateOptions;
   qwenPricingUpdate?: QwenPricingUpdateOptions;
+  catalogUpdate?: CatalogUpdateOptions;
   /** Retry bind when the previous process still holds the port during dump. */
   listenRetry?: { retries?: number; retryMs?: number };
 }): Promise<{
@@ -546,6 +666,22 @@ export async function startServer(opts?: {
   onIngestError: (id: string, reason: string) => void;
 }> {
   const store = opts?.store ?? new SessionStore();
+  const environmentHub = opts?.environmentHub ?? new RemoteEnvironmentHub();
+
+  async function resolveSessionStore(reqUrl: string | undefined): Promise<SessionStore> {
+    const env = new URL(reqUrl ?? "/", "http://localhost").searchParams.get("env");
+    if (env == null || env === "" || env === "local") return store;
+    try {
+      const force = new URL(reqUrl ?? "/", "http://localhost").searchParams.get("refresh") === "1";
+      return await environmentHub.prepare(env, { force });
+    } catch (err) {
+      if (err instanceof EnvironmentRequestError) throw err;
+      console.error(
+        `environment ${env}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new EnvironmentRequestError(502, "environment_unavailable");
+    }
+  }
   const staticDir = opts?.staticDir;
   const maxImportBytes = opts?.maxImportBytes ?? MAX_IMPORT_BYTES;
   const port =
@@ -620,8 +756,19 @@ export async function startServer(opts?: {
       return;
     }
 
+    if (req.method === "GET" && parts[0] === "environments" && parts.length === 1) {
+      sendJson(res, 200, { environments: SESSION_ENVIRONMENTS });
+      return;
+    }
+
+    if (req.method === "GET" && parts[0] === "prices" && parts.length === 1) {
+      sendJson(res, 200, buildPriceSheet());
+      return;
+    }
+
     if (req.method === "GET" && parts[0] === "sessions" && parts.length === 1) {
-      sendJson(res, 200, { sessions: store.list() });
+      const active = await resolveSessionStore(req.url);
+      sendJson(res, 200, { sessions: active.list() });
       return;
     }
 
@@ -642,7 +789,7 @@ export async function startServer(opts?: {
       }
 
       const update = await withPricingLock(() =>
-        runPricingUpdate(store, opts?.pricingUpdate, opts?.qwenPricingUpdate),
+        runPricingUpdate(store, opts?.pricingUpdate, opts?.qwenPricingUpdate, opts?.catalogUpdate),
       );
 
       if (update.error) {
@@ -662,7 +809,7 @@ export async function startServer(opts?: {
       const untilRaw = url.searchParams.get("until");
       const daysRaw = url.searchParams.get("days");
       const source = url.searchParams.get("source");
-      if (source != null && source !== "all" && source !== "codex" && source !== "claude" && source !== "cursor" && source !== "pi" && source !== "dsh" && source !== "opencode") {
+      if (source != null && source !== "all" && source !== "codex" && source !== "claude" && source !== "cursor" && source !== "pi" && source !== "dsh" && source !== "opencode" && source !== "antigravity") {
         sendJson(res, 400, { error: "invalid_source" });
         return;
       }
@@ -675,12 +822,14 @@ export async function startServer(opts?: {
       const timezoneOffsetMinutes = timezoneRaw
         ? Number(timezoneRaw)
         : Number.NaN;
+      const active = await resolveSessionStore(req.url);
+      const env = url.searchParams.get("env");
       sendJson(
         res,
         200,
-        store.overview({
+        active.overview({
           ...(source && source !== "all" ? { source } : {}),
-          watchPath: config.watch_paths.join("\n"),
+          watchPath: env && env !== "local" ? env : config.watch_paths.join("\n"),
           collecting: process.env.FIXTURE_DIR == null,
           ...(Number.isFinite(sinceMs) ? { sinceMs } : {}),
           ...(Number.isFinite(untilMs) && Number.isFinite(sinceMs) && untilMs > sinceMs
@@ -823,7 +972,8 @@ export async function startServer(opts?: {
     }
 
     if (req.method === "GET" && parts[0] === "sessions" && parts.length === 2) {
-      const snap = store.get(parts[1]!);
+      const active = await resolveSessionStore(req.url);
+      const snap = active.get(parts[1]!);
       if (!snap) {
         sendJson(res, 404, { error: "not_found" });
         return;
@@ -839,7 +989,8 @@ export async function startServer(opts?: {
       parts[2] === "waste-toggles"
     ) {
       const id = parts[1]!;
-      const snap = store.get(id);
+      const active = await resolveSessionStore(req.url);
+      const snap = active.get(id);
       if (!snap) {
         sendJson(res, 404, { error: "not_found" });
         return;
@@ -860,8 +1011,8 @@ export async function startServer(opts?: {
         return;
       }
 
-      store.setToggles(id, partial);
-      sendJson(res, 200, store.get(id));
+      active.setToggles(id, partial);
+      sendJson(res, 200, active.get(id));
       return;
     }
 
@@ -894,6 +1045,8 @@ export async function startServer(opts?: {
     } catch (err) {
       if (res.headersSent) {
         res.destroy(err instanceof Error ? err : undefined);
+      } else if (err instanceof EnvironmentRequestError) {
+        sendJson(res, err.status, { error: err.code });
       } else if ((err as { status?: number }).status === 413) {
         sendJson(res, 413, { error: "payload_too_large" });
       } else {
@@ -920,7 +1073,16 @@ export async function startServer(opts?: {
       break;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code !== "EADDRINUSE" || attempt >= listenRetries) throw err;
+      if (code !== "EADDRINUSE" || attempt >= listenRetries) {
+        if (code === "EADDRINUSE") {
+          throw new Error(
+            `token-analyser cannot listen on 127.0.0.1:${port} because the address is already in use. ` +
+            "Stop the process holding the port and start again.",
+          );
+        }
+        throw err;
+      }
+      if (attempt === 0) await signalStaleEngine(port);
       await new Promise((resolve) => setTimeout(resolve, listenRetryMs));
     }
   }
@@ -1030,6 +1192,12 @@ async function main(): Promise<void> {
       }
     }
   } else {
+    const listenPort = process.env.PORT
+      ? Number.parseInt(process.env.PORT, 10) || DEFAULT_PORT
+      : DEFAULT_PORT;
+    // The previous process owns store.db. Stop it and wait until its dump
+    // finishes, or this start dies with "database is locked".
+    await waitForExit(await signalStaleEngine(listenPort));
     // Warm start: restore dump first so the UI has sessions immediately.
     // Cursor's state.vscdb is often hundreds of MB and stays dirty while the
     // app is open — defer that re-parse until after the server is listening
@@ -1152,7 +1320,7 @@ async function main(): Promise<void> {
     }
     // Qwen publishes new rates without warning the local ledger, so refresh
     // them automatically and keep every estimate on the dated official card.
-    startQwenPriceAutoRefresh(store, {
+    const stopQwenPriceRefresh = startQwenPriceAutoRefresh(store, {
       onUpdate: ({ asOf, modelCount }) => {
         console.log(`qwen prices refreshed: ${modelCount} models (${asOf})`);
         try {
@@ -1164,6 +1332,19 @@ async function main(): Promise<void> {
         }
       },
       onError: (reason) => console.error(`qwen price refresh failed: ${reason}`),
+    });
+    const stopCatalogRefresh = startCatalogAutoRefresh(store, {
+      onUpdate: ({ modelCount }) => {
+        console.log(`catalog prices refreshed: ${modelCount} models`);
+        try {
+          store.dump();
+        } catch (err) {
+          console.error(
+            `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
+      onError: (reason) => console.error(`catalog price refresh failed: ${reason}`),
     });
 
     // Codex writes append-only JSONL files below dated directories. On macOS,
@@ -1189,6 +1370,8 @@ async function main(): Promise<void> {
     const dumpAndExit = (code: number) => {
       if (shuttingDown) return;
       shuttingDown = true;
+      stopQwenPriceRefresh();
+      stopCatalogRefresh();
       clearInterval(dumpTimer);
       void gracefulShutdown({
         close,

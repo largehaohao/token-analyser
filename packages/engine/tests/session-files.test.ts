@@ -19,6 +19,9 @@ describe("default source discovery", () => {
     expect(roots).toContain(path.join("/custom/pi", "sessions"));
     expect(roots).toContain(path.join("/custom/dsh", "sessions"));
     expect(roots).toContain(path.join("/custom/xdg", "opencode", "opencode.db"));
+    expect(roots).toContain(path.join(homedir(), ".gemini", "antigravity", "brain"));
+    expect(roots).toContain(path.join(homedir(), ".gemini", "antigravity-cli", "brain"));
+    expect(roots).toContain(path.join(homedir(), ".gemini", "antigravity-ide", "brain"));
     expect(roots).toContain(path.join(homedir(), ".cursor/projects"));
     expect(roots).toContain(path.join(homedir(), ".cursor/chats"));
     expect(roots.some((root) => root.endsWith(path.join("Cursor/User/globalStorage", "state.vscdb")))).toBe(true);

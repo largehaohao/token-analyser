@@ -262,6 +262,7 @@ describe("updateRateCardFromOfficial", () => {
         fetcher: mockedFetch(),
         now: new Date(2026, 8, 23, 12),
       },
+      catalogUpdate: { enabled: false },
       qwenPricingUpdate: {
         apiPricesPath,
         fetcher: mockedQwenFetch(),
@@ -342,6 +343,7 @@ describe("updateRateCardFromOfficial", () => {
         rateCardPath,
         fetcher: async () => new Response("down", { status: 503 }),
       },
+      catalogUpdate: { enabled: false },
       qwenPricingUpdate: {
         apiPricesPath,
         fetcher: mockedQwenFetch(),

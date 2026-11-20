@@ -12,6 +12,7 @@ import {
 import type { ParseError, RolloutLine, SessionSnapshot } from "./types.ts";
 import { effectiveRateCard } from "./rate-card.ts";
 import { loadApiPrices } from "./native-pricing.ts";
+import { loadPriceCatalog } from "./price-catalog.ts";
 import { detectSource } from "./session-adapters.ts";
 import { readCursorSessions } from "./cursor-store.ts";
 import { readOpenCodeSessions } from "./opencode-store.ts";
@@ -72,7 +73,7 @@ function readJsonlFileDetailed(
           });
         }
       }
-      offset += newline + 1;
+      offset += lineBytes.length + 1;
       scannedInLast = 0;
     }
   };
@@ -259,7 +260,19 @@ export function ingestFile(
 }
 
 export function pricingCacheContext(): string {
-  return JSON.stringify([effectiveRateCard(), loadApiPrices()]);
+  const card = effectiveRateCard();
+  const prices = loadApiPrices();
+  const catalog = loadPriceCatalog();
+  // Dates and page URLs are audit metadata. Only the numbers that change a
+  // quote belong in the cache key, or a daily refresh reparses every session.
+  return JSON.stringify([
+    card.usd_per_credit,
+    card.fast_multiplier,
+    card.models,
+    prices.models,
+    catalog.models,
+    catalog.aliases,
+  ]);
 }
 
 /** A Cursor or OpenCode database contains many sessions; JSONL contains one. */

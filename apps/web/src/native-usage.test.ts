@@ -20,5 +20,6 @@ describe("native usage presentation", () => {
     expect(sourceLabel("cursor")).toBe("Cursor"); expect(sourceLabel("pi")).toBe("pi");
     expect(sourceLabel("dsh")).toBe("DeepSeek Harness");
     expect(sourceLabel("opencode")).toBe("OpenCode");
+    expect(sourceLabel("antigravity")).toBe("Antigravity");
   });
 });

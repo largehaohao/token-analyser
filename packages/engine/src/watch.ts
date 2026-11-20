@@ -2,7 +2,7 @@ import { watch, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { loadUserConfig } from "./config.ts";
 import type { SessionStore } from "./store.ts";
-import { isSessionFile } from "./session-files.ts";
+import { isDiscoveredSessionFile, isSessionFile } from "./session-files.ts";
 
 export type WatchOptions = {
   watchPaths?: string[];
@@ -70,7 +70,7 @@ export function watchSessions(
   }
 
   function ingestIfSession(fullPath: string): void {
-    if (!isSessionFile(fullPath)) return;
+    if (!isDiscoveredSessionFile(fullPath)) return;
     if (!existsSync(fullPath)) {
       observedFiles.delete(fullPath);
       const removed = store.removePath(fullPath);
@@ -105,7 +105,7 @@ export function watchSessions(
       return 5_000;
     }
     try {
-      if (statSync(fullPath).size >= 10 * 1024 * 1024) return 2_000;
+      if (statSync(fullPath).size >= 1024 * 1024) return 5_000;
     } catch {
       // Missing files still go through remove handling promptly.
     }
@@ -114,7 +114,7 @@ export function watchSessions(
 
   function scheduleIngest(fullPath: string, delayMs?: number): void {
     fullPath = sessionPath(fullPath);
-    if (!isSessionFile(fullPath)) return;
+    if (!isDiscoveredSessionFile(fullPath)) return;
     const previous = pending.get(fullPath);
     if (previous) clearTimeout(previous);
     const timer = setTimeout(() => {
@@ -200,7 +200,8 @@ export function watchSessions(
           continue;
         }
         for (const entry of entries) {
-          if (isSessionFile(entry)) scheduleIfChanged(path.join(dir, entry));
+          const full = path.join(dir, entry);
+          if (isDiscoveredSessionFile(full)) scheduleIfChanged(full);
         }
       }
     }
