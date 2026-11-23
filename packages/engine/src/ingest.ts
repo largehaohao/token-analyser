@@ -33,50 +33,42 @@ function readJsonlFileDetailed(
   startOffset = 0,
   initialRest: Buffer<ArrayBufferLike> = Buffer.alloc(0),
   chunkBytes = READ_CHUNK_BYTES,
+  finalized = false,
 ): JsonlReadDetails {
   const events: RolloutLine[] = [];
   const parse_errors: ParseError[] = [];
   let offset = startOffset;
   let position = startOffset + initialRest.length;
-  // Keep chunks separately and remember how far each was scanned. Concatenating
-  // the whole pending line on every read made large tool-output records
-  // quadratic in both copying and newline search.
+  // Complete lines stay in the current chunk. A line that spans multiple
+  // reads is joined only once, after finding its newline or reaching EOF.
   const chunks: Buffer<ArrayBufferLike>[] = initialRest.length > 0 ? [initialRest] : [];
-  let scannedInLast = 0;
-  let pendingLength = initialRest.length;
-
-  const consumeCompleteLines = (): void => {
-    while (true) {
-      let newline = -1;
-      let newlineInChunk = -1;
-      for (let index = 0; index < chunks.length; index += 1) {
-        const found = chunks[index]!.indexOf(0x0a, index === 0 ? scannedInLast : 0);
-        if (found !== -1) {
-          newline = found;
-          newlineInChunk = index;
-          break;
-        }
-      }
-      if (newline === -1) return;
-      const lineBytes = Buffer.concat(chunks.slice(0, newlineInChunk).concat(chunks[newlineInChunk]!.subarray(0, newline)));
-      chunks.splice(0, newlineInChunk);
-      chunks[0] = chunks[0]!.subarray(newline + 1);
-      pendingLength -= lineBytes.length + 1;
-      const line = lineBytes.toString("utf8");
-      if (line.trim() !== "") {
-        try {
-          events.push(parseJsonlLine(line.replace(/\r$/, "")));
-        } catch (err) {
-          parse_errors.push({
-            offset,
-            message: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-      offset += lineBytes.length + 1;
-      scannedInLast = 0;
+  function parseLine(bytes: Buffer<ArrayBufferLike>, isTail = false): boolean {
+    const text = bytes.toString("utf8").replace(/\r$/, "");
+    if (!text.trim()) return true;
+    try {
+      events.push(parseJsonlLine(text));
+      return true;
+    } catch (error) {
+      if (!finalized && isTail) return false;
+      parse_errors.push({
+        offset,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return true;
     }
-  };
+  }
+  function consume(chunk: Buffer<ArrayBufferLike>): void {
+    let start = 0;
+    for (let newline = chunk.indexOf(0x0a); newline !== -1; newline = chunk.indexOf(0x0a, start)) {
+      const end = chunk.subarray(start, newline);
+      const line = chunks.length ? Buffer.concat([...chunks, end]) : end;
+      chunks.length = 0;
+      parseLine(line);
+      offset += line.length + 1;
+      start = newline + 1;
+    }
+    if (start < chunk.length) chunks.push(chunk.subarray(start));
+  }
 
   const fd = openSync(filePath, "r");
   const buf = Buffer.alloc(chunkBytes);
@@ -85,29 +77,21 @@ function readJsonlFileDetailed(
       const n = readSync(fd, buf, 0, buf.length, position);
       if (n === 0) break;
       position += n;
-      chunks.push(Buffer.from(buf.subarray(0, n)));
-      pendingLength += n;
-      consumeCompleteLines();
+      consume(Buffer.from(buf.subarray(0, n)));
     }
   } finally {
     closeSync(fd);
   }
 
-  // A complete JSON object is valid without a trailing newline. A failed
-  // parse is kept as a tail because a live writer may still append to it.
-  if (pendingLength > 0) {
-    const pending = Buffer.concat(chunks);
-    try {
-      events.push(parseJsonlLine(pending.toString("utf8").replace(/\r$/, "")));
-      offset += pending.length;
-      chunks.length = 0;
-      pendingLength = 0;
-    } catch {
-      // Wait for the next write to complete the final line.
-    }
+  // A final complete event is valid without a newline. Only a file that can
+  // still grow keeps an incomplete event so a later read can finish it.
+  if (chunks.length === 0) return { events, parse_errors, offset, rest: Buffer.alloc(0) };
+  const pendingTail = Buffer.concat(chunks);
+  if (parseLine(pendingTail, true)) {
+    offset += pendingTail.length;
+    return { events, parse_errors, offset, rest: Buffer.alloc(0) };
   }
-
-  return { events, parse_errors, offset, rest: Buffer.concat(chunks) };
+  return { events, parse_errors, offset, rest: pendingTail };
 }
 
 export function readJsonlFile(
@@ -127,6 +111,8 @@ export type IngestOptions = {
   cacheHome?: string;
   /** The watcher observes append-only rollout files. Direct imports default to a full reread. */
   allowAppend?: boolean;
+  /** An uploaded copy is complete even when its filesystem mtime is recent. */
+  finalized?: boolean;
 };
 
 type LiveReadState = JsonlReadDetails & {
@@ -165,13 +151,14 @@ export function ingestFile(
   opts?: IngestOptions,
 ): SessionSnapshot {
   const st = statSync(filePath);
-  const live = isLive(st.mtimeMs);
+  const live = !opts?.finalized && isLive(st.mtimeMs);
+  const finalized = opts?.finalized ? { finalized: true as const } : {};
   const key = cacheKey(filePath, pricingCacheContext());
 
   if (!live) {
     const cached = readCache(key, opts?.cacheHome);
     if (cached) {
-      return { ...cached, live, path: filePath };
+      return { ...cached, live, path: filePath, ...finalized };
     }
   }
 
@@ -189,7 +176,7 @@ export function ingestFile(
       // is a normal write-in-progress and completes on the next update.
       parse_errors.push({ offset: read.truncatedAt, message: "zstd_frame_incomplete" });
     }
-    const snapshot = analyseSession({ events, path: filePath, live, parse_errors });
+    const snapshot = { ...analyseSession({ events, path: filePath, live, parse_errors }), ...finalized };
     if (!live && !read.truncated) writeCache(key, snapshot, opts?.cacheHome);
     return snapshot;
   }
@@ -237,17 +224,20 @@ export function ingestFile(
     });
   } else {
     liveReadStates.delete(filePath);
-    const details = readJsonlFileDetailed(filePath);
+    const details = readJsonlFileDetailed(filePath, 0, undefined, READ_CHUNK_BYTES, !live);
     events = details.events;
     parse_errors = details.parse_errors;
   }
-  const snapshot = analyseSession({
-    events,
-    path: filePath,
-    live,
-    parse_errors,
-    ...(builder ? { ledgerBuilder: builder } : {}),
-  });
+  const snapshot = {
+    ...analyseSession({
+      events,
+      path: filePath,
+      live,
+      parse_errors,
+      ...(builder ? { ledgerBuilder: builder } : {}),
+    }),
+    ...finalized,
+  };
 
   // A pi fork's inherited spend depends on whether its parent file exists.
   // Caching the child alone can make a parent arriving later invisible forever.

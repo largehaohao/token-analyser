@@ -356,7 +356,7 @@ function canonicalModelId(catalog: PriceCatalog, model: string): string | undefi
  * Vitest starts the server against the repo catalog, so it never fetches.
  */
 export function startCatalogAutoRefresh(
-  store: { refreshPricing(): number },
+  store: { refreshPricing(): number | Promise<number> },
   opts: {
     intervalMs?: number;
     update?: typeof updateCatalogFromOfficial;
@@ -378,27 +378,30 @@ export function startCatalogAutoRefresh(
   async function tick(): Promise<void> {
     if (stopped) return;
     try {
-      const specs = loadPublisherSpecs();
-      if (!isPriceCatalogStale(loadPriceCatalog(), specs)) return;
-      const update = await withPricingLock(() => refresh());
-      if (stopped) {
-        restorePriceCatalog(update.previousContent);
-        return;
-      }
-      if (!update.changed) return;
-      try {
-        store.refreshPricing();
-      } catch (error) {
-        try {
+      await withPricingLock(async () => {
+        if (stopped) return;
+        const specs = loadPublisherSpecs();
+        if (!isPriceCatalogStale(loadPriceCatalog(), specs)) return;
+        const update = await refresh();
+        if (stopped) {
           restorePriceCatalog(update.previousContent);
-        } catch {
-          opts.onError?.("pricing_recalculation_rollback_failed");
           return;
         }
-        throw error;
-      }
-      const modelCount = update.sources.reduce((sum, source) => sum + (source.modelCount ?? 0), 0);
-      opts.onUpdate?.({ modelCount });
+        if (!update.changed) return;
+        try {
+          await store.refreshPricing();
+        } catch (error) {
+          try {
+            restorePriceCatalog(update.previousContent);
+          } catch {
+            opts.onError?.("pricing_recalculation_rollback_failed");
+            return;
+          }
+          throw error;
+        }
+        const modelCount = update.sources.reduce((sum, source) => sum + (source.modelCount ?? 0), 0);
+        opts.onUpdate?.({ modelCount });
+      });
     } catch (error) {
       opts.onError?.(error instanceof Error ? error.message : String(error));
     }

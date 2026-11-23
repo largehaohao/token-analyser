@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadPriceCatalog } from "../src/price-catalog.ts";
 import { ingestFile } from "../src/ingest.ts";
 import { collectSessionFiles } from "../src/session-files.ts";
 import { isTokenAnalyserEngineCommand } from "../src/server.ts";
@@ -89,7 +90,11 @@ describe("antigravity sessions", () => {
     expect(snap.turns[1]?.requestPerformance?.ttftMs).toBeNull();
     expect(snap.cost.raw).toBe(180);
     expect(snap.cost.credits).toBeNull();
-    expect(snap.cost.usd).toBeNull();
+    const gemini = loadPriceCatalog().models["gemini-3.8-flash"]!;
+    const expectedUsd = snap.turns.filter((turn) => turn.usageRecorded).reduce((total, turn) =>
+      total + (turn.cost.uncached_input * gemini.input + turn.cost.cached_input * gemini.cached +
+        turn.cost.output * gemini.output) / 1e6, 0);
+    expect(snap.cost.usd).toBeCloseTo(expectedUsd, 10);
     expect(snap.cost.unmeasured).toBe(1);
     expect(snap.performance?.avgTtftMs).toBeNull();
     expect(snap.performance?.outputTokensPerSecond).toBe(10);

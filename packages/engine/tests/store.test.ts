@@ -412,7 +412,7 @@ describe("watchSessions", () => {
     const store = {
       canSkipStartupIngest: () => true,
       sqliteWalReparseDelayMs: () => (reingested ? undefined : 30_000),
-      ingestPath,
+      ingestPathBatched: ingestPath,
       removePath: () => undefined,
     } as unknown as SessionStore;
 
@@ -442,7 +442,7 @@ describe("watchSessions", () => {
     const store = {
       canSkipStartupIngest: () => true,
       sqliteWalReparseDelayMs: () => undefined,
-      ingestPath,
+      ingestPathBatched: ingestPath,
       removePath: () => undefined,
     } as unknown as SessionStore;
 

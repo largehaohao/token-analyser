@@ -226,14 +226,17 @@ function guardMessage(tone: string, sample: TempSampleDto | null): string {
   if (!sample || tone === "idle")
     return "正在确认采集。停机线如下，返回前不显示温度数字。";
   if (tone === "stale") return "上次采样已保留，温度数字可能已经过期。";
-  if (tone === "over") return "告警：至少一路温度已超过停机线。";
+  const incomplete = sample.gpus.some((gpu) =>
+    Object.values(gpu.temperatures).some((sensor) => sensor.value == null));
+  const missing = incomplete ? "部分传感器暂无读数。" : "";
+  if (tone === "over") return `告警：至少一路温度已超过停机线。${missing}`;
   if (tone === "warm")
-    return `注意：至少一路温度距停机线不超过 ${WARM_MARGIN_C}°C。`;
+    return `注意：至少一路温度距停机线不超过 ${WARM_MARGIN_C}°C。${missing}`;
+  if (tone === "cpu-only") return "在线，已读取 CPU 温度。本机未报告 GPU 传感器。";
   if (tone === "missing") return "在线，但部分传感器没有读数，缺失项显示为 —。";
   if (sample.cpu.status !== "available")
     return "在线，CPU 读数不完整，缺失项显示为 —。";
   const count = sample.gpus.length;
-  if (count === 0) return "在线：本机未报告 GPU，CPU 温度在停机线以下。";
   return `在线：${count === 2 ? "双卡" : `${count} 张显卡`}温度都在停机线以下。`;
 }
 
@@ -293,7 +296,7 @@ function colorFor(palette: ChartPalette, swatch: Swatch): string {
   return palette.violet;
 }
 
-export function SystemTemperaturePage({ now }: { now: number }) {
+export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; refreshKey?: number }) {
   const [samples, setSamples] = useState<TempSampleDto[]>([]);
   const [latest, setLatest] = useState<TempSampleDto | null>(null);
   const [link, setLink] = useState<LinkState>("unknown");
@@ -305,7 +308,12 @@ export function SystemTemperaturePage({ now }: { now: number }) {
   const [period, setPeriod] = useState<TempPeriodId>(3600);
   const [clock, setClock] = useState(() => Date.now());
   const [palette, setPalette] = useState<ChartPalette>(FALLBACK_PALETTE);
-  const historyRetry = useRef(0);
+  const [historyAttempt, setHistoryAttempt] = useState(0);
+  const historySeconds = Math.max(period, HISTORY_SECONDS);
+  const lastPollRefresh = useRef(refreshKey);
+  const lastHistoryRequest = useRef({ refreshKey, historyAttempt });
+  const retriedHistoryScope = useRef<string | null>(null);
+  const historyScope = `${historySeconds}:${refreshKey}`;
 
   useEffect(() => {
     setClock((current) => (now > current ? now : current));
@@ -327,58 +335,18 @@ export function SystemTemperaturePage({ now }: { now: number }) {
 
   useEffect(() => {
     let stopped = false;
-    const historyController = new AbortController();
     const pollController = new AbortController();
-    const pollOk = { current: null as boolean | null };
     let busy = false;
+    const refresh = lastPollRefresh.current !== refreshKey;
+    lastPollRefresh.current = refreshKey;
 
-    getTempsHistory(HISTORY_SECONDS, historyController.signal)
-      .then((feed) => {
-        if (stopped) return;
-        if (feed.url) setSourceUrl(feed.url);
-        if (feed.connected) {
-          if (feed.samples.length > 0) {
-            setSamples((current) => mergeTempSamples(feed.samples, current));
-            const newest = newestSample(feed.samples);
-            if (newest) {
-              setLatest((prev) =>
-                !prev || newest.timestamp > prev.timestamp ? newest : prev,
-              );
-            }
-          }
-          setHistoryError(null);
-          if (pollOk.current !== false) {
-            setLink("up");
-            setError(null);
-          }
-        } else {
-          setHistoryError(feed.error ?? "采集源不可达");
-          if (pollOk.current !== true) {
-            setLink("down");
-            setError(feed.error ?? null);
-          }
-        }
-      })
-      .catch((err: unknown) => {
-        if (stopped || isAbortError(err)) return;
-        const message = err instanceof Error ? err.message : String(err);
-        setHistoryError(message);
-        if (pollOk.current === true) return;
-        setLink("down");
-        setError(message);
-      })
-      .finally(() => {
-        if (!stopped) setHistorySettled(true);
-      });
-
-    const poll = async () => {
+    const poll = async (force = false) => {
       // A hidden tab keeps readable data but stops generating requests.
-      if (stopped || busy || document.visibilityState === "hidden") return;
+      if (stopped || busy || (!force && document.visibilityState === "hidden")) return;
       busy = true;
       try {
-        const feed = await getTemps(pollController.signal);
+        const feed = await getTemps(pollController.signal, force);
         if (stopped) return;
-        pollOk.current = feed.connected;
         if (feed.url) setSourceUrl(feed.url);
         if (feed.connected) {
           const sample = toSample(feed);
@@ -394,7 +362,6 @@ export function SystemTemperaturePage({ now }: { now: number }) {
         }
       } catch (err: unknown) {
         if (stopped || isAbortError(err)) return;
-        pollOk.current = false;
         setLink("down");
         setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -407,92 +374,59 @@ export function SystemTemperaturePage({ now }: { now: number }) {
       if (document.visibilityState === "visible") void poll();
     }
     document.addEventListener("visibilitychange", onVisibilityChange);
-    void poll();
+    void poll(refresh);
     const intervalId = window.setInterval(() => void poll(), POLL_MS);
     return () => {
       stopped = true;
-      historyController.abort();
       pollController.abort();
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [refreshKey]);
 
-  // History coverage is tracked independently of live samples: a failed
-  // history read stays retryable even while polling succeeds.
-  const retryHistory = useCallback(() => {
-    const seconds = Math.max(period, HISTORY_SECONDS);
-    setHistoryError(null);
-    historyRetry.current = 0;
-    void getTempsHistory(seconds)
-      .then((feed) => {
-        if (!feed.connected || feed.samples.length === 0) {
-          setHistoryError(feed.connected ? "该窗口没有历史采样" : (feed.error ?? "采集源不可达"));
-          return;
-        }
-        if (feed.url) setSourceUrl(feed.url);
-        setSamples((current) => mergeTempSamples(feed.samples, current));
-        const newest = newestSample(feed.samples);
-        if (newest) {
-          setLatest((prev) =>
-            !prev || newest.timestamp > prev.timestamp ? newest : prev,
-          );
-        }
-      })
-      .catch((err: unknown) => {
-        if (isAbortError(err)) return;
-        setHistoryError(err instanceof Error ? err.message : String(err));
-      });
-  }, [period]);
-
-  // One automatic retry once live polling recovers; manual retry stays available.
+  // History and live polling use separate state. A single effect owns the
+  // selected history window, including retries and manual refreshes.
   useEffect(() => {
-    if (
-      link !== "up" ||
-      !historySettled ||
-      historyError == null ||
-      historyRetry.current >= 1
-    ) {
-      return;
-    }
-    historyRetry.current += 1;
-    retryHistory();
-  }, [link, historySettled, historyError, retryHistory]);
-
-  // 一档以上的窗口（12 小时 / 1 天 / 7 天）需要更长的 Prometheus 历史。
-  // 按所选档位单独取一次并合并：引擎会随窗口放大采样步长，切回短档位时
-  // 仍保留启动时那批秒级精度的近一小时样本。
-  useEffect(() => {
-    if (period <= HISTORY_SECONDS) return;
-    let cancelled = false;
-    setHistoryError(null);
     const controller = new AbortController();
-    void getTempsHistory(period, controller.signal)
+    const refresh = lastHistoryRequest.current.refreshKey !== refreshKey ||
+      lastHistoryRequest.current.historyAttempt !== historyAttempt;
+    lastHistoryRequest.current = { refreshKey, historyAttempt };
+    setHistorySettled(false);
+    setHistoryError(null);
+    void getTempsHistory(historySeconds, controller.signal, refresh)
       .then((feed) => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
+        if (feed.url) setSourceUrl(feed.url);
         if (!feed.connected || feed.samples.length === 0) {
           setHistoryError(feed.connected ? "该窗口没有历史采样" : (feed.error ?? "采集源不可达"));
           return;
         }
-        setHistoryError(null);
-        if (feed.url) setSourceUrl(feed.url);
         setSamples((current) => mergeTempSamples(feed.samples, current));
         const newest = newestSample(feed.samples);
-        if (newest) {
-          setLatest((prev) =>
-            !prev || newest.timestamp > prev.timestamp ? newest : prev,
-          );
+        if (newest) setLatest((previous) => !previous || newest.timestamp > previous.timestamp ? newest : previous);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted && !isAbortError(error)) {
+          setHistoryError(error instanceof Error ? error.message : String(error));
         }
       })
-      .catch((err: unknown) => {
-        if (cancelled || isAbortError(err)) return;
-        setHistoryError(err instanceof Error ? err.message : String(err));
+      .finally(() => {
+        if (!controller.signal.aborted) setHistorySettled(true);
       });
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [period]);
+    return () => controller.abort();
+  }, [historySeconds, refreshKey, historyAttempt]);
+
+  function retryHistory() {
+    retriedHistoryScope.current = historyScope;
+    setHistoryAttempt((value) => value + 1);
+  }
+
+  useEffect(() => {
+    if (link === "up" && historySettled && historyError != null && retriedHistoryScope.current !== historyScope) {
+      retriedHistoryScope.current = historyScope;
+      setHistoryAttempt((value) => value + 1);
+    }
+  }, [link, historySettled, historyError, historyScope]);
 
   const nowSec = Math.max(clock / 1000, latest?.timestamp ?? 0);
   // Charts only need to move when a new sample can arrive; quantising keeps a
@@ -522,7 +456,7 @@ export function SystemTemperaturePage({ now }: { now: number }) {
   );
   const gpuStatus =
     latest && latest.gpus.length === 0
-      ? latest.cpu.status === "available" ? "normal" : "missing"
+      ? latest.cpu.status !== "missing" ? "cpu-only" : "missing"
       : worstGpuStatus(latest ? latest.gpus.map((gpu) => gpu.status) : []);
   const guardTone = !latest
     ? "idle"

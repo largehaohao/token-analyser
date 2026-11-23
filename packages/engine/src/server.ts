@@ -32,6 +32,7 @@ import {
   type CatalogUpdateOptions,
 } from "./price-catalog.ts";
 import { buildPriceSheet } from "./price-sheet.ts";
+import { isOverviewSliceKey } from "./overview.ts";
 import { SessionStore, type SessionIngestOptions } from "./store.ts";
 import {
   EnvironmentRequestError,
@@ -40,14 +41,15 @@ import {
   type SessionEnvironmentSource,
 } from "./environments.ts";
 import { withPricingLock } from "./pricing-lock.ts";
-import { fetchPowerRange } from "./power.ts";
-import { fetchTempSnapshot, fetchTempHistory } from "./temps.ts";
+import { fetchPowerRange, type FetchLike } from "./power.ts";
+import { fetchTempSnapshot, fetchTempHistory, clampHistorySeconds } from "./temps.ts";
 import { watchSessions } from "./watch.ts";
 import { collectSessionFiles } from "./session-files.ts";
+import { readLinkedImports, registerLinkedImport } from "./store-db.ts";
 import { resolveImportTarget } from "./import-path.ts";
 import { isLoopbackHost, isStateChangeAllowed } from "./request-guard.ts";
 import { powerPreviewEnabled } from "./runtime-config.ts";
-import type { SessionSnapshot, WasteToggleId } from "./types.ts";
+import type { SessionSnapshot, SessionSource, WasteToggleId } from "./types.ts";
 
 const CORS_ORIGIN = "http://127.0.0.1:7788";
 const HOST = "127.0.0.1";
@@ -135,6 +137,21 @@ function isValidTimezone(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function validSource(source: string | null): source is SessionSource | "all" | null {
+  return source == null || source === "all" || source === "codex" || source === "claude" ||
+    source === "cursor" || source === "pi" || source === "dsh" ||
+    source === "opencode" || source === "antigravity";
+}
+
+function windowBounds(params: URLSearchParams): { sinceMs?: number; untilMs?: number } {
+  const sinceMs = Date.parse(params.get("since") ?? "");
+  const explicitUntil = Date.parse(params.get("until") ?? "");
+  const asOf = Date.parse(params.get("as_of") ?? "");
+  const untilMs = Number.isFinite(explicitUntil) ? explicitUntil : asOf + 1;
+  if (!Number.isFinite(sinceMs)) return {};
+  return { sinceMs, ...(Number.isFinite(untilMs) && untilMs > sinceMs ? { untilMs } : {}) };
 }
 
 function corsHeaders(extra: Record<string, string> = {}): Record<string, string> {
@@ -227,7 +244,7 @@ export function loadImportedSessions(
   const loaded: string[] = [];
   for (const filePath of collectImportFiles(importsDir)) {
     try {
-      const id = store.ingestPath(filePath, { skipExisting: true });
+      const id = store.ingestPath(filePath, { skipExisting: true, finalized: true });
       if (id) loaded.push(id);
     } catch (err) {
       onError?.(
@@ -274,12 +291,11 @@ function wireStoreChangeEvents(
 
   const notifyIngested = (id: string | undefined, idsBefore: Set<string>) => {
     if (!id) return;
-    const snap = store.get(id);
-    const parentId = snap?.parentId;
-    const isRoot = parentId == null || !store.get(parentId);
+    const parentId = store.parentOf(id);
+    const isRoot = parentId == null || !store.hasSession(parentId);
     const isNew = isRoot && !idsBefore.has(id);
     onChange(id, isNew);
-    if (snap?.parentId) onChange(snap.parentId, false);
+    if (parentId) onChange(parentId, false);
   };
 
   const origIngest = store.ingestPath.bind(store);
@@ -287,8 +303,12 @@ function wireStoreChangeEvents(
     try {
       // Avoid store.list() here: it runs refreshLiveFlags and can re-enter ingest.
       const idsBefore = new Set(store.peekRootIds());
+      const revision = store.dataRevision;
       const id = origIngest(filePath, ingestOptions);
-      notifyIngested(id, idsBefore);
+      if (store.dataRevision !== revision) {
+        if (id) notifyIngested(id, idsBefore);
+        else onChange("*", false);
+      }
       return id;
     } catch (err) {
       onError(
@@ -302,14 +322,9 @@ function wireStoreChangeEvents(
   const origBatched = store.ingestPathBatched.bind(store);
   store.ingestPathBatched = async (filePath, ingestOptions) => {
     try {
-      const idsBefore = new Set(store.peekRootIds());
-      const id = await origBatched(filePath, {
-        ...ingestOptions,
-        onBatch: (ids) => {
-          ingestOptions?.onBatch?.(ids);
-          for (const batchId of ids) notifyIngested(batchId, idsBefore);
-        },
-      });
+      const revision = store.dataRevision;
+      const id = await origBatched(filePath, ingestOptions);
+      if (store.dataRevision !== revision) onChange("*", false);
       return id;
     } catch (err) {
       onError(
@@ -325,7 +340,7 @@ function wireStoreChangeEvents(
     id: string,
     toggles: Partial<Record<WasteToggleId, boolean>>,
   ) => {
-    if (!store.get(id)) return;
+    if (!store.hasSession(id)) return;
     origSetToggles(id, toggles);
     onChange(id, false);
   };
@@ -376,7 +391,7 @@ async function handleImport(
     const dest = uniqueImportPath(importsDir, filename);
     writeFileSync(dest, body, { mode: 0o600 });
 
-    const id = store.ingestPath(dest, { skipExisting: true });
+    const id = await withPricingLock(() => Promise.resolve(store.ingestPath(dest, { skipExisting: true, finalized: true })));
     if (!id) {
       removeFailedImport(dest);
       sendJson(res, 500, { error: "ingest_failed" });
@@ -410,11 +425,12 @@ async function handleImport(
       return;
     }
 
-    const id = store.ingestPath(resolved.path);
+    const id = await withPricingLock(() => Promise.resolve(store.ingestPath(resolved.path)));
     if (!id) {
       sendJson(res, 500, { error: "ingest_failed" });
       return;
     }
+    registerLinkedImport(resolved.path);
     const snap = store.get(id);
     sendJson(res, 200, snap);
     return;
@@ -467,7 +483,7 @@ async function handleImport(
     const dest = uniqueImportPath(importsDir, filename);
     writeFileSync(dest, fileData, { encoding: "binary", mode: 0o600 });
 
-    const id = store.ingestPath(dest, { skipExisting: true });
+    const id = await withPricingLock(() => Promise.resolve(store.ingestPath(dest, { skipExisting: true, finalized: true })));
     if (!id) {
       removeFailedImport(dest);
       sendJson(res, 500, { error: "ingest_failed" });
@@ -524,6 +540,8 @@ function serveStatic(
   res.writeHead(200, {
     ...corsHeaders(),
     "Content-Type": types[ext] ?? "application/octet-stream",
+    "Cache-Control": /[/\\]assets[/\\][^/\\]+-[\w-]{8,}\.(?:js|css)$/.test(filePath)
+      ? "public, max-age=31536000, immutable" : "no-cache",
   });
   const stream = createReadStream(filePath);
   stream.on("error", () => {
@@ -618,7 +636,7 @@ async function runPricingUpdate(
   }
 
   try {
-    store.refreshPricing();
+    await store.repriceInBackground();
   } catch {
     try {
       if (codexUpdate.previous) restoreRateCard(codexUpdate.previous, pricingUpdate?.rateCardPath);
@@ -648,12 +666,37 @@ async function runPricingUpdate(
   return { body };
 }
 
+function sharedRead<T>(ttlMs: number) {
+  const cache = new Map<string, { value: T; expires: number }>();
+  const flights = new Map<string, Promise<T>>();
+  return function read(key: string, loader: () => Promise<T>, refresh = false): Promise<T> {
+    const pending = flights.get(key);
+    if (pending) return pending;
+    const hit = cache.get(key);
+    if (!refresh && hit && hit.expires > Date.now()) return Promise.resolve(hit.value);
+    const request = loader().then((value) => {
+      cache.delete(key);
+      cache.set(key, { value, expires: Date.now() + ttlMs });
+      if (cache.size > 12) {
+        const oldest = cache.keys().next().value;
+        if (oldest != null) cache.delete(oldest);
+      }
+      return value;
+    }).finally(() => flights.delete(key));
+    flights.set(key, request);
+    return request;
+  };
+}
+
 export async function startServer(opts?: {
   port?: number;
   store?: SessionStore;
   /** Remote session mirrors. Tests inject a hub that does not open SSH. */
   environmentHub?: SessionEnvironmentSource;
+  hardwareFetch?: FetchLike;
   staticDir?: string;
+  localReady?: Promise<void>;
+  indexing?: () => { completed: number; total: number } | undefined;
   maxImportBytes?: number;
   pricingUpdate?: PricingUpdateOptions;
   qwenPricingUpdate?: QwenPricingUpdateOptions;
@@ -664,13 +707,20 @@ export async function startServer(opts?: {
   url: string;
   close: () => Promise<void>;
   onIngestError: (id: string, reason: string) => void;
+  onIndexChange: () => void;
 }> {
   const store = opts?.store ?? new SessionStore();
   const environmentHub = opts?.environmentHub ?? new RemoteEnvironmentHub();
+  const powerRead = sharedRead<Awaited<ReturnType<typeof fetchPowerRange>>>(1_000);
+  const tempsRead = sharedRead<Awaited<ReturnType<typeof fetchTempSnapshot>>>(1_000);
+  const historyRead = sharedRead<Awaited<ReturnType<typeof fetchTempHistory>>>(5_000);
 
   async function resolveSessionStore(reqUrl: string | undefined): Promise<SessionStore> {
     const env = new URL(reqUrl ?? "/", "http://localhost").searchParams.get("env");
-    if (env == null || env === "" || env === "local") return store;
+    if (env == null || env === "" || env === "local") {
+      if (opts?.localReady) await opts.localReady;
+      return store;
+    }
     try {
       const force = new URL(reqUrl ?? "/", "http://localhost").searchParams.get("refresh") === "1";
       return await environmentHub.prepare(env, { force });
@@ -767,8 +817,25 @@ export async function startServer(opts?: {
     }
 
     if (req.method === "GET" && parts[0] === "sessions" && parts.length === 1) {
+      const params = new URL(req.url ?? "/", "http://localhost").searchParams;
+      const behavior = params.get("behavior");
+      if (behavior != null) {
+        const source = params.get("source");
+        if (!isOverviewSliceKey(behavior) || !validSource(source)) {
+          sendJson(res, 400, { error: "invalid_behavior_scope" });
+          return;
+        }
+        const active = await resolveSessionStore(req.url);
+        sendJson(res, 200, { sessionIds: active.behaviorSessions(behavior, {
+          ...(source && source !== "all" ? { source } : {}),
+          ...windowBounds(params),
+        }) });
+        return;
+      }
       const active = await resolveSessionStore(req.url);
-      sendJson(res, 200, { sessions: active.list() });
+      const env = params.get("env");
+      const sync = env ? environmentHub.status?.(env) : undefined;
+      sendJson(res, 200, { sessions: active.list(), indexing: active === store ? opts?.indexing?.() : undefined, ...(sync ? { sync } : {}) });
       return;
     }
 
@@ -779,15 +846,17 @@ export async function startServer(opts?: {
       parts.length === 2
     ) {
       const origin = req.headers.origin;
+      const sameOrigin = origin === `http://${req.headers.host?.toLowerCase()}`;
       const contentType = req.headers["content-type"] ?? "";
       if (
-        (origin && origin !== CORS_ORIGIN) ||
+        (origin && origin !== CORS_ORIGIN && !sameOrigin) ||
         !contentType.startsWith("application/json")
       ) {
         sendJson(res, 403, { error: "forbidden" });
         return;
       }
 
+      if (opts?.localReady) await opts.localReady;
       const update = await withPricingLock(() =>
         runPricingUpdate(store, opts?.pricingUpdate, opts?.qwenPricingUpdate, opts?.catalogUpdate),
       );
@@ -805,50 +874,46 @@ export async function startServer(opts?: {
     if (req.method === "GET" && parts[0] === "overview" && parts.length === 1) {
       const config = loadUserConfig();
       const url = new URL(req.url ?? "/", "http://localhost");
-      const sinceRaw = url.searchParams.get("since");
-      const untilRaw = url.searchParams.get("until");
       const daysRaw = url.searchParams.get("days");
       const source = url.searchParams.get("source");
-      if (source != null && source !== "all" && source !== "codex" && source !== "claude" && source !== "cursor" && source !== "pi" && source !== "dsh" && source !== "opencode" && source !== "antigravity") {
+      if (!validSource(source)) {
         sendJson(res, 400, { error: "invalid_source" });
         return;
       }
       const timezoneRaw = url.searchParams.get("timezone_offset_minutes");
       const timezone = url.searchParams.get("timezone")?.trim();
       const modelRaw = url.searchParams.get("model")?.trim();
-      const sinceMs = sinceRaw ? Date.parse(sinceRaw) : Number.NaN;
-      const untilMs = untilRaw ? Date.parse(untilRaw) : Number.NaN;
+      const asOf = Date.parse(url.searchParams.get("as_of") ?? "");
+      const now = Number.isFinite(asOf)
+        ? new Date(asOf).toISOString()
+        : new Date(Math.floor(Date.now() / 30_000) * 30_000).toISOString();
       const dayCount = daysRaw ? Number(daysRaw) : Number.NaN;
       const timezoneOffsetMinutes = timezoneRaw
         ? Number(timezoneRaw)
         : Number.NaN;
       const active = await resolveSessionStore(req.url);
       const env = url.searchParams.get("env");
-      sendJson(
-        res,
-        200,
-        active.overview({
-          ...(source && source !== "all" ? { source } : {}),
-          watchPath: env && env !== "local" ? env : config.watch_paths.join("\n"),
-          collecting: process.env.FIXTURE_DIR == null,
-          ...(Number.isFinite(sinceMs) ? { sinceMs } : {}),
-          ...(Number.isFinite(untilMs) && Number.isFinite(sinceMs) && untilMs > sinceMs
-            ? { untilMs }
-            : {}),
-          ...(Number.isFinite(dayCount) && dayCount > 0
-            ? { dayCount: Math.min(60, Math.floor(dayCount)) }
-            : {}),
-          ...(Number.isFinite(timezoneOffsetMinutes) &&
-          timezoneOffsetMinutes >= -840 &&
-          timezoneOffsetMinutes <= 840
-            ? { timezoneOffsetMinutes: Math.trunc(timezoneOffsetMinutes) }
-            : {}),
-          ...(timezone && timezone.length <= 100 && isValidTimezone(timezone)
-            ? { timezone }
-            : {}),
-          ...(modelRaw && modelRaw.length <= 200 ? { model: modelRaw } : {}),
-        }),
-      );
+      const overview = active.overview({
+        ...(source && source !== "all" ? { source } : {}),
+        watchPath: env && env !== "local" ? env : config.watch_paths.join("\n"),
+        collecting: process.env.FIXTURE_DIR == null,
+        now,
+        ...windowBounds(url.searchParams),
+        ...(Number.isFinite(dayCount) && dayCount > 0
+          ? { dayCount: Math.min(60, Math.floor(dayCount)) }
+          : {}),
+        ...(Number.isFinite(timezoneOffsetMinutes) &&
+        timezoneOffsetMinutes >= -840 &&
+        timezoneOffsetMinutes <= 840
+          ? { timezoneOffsetMinutes: Math.trunc(timezoneOffsetMinutes) }
+          : {}),
+        ...(timezone && timezone.length <= 100 && isValidTimezone(timezone)
+          ? { timezone }
+          : {}),
+        ...(modelRaw && modelRaw.length <= 200 ? { model: modelRaw } : {}),
+      });
+      const indexing = active === store ? opts?.indexing?.() : undefined;
+      sendJson(res, 200, indexing ? { ...overview, indexing } : overview);
       return;
     }
 
@@ -869,12 +934,11 @@ export async function startServer(opts?: {
         return;
       }
       const config = loadUserConfig();
-      const result = await fetchPowerRange({
-        config: config.power,
-        startMs,
-        endMs,
-        stepMs,
-      });
+      const result = await powerRead(
+        JSON.stringify([config.power, startMs, endMs, stepMs]),
+        () => fetchPowerRange({ config: config.power, startMs, endMs, stepMs, fetchImpl: opts?.hardwareFetch }),
+        url.searchParams.get("refresh") === "1",
+      );
       if (result.ok) {
         sendJson(res, 200, {
           source: "prometheus",
@@ -902,7 +966,12 @@ export async function startServer(opts?: {
 
     if (req.method === "GET" && parts[0] === "temps" && parts.length === 1) {
       const config = loadUserConfig();
-      const result = await fetchTempSnapshot({ config: config.power });
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const result = await tempsRead(
+        JSON.stringify(config.power),
+        () => fetchTempSnapshot({ config: config.power, fetchImpl: opts?.hardwareFetch }),
+        url.searchParams.get("refresh") === "1",
+      );
       if (result.ok) {
         sendJson(res, 200, {
           source: "prometheus",
@@ -944,10 +1013,12 @@ export async function startServer(opts?: {
         return;
       }
       const config = loadUserConfig();
-      const result = await fetchTempHistory({
-        config: config.power,
-        seconds,
-      });
+      const range = clampHistorySeconds(seconds);
+      const result = await historyRead(
+        JSON.stringify([config.power, range]),
+        () => fetchTempHistory({ config: config.power, seconds: range, fetchImpl: opts?.hardwareFetch }),
+        url.searchParams.get("refresh") === "1",
+      );
       if (result.ok) {
         sendJson(res, 200, {
           source: "prometheus",
@@ -1033,6 +1104,7 @@ export async function startServer(opts?: {
     }
 
     if (req.method === "POST" && parts[0] === "import" && parts.length === 1) {
+      if (opts?.localReady) await opts.localReady;
       await handleImport(req, res, store, maxImportBytes);
       return;
     }
@@ -1109,6 +1181,7 @@ export async function startServer(opts?: {
   }, HEARTBEAT_MS);
 
   return {
+    onIndexChange: () => broadcast("session_updated", { id: "*" }),
     url,
     onIngestError: notifySessionError,
     close: async () => {
@@ -1168,220 +1241,153 @@ export async function gracefulShutdown(opts: {
 
 async function main(): Promise<void> {
   const config = loadUserConfig();
-  const store = new SessionStore();
-  const repoRoot = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../..",
-  );
-  const ingestErrors: { id: string; reason: string }[] = [];
-  /** Cursor state.vscdb paths deferred until after listen when dump is warm. */
-  let deferredVscdb: string[] = [];
-
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
   const fixtureDir = process.env.FIXTURE_DIR;
-  if (fixtureDir) {
-    const root = path.isAbsolute(fixtureDir)
-      ? fixtureDir
-      : path.resolve(repoRoot, fixtureDir);
-    for (const file of collectFixtureFiles(root)) {
-      try {
-        store.ingestPath(file);
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        ingestErrors.push({ id: errorIdFromPath(file), reason });
-        console.error(`ingest failed ${file}: ${reason}`);
-      }
-    }
-  } else {
-    const listenPort = process.env.PORT
-      ? Number.parseInt(process.env.PORT, 10) || DEFAULT_PORT
-      : DEFAULT_PORT;
-    // The previous process owns store.db. Stop it and wait until its dump
-    // finishes, or this start dies with "database is locked".
-    await waitForExit(await signalStaleEngine(listenPort));
-    // Warm start: restore dump first so the UI has sessions immediately.
-    // Cursor's state.vscdb is often hundreds of MB and stays dirty while the
-    // app is open — defer that re-parse until after the server is listening
-    // when a dump already has Cursor sessions.
-    const bootStarted = Date.now();
-    const dumpRestored = store.loadDump();
-    if (dumpRestored > 0) {
-      console.log(`store dump restored ${dumpRestored} session(s)`);
-    }
-    const onRefreshError = (filePath: string, err: Error) => {
-      ingestErrors.push({ id: errorIdFromPath(filePath), reason: err.message });
-      console.error(`ingest failed ${filePath}: ${err.message}`);
-    };
-    const allFiles = collectSessionFiles(config.watch_paths);
-    // Large / often-dirty sources (Cursor DB, OpenCode DB, multi‑MB live JSONL)
-    // block the HTTP loop if parsed synchronously. Always defer them until after
-    // listen so the UI can paint within a few seconds even on a cold dump.
-    const DEFER_BYTES = 10 * 1024 * 1024;
-    const heavyFiles: string[] = [];
-    const lightFiles: string[] = [];
-    for (const filePath of allFiles) {
-      let defer = path.basename(filePath) === "state.vscdb" || path.basename(filePath) === "opencode.db";
-      if (!defer) {
-        try {
-          defer = statSync(filePath).size >= DEFER_BYTES;
-        } catch {
-          defer = false;
-        }
-      }
-      (defer ? heavyFiles : lightFiles).push(filePath);
-    }
-    // Prefer OpenCode before Cursor's often-GB state.vscdb so timing metrics
-    // show up first.
-    heavyFiles.sort((a, b) => {
-      const rank = (filePath: string) =>
-        path.basename(filePath) === "opencode.db" ? 0
-          : filePath.endsWith(".vscdb") ? 2
-          : 1;
-      return rank(a) - rank(b);
-    });
-    store.refresh(lightFiles, { onError: onRefreshError });
-    deferredVscdb = heavyFiles;
-    loadImportedSessions(
-      store,
-      path.join(tokenAnalyserHome(), "imports"),
-      (filePath, err) => {
-        ingestErrors.push({ id: errorIdFromPath(filePath), reason: err.message });
-        console.error(`import ingest failed ${filePath}: ${err.message}`);
-      },
-    );
-    // Do not force a synchronous 100MB+ dump on the listen path; refresh
-    // scheduleDump() persists shortly after, and exit hooks still dump.
-    console.log(
-      `startup session load (pre-listen): ${Date.now() - bootStarted}ms` +
-        (deferredVscdb.length > 0
-          ? ` · deferring ${deferredVscdb.length} heavy source refresh`
-          : ""),
-    );
-  }
-
-  const webDist = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../../apps/web/dist",
-  );
+  const webDist = path.join(repoRoot, "apps/web/dist");
   const serveUi = process.env.SERVE_UI === "1" && existsSync(webDist);
-  const configuredPort = process.env.PORT
-    ? Number.parseInt(process.env.PORT, 10)
-    : 7788;
-  const { url, onIngestError, close } = await startServer({
-    store,
-    ...(serveUi
-      ? { staticDir: webDist, port: configuredPort || 7788 }
-      : {}),
+  const configuredPort = Number.parseInt(process.env.PORT ?? "", 10);
+  const port = Number.isInteger(configuredPort) && configuredPort >= 0 ? configuredPort : (serveUi ? 7788 : DEFAULT_PORT);
+  if (!fixtureDir && port > 0) await waitForExit(await signalStaleEngine(port));
+
+  const store = new SessionStore();
+  let resolveReady!: () => void;
+  let rejectReady!: (error: unknown) => void;
+  const localReady = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
   });
-  for (const item of ingestErrors) {
-    onIngestError(item.id, item.reason);
-  }
+  void localReady.catch(() => {});
+  let progress: { completed: number; total: number } | undefined;
+  const { url, close, onIngestError, onIndexChange } = await startServer({
+    store, port, ...(serveUi ? { staticDir: webDist } : {}),
+    localReady,
+    indexing: () => progress,
+  });
   console.log(`token-analyser engine listening on ${url}`);
+  process.send?.({ type: "listening", url });
 
-    if (!fixtureDir) {
-    if (deferredVscdb.length > 0) {
-      const heavyFiles = deferredVscdb;
-      const heavyStarted = Date.now();
-      // Wait for the first UI /sessions paint, then check one heavy file at a
-      // time. Unchanged files return from their fingerprint; a parse cannot
-      // stall the HTTP event loop for the whole batch. A warm dump is not a
-      // reason to skip this: files committed while the engine was stopped
-      // would otherwise stay out of memory until the next watcher event.
-      const refreshNext = (index: number): void => {
-        if (index >= heavyFiles.length) {
-          try {
-            store.dump();
-          } catch (err) {
-            console.error(
-              `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-          console.log(
-            `heavy source refresh finished in ${Date.now() - heavyStarted}ms` +
-              ` (${heavyFiles.length} file(s))`,
-          );
-          return;
-        }
-        const filePath = heavyFiles[index]!;
-        const finish = () => setTimeout(() => refreshNext(index + 1), 0);
-        const run = path.basename(filePath) === "opencode.db" || filePath.endsWith(".vscdb")
-          ? store.ingestPathBatched(filePath, {
-            batchSize: path.basename(filePath) === "opencode.db" ? 25 : 8,
-          })
-          : Promise.resolve(store.ingestPath(filePath));
-        void run.then(finish, (err) => {
-          const reason = err instanceof Error ? err.message : String(err);
-          onIngestError(errorIdFromPath(filePath), reason);
-          console.error(`ingest failed ${filePath}: ${reason}`);
-          finish();
-        });
-      };
-      // Give /sessions and SSE a tick to complete before GB-scale SQLite work.
-      setTimeout(() => refreshNext(0), 750);
+  let stopping = false;
+  const cleanup: Array<() => void> = [];
+  function stop(code: number): void {
+    if (stopping) return;
+    stopping = true;
+    for (const dispose of cleanup) dispose();
+    resolveReady();
+    void gracefulShutdown({ close, dump: () => store.dump(), exit: (value) => process.exit(value), code });
+  }
+  process.once("SIGINT", () => stop(0));
+  process.once("SIGTERM", () => stop(0));
+
+  try {
+    if (fixtureDir) {
+      for (const file of collectFixtureFiles(path.resolve(repoRoot, fixtureDir))) {
+        store.ingestPath(file);
+      }
+      resolveReady();
+      return;
     }
-    // Qwen publishes new rates without warning the local ledger, so refresh
-    // them automatically and keep every estimate on the dated official card.
-    const stopQwenPriceRefresh = startQwenPriceAutoRefresh(store, {
-      onUpdate: ({ asOf, modelCount }) => {
-        console.log(`qwen prices refreshed: ${modelCount} models (${asOf})`);
-        try {
-          store.dump();
-        } catch (err) {
-          console.error(
-            `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      },
-      onError: (reason) => console.error(`qwen price refresh failed: ${reason}`),
-    });
-    const stopCatalogRefresh = startCatalogAutoRefresh(store, {
-      onUpdate: ({ modelCount }) => {
-        console.log(`catalog prices refreshed: ${modelCount} models`);
-        try {
-          store.dump();
-        } catch (err) {
-          console.error(
-            `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      },
-      onError: (reason) => console.error(`catalog price refresh failed: ${reason}`),
-    });
 
-    // Codex writes append-only JSONL files below dated directories. On macOS,
-    // the recursive watcher can miss content changes in that tree, so use the
-    // per-directory watcher plus its stat-based scan for reliable ingestion.
-    watchSessions(store, () => {}, {
+    const started = performance.now();
+    const restored = await store.restoreForStartup();
+    const roots = [...config.watch_paths, ...readLinkedImports()];
+    const discovered = collectSessionFiles(roots);
+    const imports = collectImportFiles(path.join(tokenAnalyserHome(), "imports"));
+    const previousOwners = store.sourceOwners();
+    const previousPaths = new Set(previousOwners.values());
+    // Enforce the current discovery scope before exposing a restored ledger.
+    store.refresh([], { retainPaths: [...discovered, ...imports] });
+    const light: string[] = [];
+    const sqlite: string[] = [];
+    const largeLogs: string[] = [];
+    for (const file of discovered) {
+      if (file.endsWith(".vscdb") || path.basename(file) === "opencode.db") {
+        sqlite.push(file);
+        continue;
+      }
+      let size = 0;
+      try { size = statSync(file).size; } catch { /* Ingest reports the source error. */ }
+      (size >= 10 * 1024 * 1024 ? largeLogs : light).push(file);
+    }
+    // Preserve source precedence when two files contain the same session ID.
+    // Imports keep the canonical watched session. Within each class discovery
+    // order matches the synchronous scanner used by existing installations.
+    sqlite.sort((a, b) => Number(a.endsWith(".vscdb")) - Number(b.endsWith(".vscdb")));
+    const ordered = [
+      ...light.map((file) => ({ file, imported: false })),
+      ...imports.map((file) => ({ file, imported: true })),
+      ...[...sqlite, ...largeLogs].map((file) => ({ file, imported: false })),
+    ];
+    const precedence = new Map([...imports.slice().reverse(), ...light, ...sqlite, ...largeLogs]
+      .map((file, index) => [file, index]));
+    const jobs = ordered.filter((job) => store.needsStartupIngest(job.file, job.imported));
+    if (jobs.length) progress = { completed: 0, total: jobs.length };
+    resolveReady();
+    console.log(`startup index ready in ${Math.round(performance.now() - started)}ms · ${restored} restored · ${jobs.length} source(s) to reconcile`);
+
+    cleanup.push(watchSessions(store, () => {}, {
+      watchPaths: roots, startupFiles: jobs.filter((job) => !job.imported).map((job) => job.file),
       recursive: process.platform !== "darwin",
       onError: onIngestError,
-    });
-
-    const dumpTimer = setInterval(() => {
-      try {
-        store.dump();
-      } catch (err) {
-        console.error(
-          `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }, STORE_DUMP_INTERVAL_MS);
-    dumpTimer.unref?.();
-
-    let shuttingDown = false;
-    const dumpAndExit = (code: number) => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      stopQwenPriceRefresh();
-      stopCatalogRefresh();
-      clearInterval(dumpTimer);
-      void gracefulShutdown({
-        close,
-        dump: () => store.dump(),
-        exit: (exitCode) => process.exit(exitCode),
-        code,
+    }));
+    let lastNotice = 0;
+    async function reconcile(file: string, imported: boolean) {
+      await store.ingestPathBatched(file, {
+        reparse: true, allowAppend: !imported, finalized: imported, skipExisting: imported, precedence,
       });
+      if (progress) progress.completed++;
+      if (performance.now() - lastNotice >= 500) {
+        onIndexChange();
+        lastNotice = performance.now();
+      }
+    }
+    for (const job of jobs) {
+      if (stopping) return;
+      await reconcile(job.file, job.imported);
+    }
+    // A removed winner can expose an unchanged JSONL that used to contribute
+    // only a fingerprint, or another database containing the same session ID.
+    const missing = [...previousOwners].filter(([id]) => !store.hasSession(id));
+    if (missing.length) {
+      const fallback = ordered.filter(({ file }) => {
+        if (!store.knowsPath(file)) return false;
+        if (!previousPaths.has(file)) return true;
+        return (file.endsWith(".vscdb") || path.basename(file) === "opencode.db") &&
+          missing.some(([, owner]) => owner !== file && path.extname(owner) === path.extname(file));
+      });
+      if (fallback.length) progress = { completed: jobs.length, total: jobs.length + fallback.length };
+      for (const job of fallback) {
+        if (stopping) return;
+        await reconcile(job.file, job.imported);
+      }
+    }
+    progress = undefined;
+    onIndexChange();
+    console.log(`startup reconciliation complete in ${Math.round(performance.now() - started)}ms`);
+    if (stopping) return;
+
+    const onPricesUpdated = () => {
+      store.dump();
+      onIndexChange();
     };
-    process.once("SIGINT", () => dumpAndExit(0));
-    process.once("SIGTERM", () => dumpAndExit(0));
+    const pricingTarget = { refreshPricing: () => store.repriceInBackground() };
+    cleanup.push(startQwenPriceAutoRefresh(pricingTarget, {
+      onUpdate: onPricesUpdated,
+      onError: (reason) => console.error(`qwen price refresh failed: ${reason}`),
+    }));
+    cleanup.push(startCatalogAutoRefresh(pricingTarget, {
+      onUpdate: onPricesUpdated,
+      onError: (reason) => console.error(`catalog price refresh failed: ${reason}`),
+    }));
+    void store.pruneCache().catch((error) => console.error("cache cleanup failed", error));
+    const dumpTimer = setInterval(() => {
+      try { store.dump(); } catch (error) { console.error("store dump failed", error); }
+    }, STORE_DUMP_INTERVAL_MS);
+    dumpTimer.unref();
+    cleanup.push(() => clearInterval(dumpTimer));
+  } catch (error) {
+    rejectReady(error);
+    console.error("startup failed", error);
+    stop(1);
   }
 }
 const entry = process.argv[1]

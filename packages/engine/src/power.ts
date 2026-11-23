@@ -31,7 +31,7 @@ export const DEFAULT_POWER_CONFIG: PowerQueryConfig = {
   prometheus_url: "http://192.168.1.102:9090",
   queries: {
     cpu: "max by () (node_rapl_package_milliwatts) / 1000",
-    gpu: "max by () (DCGM_FI_DEV_POWER_USAGE)",
+    gpu: "sum(max by (Hostname, UUID, gpu, device) (DCGM_FI_DEV_POWER_USAGE))",
     machine: "max by () (node_hwmon_power_watts)",
   },
 };
@@ -58,8 +58,7 @@ function parseValue(raw: string): number | null {
 }
 
 /**
- * 把 query_range 的 matrix 响应收敛成「时间 → 瓦特」映射：同一时刻存在
- * 多条序列（多路 RAPL/多块 GPU）时取最大值，与默认查询里的 max 语义一致。
+ * Multiple readings of one meter use its maximum sample at each timestamp.
  */
 function seriesToMap(series: RangeSeries[] | undefined): Map<number, number> {
   const map = new Map<number, number>();
@@ -72,6 +71,25 @@ function seriesToMap(series: RangeSeries[] | undefined): Map<number, number> {
     }
   }
   return map;
+}
+
+function gpuTotals(series: RangeSeries[] = []): Map<number, number> {
+  const devices = new Map<string, RangeSeries[]>();
+  series.forEach((entry, index) => {
+    const labels = entry.metric ?? {};
+    const device = labels.UUID ?? labels.uuid ?? labels.gpu ?? labels.card ?? labels.device;
+    const key = device == null ? `series:${index}` : JSON.stringify([labels.Hostname ?? labels.hostname, device]);
+    const readings = devices.get(key) ?? [];
+    readings.push(entry);
+    devices.set(key, readings);
+  });
+  const totals = new Map<number, number>();
+  for (const readings of devices.values()) {
+    for (const [time, watts] of seriesToMap(readings)) {
+      totals.set(time, (totals.get(time) ?? 0) + watts);
+    }
+  }
+  return totals;
 }
 
 export async function fetchPowerRange(options: {
@@ -117,7 +135,7 @@ export async function fetchPowerRange(options: {
         const body = (await res.json()) as RangeResponse;
         if (body.status !== "success" || body.data?.resultType !== "matrix")
           return { ok: false, error: "prometheus_unexpected_response" };
-        return { ok: true, map: seriesToMap(body.data.result) };
+        return { ok: true, map: key === "gpu" ? gpuTotals(body.data.result) : seriesToMap(body.data.result) };
       } catch (err) {
         const reason =
           err instanceof Error && err.name === "AbortError"

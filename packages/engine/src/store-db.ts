@@ -6,6 +6,9 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { zstdDecompressSync } from "node:zlib";
+import { prepareSource, encodeIndex, type PreparedSource, type SessionIndex } from "./session-index.ts";
+import { sha256 } from "./hash.ts";
 import { assertSupportedNode } from "./node-guard.ts";
 import { tokenAnalyserHome } from "./config.ts";
 import type { FileFingerprint, StoreDump } from "./store-dump.ts";
@@ -59,6 +62,16 @@ function openDb(home?: string): DatabaseSync {
       id TEXT PRIMARY KEY,
       snapshot_json TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS source_index (
+      id TEXT PRIMARY KEY,
+      revision TEXT NOT NULL,
+      format INTEGER NOT NULL,
+      data BLOB NOT NULL
+    );
+    CREATE TRIGGER IF NOT EXISTS invalidate_source_index AFTER UPDATE OF snapshot_json ON sources
+    BEGIN DELETE FROM source_index WHERE id = OLD.id; END;
+    CREATE TRIGGER IF NOT EXISTS remove_source_index AFTER DELETE ON sources
+    BEGIN DELETE FROM source_index WHERE id = OLD.id; END;
     CREATE TABLE IF NOT EXISTS fingerprints (
       path TEXT PRIMARY KEY,
       inode INTEGER NOT NULL,
@@ -72,6 +85,9 @@ function openDb(home?: string): DatabaseSync {
     CREATE TABLE IF NOT EXISTS toggles (
       session_id TEXT PRIMARY KEY,
       toggles_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS linked_imports (
+      path TEXT PRIMARY KEY
     );
     CREATE TABLE IF NOT EXISTS file_cache (
       cache_key TEXT PRIMARY KEY,
@@ -124,42 +140,97 @@ export function invalidateStoreDb(home?: string): void {
   }
 }
 
-function readDumpFromDb(db: DatabaseSync): StoreDump | undefined {
-  // One read transaction keeps sources, fingerprints, toggles and meta on a
-  // single committed generation even if another process dumps concurrently.
+type DumpIdentity = { version: number; pricingContext?: string };
+type SourceReader<T> = (db: DatabaseSync) => T[] | undefined;
+
+function decodeSource(id: string, json: string): SessionSnapshot | undefined {
+  try {
+    const snapshot = JSON.parse(json) as SessionSnapshot;
+    if (snapshot?.id === id && typeof snapshot.path === "string" &&
+        Array.isArray(snapshot.turns) && Array.isArray(snapshot.parse_errors)) return snapshot;
+  } catch {
+    // Rebuild the derived generation when evidence and file fingerprints disagree.
+  }
+  return undefined;
+}
+
+function readFullSources(db: DatabaseSync): SessionSnapshot[] | undefined {
+  const result: SessionSnapshot[] = [];
+  for (const row of db.prepare("SELECT id, snapshot_json FROM sources ORDER BY rowid").iterate()) {
+    const snapshot = decodeSource(String(row.id), String(row.snapshot_json));
+    if (!snapshot) return undefined;
+    result.push(snapshot);
+  }
+  return result;
+}
+
+const INDEX_FORMAT = 1;
+const SAVE_INDEX = "INSERT OR REPLACE INTO source_index(id,revision,format,data) VALUES(?,?,?,?)";
+
+function readIndexes(db: DatabaseSync): SessionIndex[] | undefined {
+  const result: SessionIndex[] = [];
+  const readDetail = db.prepare("SELECT snapshot_json FROM sources WHERE id = ?");
+  const writeIndex = db.prepare(SAVE_INDEX);
+  // Read the smaller table independently. Iteration over source IDs touches
+  // only row headers, including when the old installation has no indexes yet.
+  const rows = db.prepare(`SELECT s.id, i.revision, i.data FROM sources s
+    LEFT JOIN source_index i ON i.id = s.id AND i.format = ? ORDER BY s.rowid`).all(INDEX_FORMAT);
+  for (const row of rows) {
+    if (row.data instanceof Uint8Array) {
+      try {
+        const item = JSON.parse(zstdDecompressSync(row.data).toString()) as SessionIndex;
+        if (item.id === row.id && item.revision === row.revision && Array.isArray(item.turns) &&
+            Array.isArray(item.parse_errors) && typeof item.path === "string") {
+          result.push(item);
+          continue;
+        }
+      } catch {
+        // Recover just this index from its full source row.
+      }
+    }
+    const json = readDetail.get(row.id)?.snapshot_json;
+    if (typeof json !== "string") return undefined;
+    const detail = decodeSource(String(row.id), json);
+    if (!detail) return undefined;
+    const { index } = prepareSource(detail, json);
+    writeIndex.run(index.id, index.revision, INDEX_FORMAT, encodeIndex(index));
+    result.push(index);
+  }
+  return result;
+}
+
+export function readSourceDetail(home: string | undefined, index: SessionIndex): SessionSnapshot | undefined {
+  const row = openDb(home).prepare(`SELECT s.snapshot_json, i.revision FROM sources s
+    LEFT JOIN source_index i ON s.id = i.id WHERE s.id = ?`).get(index.id);
+  if (typeof row?.snapshot_json !== "string") return undefined;
+  const revision = row.revision ?? sha256(row.snapshot_json);
+  return revision === index.revision ? decodeSource(index.id, row.snapshot_json) : undefined;
+}
+
+function readDumpFromDb<T>(db: DatabaseSync, readSources: SourceReader<T>, expected?: DumpIdentity): StoreDump<T> | undefined {
   db.exec("BEGIN");
   try {
-    const dump = readDumpTables(db);
+    const dump = readDumpTables(db, readSources, expected);
     db.exec("COMMIT");
     return dump;
   } catch (err) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {
-      // Connection may already be closed.
-    }
+    try { db.exec("ROLLBACK"); } catch { /* Already closed. */ }
     throw err;
   }
 }
 
-function readDumpTables(db: DatabaseSync): StoreDump | undefined {
+function readDumpTables<T>(db: DatabaseSync, readSources: SourceReader<T>, expected?: DumpIdentity): StoreDump<T> | undefined {
   const schemaRaw = metaGet(db, "schema_version");
-  // Cache rows may exist before the first dump writes meta — not an error.
-  if (schemaRaw == null) return undefined;
-  const schema = Number(schemaRaw);
-  if (schema !== STORE_DB_SCHEMA_VERSION) return undefined;
-
-  const sources: SessionSnapshot[] = [];
-  for (const row of db.prepare("SELECT snapshot_json FROM sources").all() as {
-    snapshot_json: string;
-  }[]) {
-    try {
-      const snap = JSON.parse(row.snapshot_json) as SessionSnapshot;
-      if (snap?.id && typeof snap.path === "string") sources.push(snap);
-    } catch {
-      // Skip corrupt rows; a later dump rewrites the table.
-    }
+  if (schemaRaw == null || Number(schemaRaw) !== STORE_DB_SCHEMA_VERSION) return undefined;
+  const version = Number(metaGet(db, "dump_version") ?? NaN);
+  const pricingContext = metaGet(db, "pricing_context") ?? "";
+  // Reject old parsers / prices without decoding hundreds of MB first.
+  if (expected && (version !== expected.version ||
+      (expected.pricingContext != null && pricingContext !== expected.pricingContext))) {
+    return { version, pricingContext, sources: [], fingerprints: {}, toggles: {} };
   }
+  const sources = readSources(db);
+  if (!sources) return undefined;
 
   const fingerprints: Record<string, FileFingerprint> = {};
   for (const row of db
@@ -203,15 +274,33 @@ function readDumpTables(db: DatabaseSync): StoreDump | undefined {
   }
 
   return {
-    version: Number(metaGet(db, "dump_version") ?? NaN),
-    pricingContext: metaGet(db, "pricing_context") ?? "",
+    version,
+    pricingContext,
     sources,
     toggles,
     fingerprints,
   };
 }
 
-export function readStoreDumpDb(home?: string): StoreDump | undefined {
+export function readStoreDumpDb(home?: string, expected?: DumpIdentity): StoreDump | undefined {
+  return loadDumpTables(home, readFullSources, expected);
+}
+
+export function needsIndexBackfill(home: string | undefined, expected: DumpIdentity): boolean {
+  if (!existsSync(storeDbPath(home))) return false;
+  const db = openDb(home);
+  const version = metaGet(db, "dump_version");
+  if (version == null) return false;
+  if (Number(version) !== expected.version || metaGet(db, "pricing_context") !== expected.pricingContext) return true;
+  return db.prepare(`SELECT 1 FROM sources s LEFT JOIN source_index i
+    ON i.id=s.id AND i.format=? WHERE i.id IS NULL LIMIT 1`).get(INDEX_FORMAT) != null;
+}
+
+export function readStoreIndexesDb(home?: string, expected?: DumpIdentity): StoreDump<SessionIndex> | undefined {
+  return loadDumpTables(home, readIndexes, expected);
+}
+
+function loadDumpTables<T>(home: string | undefined, readSources: SourceReader<T>, expected?: DumpIdentity): StoreDump<T> | undefined {
   const dbPath = storeDbPath(home);
   if (!existsSync(dbPath)) return undefined;
   try {
@@ -222,7 +311,7 @@ export function readStoreDumpDb(home?: string): StoreDump | undefined {
       clearDerivedStoreData(home);
       return undefined;
     }
-    const dump = readDumpFromDb(db);
+    const dump = readDumpFromDb(db, readSources, expected);
     if (!dump || !Number.isFinite(dump.version)) {
       clearDerivedStoreData(home);
       return undefined;
@@ -259,6 +348,32 @@ export function clearDerivedStoreData(home?: string): void {
     }
     throw err;
   }
+}
+
+export function readRemoteSyncState(home: string): string | undefined {
+  return metaGet(openDb(home), "remote_sync");
+}
+
+export function writeRemoteSyncState(home: string, json: string): void {
+  metaSet(openDb(home), "remote_sync", json);
+}
+
+export function cachePruneDue(home?: string): boolean {
+  const last = Number(metaGet(openDb(home), "cache_pruned_at"));
+  return !Number.isFinite(last) || Date.now() - last >= 86_400_000 || last > Date.now();
+}
+
+export function recordCachePrune(home?: string): void {
+  metaSet(openDb(home), "cache_pruned_at", String(Date.now()));
+}
+
+export function readLinkedImports(home?: string): string[] {
+  const rows = openDb(home).prepare("SELECT path FROM linked_imports").all() as { path: string }[];
+  return rows.map((row) => row.path);
+}
+
+export function registerLinkedImport(filePath: string, home?: string): void {
+  openDb(home).prepare("INSERT OR IGNORE INTO linked_imports (path) VALUES (?)").run(filePath);
 }
 
 export function readStoredToggles(
@@ -305,49 +420,58 @@ export function deleteStoredToggles(home: string | undefined, ids: string[]): vo
 }
 
 export function writeStoreDumpDb(dump: StoreDump, home?: string): void {
+  writeStoreChanges(home, {
+    version: dump.version,
+    pricingContext: dump.pricingContext,
+    replace: true,
+    sources: dump.sources.map((snapshot) => prepareSource(snapshot)),
+    fingerprints: Object.entries(dump.fingerprints),
+    removedIds: [],
+    removedPaths: [],
+  });
+}
+
+/** Publish changed evidence, compact indexes and their fingerprints as one generation. */
+export function writeStoreChanges(home: string | undefined, changes: {
+  version: number;
+  pricingContext: string;
+  replace: boolean;
+  sources: PreparedSource[];
+  fingerprints: [string, FileFingerprint][];
+  removedIds: string[];
+  removedPaths: string[];
+}): void {
   const db = openDb(home);
-  db.exec("BEGIN");
+  db.exec("BEGIN IMMEDIATE");
   try {
     metaSet(db, "schema_version", String(STORE_DB_SCHEMA_VERSION));
-    metaSet(db, "dump_version", String(dump.version));
-    metaSet(db, "pricing_context", dump.pricingContext);
-
-    db.exec("DELETE FROM sources");
-    db.exec("DELETE FROM fingerprints");
-
-    const insertSource = db.prepare(
-      "INSERT INTO sources(id, snapshot_json) VALUES(?, ?)",
-    );
-    for (const snap of dump.sources) {
-      insertSource.run(snap.id, JSON.stringify({ ...snap, children: [] }));
+    metaSet(db, "dump_version", String(changes.version));
+    metaSet(db, "pricing_context", changes.pricingContext);
+    if (changes.replace) {
+      db.exec("DELETE FROM sources; DELETE FROM fingerprints;");
+    } else {
+      const deleteSource = db.prepare("DELETE FROM sources WHERE id = ?");
+      for (const id of changes.removedIds) deleteSource.run(id);
+      const deleteFingerprint = db.prepare("DELETE FROM fingerprints WHERE path = ?");
+      for (const file of changes.removedPaths) deleteFingerprint.run(file);
     }
-
-    const insertFp = db.prepare(
-      `INSERT INTO fingerprints(
+    const source = db.prepare(`INSERT INTO sources(id, snapshot_json) VALUES(?, ?)
+      ON CONFLICT(id) DO UPDATE SET snapshot_json=excluded.snapshot_json`);
+    const index = db.prepare(SAVE_INDEX);
+    for (const item of changes.sources) {
+      source.run(item.index.id, item.json);
+      index.run(item.index.id, item.index.revision, INDEX_FORMAT, item.packedIndex ?? encodeIndex(item.index));
+    }
+    const insertFp = db.prepare(`INSERT OR REPLACE INTO fingerprints(
         path, inode, size, mtime_ms, wal_size, wal_mtime_ms, shm_size, shm_mtime_ms
-      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const [filePath, fp] of Object.entries(dump.fingerprints)) {
-      insertFp.run(
-        filePath,
-        fp.inode,
-        fp.size,
-        fp.mtimeMs,
-        fp.walSize ?? 0,
-        fp.walMtimeMs ?? 0,
-        fp.shmSize ?? 0,
-        fp.shmMtimeMs ?? 0,
-      );
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const [file, fp] of changes.fingerprints) {
+      insertFp.run(file, fp.inode, fp.size, fp.mtimeMs, fp.walSize ?? 0, fp.walMtimeMs ?? 0, fp.shmSize ?? 0, fp.shmMtimeMs ?? 0);
     }
-
     db.exec("COMMIT");
-  } catch (err) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {
-      // Connection may already be closed.
-    }
-    throw err;
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch { /* Already closed. */ }
+    throw error;
   }
 }
 

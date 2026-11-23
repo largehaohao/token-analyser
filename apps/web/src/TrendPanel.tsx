@@ -6,6 +6,7 @@ import {
   chartMax,
   dayHasMixedUnpriced,
   dayMetricValue,
+  formatDayReading,
   dayUnpricedRaw,
   flaggedValue,
   formatChartDay,
@@ -82,6 +83,7 @@ export function TrendPanel({
   const hoveredHeat = heatTip.active;
   const metric = chartMetric;
   const days = overview?.days ?? [];
+  const dayByDate = new Map(days.map((day) => [day.date, day]));
   const max = chartMax(days.map((day) => dayMetricValue(day, metric)));
   const ticks = niceChartTicks(max);
   const knownValues = days
@@ -89,7 +91,8 @@ export function TrendPanel({
     .filter((value): value is number => value != null);
   const hasData = knownValues.some((value) => value > 0);
   const average =
-    knownValues.length >= 2
+    knownValues.length >= 2 && knownValues.length === days.length &&
+      days.every((day) => !day.cost.unmeasured && (metric === "tokens" || day.unpricedRaw === 0))
       ? knownValues.reduce((sum, value) => sum + value, 0) / knownValues.length
       : null;
   const today = localDateString(new Date());
@@ -109,7 +112,11 @@ export function TrendPanel({
   const overlayMax = mode === "cumulative" ? chartMax(overlay ?? []) : max;
   const calendar = heatCalendar(days, metric);
   const label = (value: number | null) =>
-    value == null ? "未定价" : formatChartNumber(value, metric);
+    value == null ? "—" : formatChartNumber(value, metric);
+  const readingForDate = (date: string) => {
+    const day = dayByDate.get(date);
+    return day ? formatDayReading(day, metric) : "—";
+  };
   return (
     <Panel role="region" className="chart-card trend-panel" data-testid="trend-chart" aria-label="每日支出趋势">
       <div className="chart-head">
@@ -282,12 +289,8 @@ export function TrendPanel({
                           onBlur={barTip.scheduleHide}
                         >
                           <b>{day.date}</b>
-                          <span>总计 {label(value)}</span>
-                          {value != null && (
-                            <span>
-                              {day.cost.raw.toLocaleString()} tokens
-                            </span>
-                          )}
+                          <span>{formatDayReading(day, metric)}{metric === "tokens" && value != null ? " tokens" : ""}</span>
+                          {metric !== "tokens" && <span>{formatDayReading(day, "tokens")}{day.cost.raw > 0 ? " tokens" : ""}</span>}
                           <span className="sep">
                             账本 / 解析异常 {label(flagged)}
                           </span>
@@ -390,7 +393,7 @@ export function TrendPanel({
                       className={`heat-cell${hoveredHeat === cell.date ? " hot" : ""}${cell.value == null ? " unknown" : ""}`}
                       data-level={cell.level}
                       data-date={cell.date}
-                      aria-label={`${cell.date} · ${label(cell.value)}${onDrillDay ? "，回车查看当日会话" : ""}`}
+                      aria-label={`${cell.date} · ${readingForDate(cell.date)}${onDrillDay ? "，回车查看当日会话" : ""}`}
                       onMouseEnter={(e) => heatTip.show(cell.date!, e.currentTarget)}
                       onMouseLeave={heatTip.scheduleHide}
                       onFocus={(e) => heatTip.show(cell.date!, e.currentTarget)}
@@ -417,7 +420,7 @@ export function TrendPanel({
                           onBlur={heatTip.scheduleHide}
                         >
                           <b>{cell.date}</b>
-                          <span>{label(cell.value)}</span>
+                          <span>{readingForDate(cell.date)}</span>
                           {onDrillDay && (
                             <BareButton
                               type="button"
@@ -456,7 +459,7 @@ export function TrendPanel({
             ["日期", metric, "账本 / 解析异常", "未定价 Token"],
             overview.days.map((day) => [
               day.date,
-              label(dayMetricValue(day, metric)),
+              formatDayReading(day, metric),
               label(flaggedValue(day, metric)),
               formatChartNumber(dayUnpricedRaw(day), "tokens"),
             ]),

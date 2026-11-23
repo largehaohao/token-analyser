@@ -1,48 +1,60 @@
 import path from "node:path";
 import { existsSync, statSync } from "node:fs";
 import { buildTree } from "./tree.ts";
+import { prepareSource, type PreparedSource, type SessionIndex } from "./session-index.ts";
 import { computeWaste } from "./waste.ts";
 import {
-  ingestFile,
   ingestSessions,
   pricingCacheContext,
   clearLiveReadState,
   pruneInactiveLiveReadStates,
-  readMultiSessionEvents,
-  snapshotFromEvents,
   type IngestOptions,
 } from "./ingest.ts";
-import { readCursorSessionsCooperative } from "./cursor-store.ts";
-import { isLive, pruneStaleCache } from "./cache.ts";
+import { withPricingLock } from "./pricing-lock.ts";
+import { BackgroundIngest, type FileUpdate } from "./background-ingest.ts";
+import { isLive } from "./cache.ts";
 import { isSessionFile } from "./session-files.ts";
 import { summarizeSessions } from "./performance.ts";
 import {
   DEFAULT_WASTE_TOGGLES,
+  addKnownCost,
+  emptyMaybeCost,
+  type AnalysisSession,
   type SessionListItem,
   type SessionSnapshot,
   type WasteToggleId,
 } from "./types.ts";
-import { buildOverview, type Overview, type OverviewOptions } from "./overview.ts";
+import {
+  behaviorSessionIds, buildOverview, type Overview, type OverviewOptions, type OverviewSliceKey,
+} from "./overview.ts";
 import {
   fileFingerprint,
   fingerprintsMatch,
   shouldDeferSqliteWalReparse,
   SQLITE_WAL_REPARSE_COOLDOWN_MS,
-  readStoreDump,
+  readStoreIndex,
   STORE_DUMP_VERSION,
-  writeStoreDump,
   type FileFingerprint,
 } from "./store-dump.ts";
 import {
   deleteStoredToggles,
   readStoredToggles,
   writeStoredToggle,
+  readSourceDetail,
+  needsIndexBackfill,
+  cachePruneDue,
+  recordCachePrune,
+  writeStoreChanges,
 } from "./store-db.ts";
 
 /** Coalesce dump writes after ingest bursts so a crash loses at most ~2s. */
 const DUMP_DEBOUNCE_MS = 2_000;
 
-function latestActivityIso(session: SessionSnapshot): string | null {
+function isSqliteFile(file: string): boolean {
+  return file.endsWith(".vscdb") || path.basename(file) === "opencode.db";
+}
+
+function latestActivityIso(session: AnalysisSession): string | null {
   let best = session.lastEventAt ?? session.startedAt;
   let bestMs = best ? Date.parse(best) : Number.NaN;
   for (const child of session.children) {
@@ -54,15 +66,6 @@ function latestActivityIso(session: SessionSnapshot): string | null {
     }
   }
   return best && Number.isFinite(bestMs) ? best : null;
-}
-
-function unpricedRawFromSession(session: SessionSnapshot): number {
-  let raw = 0;
-  for (const turn of session.turns) {
-    if (turn.cost.credits == null && turn.cost.usd == null) raw += turn.cost.raw;
-  }
-  for (const child of session.children) raw += unpricedRawFromSession(child);
-  return raw;
 }
 
 function rebuildDerived(snap: SessionSnapshot): SessionSnapshot {
@@ -88,7 +91,7 @@ function rebuildDerived(snap: SessionSnapshot): SessionSnapshot {
   };
 }
 
-function toListItem(snap: SessionSnapshot): SessionListItem {
+function toListItem(snap: SessionIndex): SessionListItem {
   return {
     id: snap.id,
     source: snap.source,
@@ -104,15 +107,15 @@ function toListItem(snap: SessionSnapshot): SessionListItem {
     lastEventAt: snap.lastEventAt,
     cost: snap.cost,
     waste: snap.waste,
-    unpricedRaw: unpricedRawFromSession(snap),
+    unpricedRaw: snap.unpricedRaw,
     parse_error: snap.parse_errors.length > 0,
     parse_error_offset: snap.parse_errors[0]?.offset,
     parse_error_message: snap.parse_errors[0]?.message,
     ledger_warning: snap.ledger_warning,
-    toolsChars: snap.context?.tools.chars ?? 0,
-    toolsCount: snap.context?.tools.items.length ?? 0,
-    skillsChars: snap.context?.skills.chars ?? 0,
-    skillsCount: snap.context?.skills.items.length ?? 0,
+    toolsChars: snap.toolsChars,
+    toolsCount: snap.toolsCount,
+    skillsChars: snap.skillsChars,
+    skillsCount: snap.skillsCount,
   };
 }
 
@@ -120,15 +123,30 @@ export type SessionStoreOptions = {
   cacheDir?: string;
 };
 
-export type SessionIngestOptions = Pick<IngestOptions, "allowAppend"> & {
+export type SessionIngestOptions = Pick<IngestOptions, "allowAppend" | "finalized"> & {
+  reparse?: boolean;
+  /** Stable discovery order for a partial startup reconciliation. */
+  precedence?: ReadonlyMap<string, number>;
   /** Keep an already-loaded canonical session when an import has the same id. */
   skipExisting?: boolean;
 };
 
+class MissingDetail extends Error {
+  constructor(readonly index: SessionIndex) { super("session_detail_changed"); }
+}
+
 export class SessionStore {
-  /** Raw per-file snapshots. Children are attached only in `rebuildAll`. */
-  private sources = new Map<string, SessionSnapshot>();
-  private snapshots = new Map<string, SessionSnapshot>();
+  /** Accounting stays in memory. Full turns are fetched only for the requested detail tree. */
+  private sources = new Map<string, SessionIndex>();
+  private snapshots = new Map<string, SessionIndex>();
+  private joinedFrom = new Map<string, SessionIndex>();
+  private detailViews = new Map<SessionIndex, SessionSnapshot>();
+  private roots?: SessionIndex[];
+  private pendingSources = new Map<string, PreparedSource>();
+  private persistedRevisions = new Map<string, string>();
+  private persistedFingerprints = new Map<string, FileFingerprint>();
+  private hasPersistedBase = false;
+  private accountedPrices = pricingCacheContext();
   private toggles = new Map<string, Record<WasteToggleId, boolean>>();
   /** Resolved path → fingerprint of the file used for the current source(s). */
   private fingerprints = new Map<string, FileFingerprint>();
@@ -143,35 +161,46 @@ export class SessionStore {
   /** True after a mutation that should be persisted to the store dump. */
   private dumpDirty = false;
   /** Single-flight batched ingests per resolved path. */
+  private readonly parser = new BackgroundIngest();
   private batchedFlights = new Map<string, Promise<string | undefined>>();
   private batchedRefreshPending = new Set<string>();
   /** Last full scan of source mtimes; reads reuse it for up to one second. */
   private lastLiveFlagScanAt = 0;
-  /** Dump generation fingerprint for incremental persistence. */
-  private lastDumpSourceIds = "";
-  private lastDumpFingerprintIds = "";
+  private revision = 0;
+  private overviewCache = new Map<string, Overview>();
+
+  get restoredIndex(): boolean {
+    return this.hasPersistedBase;
+  }
+
+  get dataRevision(): number {
+    return this.revision;
+  }
 
   constructor(opts?: SessionStoreOptions) {
     if (opts?.cacheDir) {
       this.cacheHome = path.dirname(opts.cacheDir);
     }
-    // Prune is O(cache files × JSON parse). Defer so startup loadDump/refresh
-    // is not blocked on reading every per-file cache entry.
-    const home = this.cacheHome;
-    const context = pricingCacheContext();
-    setTimeout(() => {
-      try {
-        pruneStaleCache(home, context);
-      } catch {
-        // Best-effort cleanup; ingest still works without it.
-      }
-    }, 0).unref?.();
+  }
+
+  async restoreForStartup(): Promise<number> {
+    const prices = pricingCacheContext();
+    if (needsIndexBackfill(this.cacheHome, { version: STORE_DUMP_VERSION, pricingContext: prices })) {
+      await this.parser.maintain("migrate", this.cacheHome, prices);
+    }
+    return this.loadDump();
+  }
+
+  async pruneCache(): Promise<void> {
+    if (!cachePruneDue(this.cacheHome)) return;
+    await this.parser.maintain("prune", this.cacheHome, pricingCacheContext());
+    recordCachePrune(this.cacheHome);
   }
 
   /** Queue a dump soon after mutations; coalesces watcher append storms. */
   scheduleDump(): void {
     this.dumpDirty = true;
-    if (this.dumpTimer) clearTimeout(this.dumpTimer);
+    if (this.dumpTimer) return;
     this.dumpTimer = setTimeout(() => {
       this.dumpTimer = undefined;
       try {
@@ -192,10 +221,10 @@ export class SessionStore {
       childrenByParent.set(source.parentId, children);
     }
 
-    const rebuilt = new Map<string, SessionSnapshot>();
+    const rebuilt = new Map<string, SessionIndex>();
     const building = new Set<string>();
 
-    const build = (id: string): SessionSnapshot => {
+    const build = (id: string): SessionIndex => {
       const existing = rebuilt.get(id);
       if (existing) return existing;
       const source = this.sources.get(id)!;
@@ -207,17 +236,32 @@ export class SessionStore {
       building.add(id);
       const children = (childrenByParent.get(id) ?? []).map(build);
       building.delete(id);
-      const snapshot = rebuildDerived({
-        ...source,
-        children,
-        toggles: this.toggles.get(id) ?? DEFAULT_WASTE_TOGGLES,
-      });
+      const toggles = this.toggles.get(id) ?? DEFAULT_WASTE_TOGGLES;
+      const old = this.snapshots.get(id);
+      if (old && this.joinedFrom.get(id) === source && old.toggles === toggles &&
+          children.length === old.children.length && children.every((child, i) => child === old.children[i])) {
+        rebuilt.set(id, old);
+        return old;
+      }
+      const childCost = children.reduce((sum, child) => addKnownCost(sum, child.cost), emptyMaybeCost());
+      const { waste } = computeWaste({ turns: source.turns, children, toggles });
+      const snapshot: SessionIndex = {
+        ...source, children, toggles, waste,
+        cost: addKnownCost(source.cost, childCost),
+        unpricedRaw: children.reduce((sum, child) => sum + child.unpricedRaw, source.unpricedRaw),
+        live: source.live || children.some((child) => child.live),
+      };
+      snapshot.lastEventAt = latestActivityIso(snapshot);
       rebuilt.set(id, snapshot);
       return snapshot;
     };
 
     for (const id of this.sources.keys()) build(id);
     this.snapshots = rebuilt;
+    this.joinedFrom = new Map(this.sources);
+    this.roots = undefined;
+    this.revision += 1;
+    this.overviewCache.clear();
   }
 
   private reindexPaths(): void {
@@ -230,10 +274,10 @@ export class SessionStore {
     }
   }
 
-  private sourcesForPath(resolved: string): SessionSnapshot[] {
+  private sourcesForPath(resolved: string): SessionIndex[] {
     const ids = this.sourcesByPath.get(resolved);
     if (!ids || ids.length === 0) return [];
-    const out: SessionSnapshot[] = [];
+    const out: SessionIndex[] = [];
     for (const id of ids) {
       const snap = this.sources.get(id);
       if (snap) out.push(snap);
@@ -241,17 +285,7 @@ export class SessionStore {
     return out;
   }
 
-  private rememberFingerprint(filePath: string): void {
-    try {
-      const resolved = path.resolve(filePath);
-      this.fingerprints.set(resolved, fileFingerprint(filePath));
-      if (resolved.endsWith(".vscdb") || path.basename(resolved) === "opencode.db") {
-        this.sqliteIngestAt.set(resolved, Date.now());
-      }
-    } catch {
-      this.fingerprints.delete(path.resolve(filePath));
-    }
-  }
+
 
   private sqliteWalState(
     filePath: string,
@@ -304,8 +338,9 @@ export class SessionStore {
   loadDump(): number {
     // Preferences live independently of derived snapshots: they survive dump
     // version bumps, pricing changes and cache rebuilds.
-    const storedToggles = readStoredToggles(this.cacheHome);
-    const dump = readStoreDump(this.cacheHome, pricingCacheContext());
+    this.accountedPrices = pricingCacheContext();
+    const dump = readStoreIndex(this.cacheHome, this.accountedPrices);
+    const storedToggles = dump?.toggles ?? readStoredToggles(this.cacheHome);
     if (!dump) {
       for (const [id, toggles] of Object.entries(storedToggles)) {
         this.toggles.set(id, { ...toggles });
@@ -315,9 +350,12 @@ export class SessionStore {
     this.sources.clear();
     this.toggles.clear();
     this.fingerprints.clear();
+    this.pendingSources.clear();
+    this.persistedRevisions.clear();
     for (const snap of dump.sources) {
       if (!snap?.id || typeof snap.path !== "string") continue;
-      this.sources.set(snap.id, { ...snap, children: [] });
+      this.sources.set(snap.id, snap);
+      this.persistedRevisions.set(snap.id, snap.revision);
     }
     for (const [id, toggles] of Object.entries(storedToggles)) {
       if (this.sources.has(id)) this.toggles.set(id, { ...toggles });
@@ -330,6 +368,8 @@ export class SessionStore {
         this.sqliteIngestAt.set(resolved, restoredAt);
       }
     }
+    this.hasPersistedBase = true;
+    this.persistedFingerprints = new Map(this.fingerprints);
     this.reindexPaths();
     this.rebuildAll();
     return this.sources.size;
@@ -342,47 +382,33 @@ export class SessionStore {
       this.dumpTimer = undefined;
     }
     if (!opts?.force && !this.dumpDirty) return;
-    const sourceIds = [...this.sources.keys()].sort().join("|");
-    const fingerprintIds = [...this.fingerprints.keys()].sort().join("|");
-    if (
-      !opts?.force &&
-      sourceIds === this.lastDumpSourceIds &&
-      fingerprintIds === this.lastDumpFingerprintIds
-    ) {
-      // Only preference metadata changed; preferences already have their own
-      // durable table, so skip rewriting the full snapshot history.
-      this.dumpDirty = false;
-      return;
-    }
-    const fingerprints: Record<string, FileFingerprint> = {};
-    for (const [filePath, fingerprint] of this.fingerprints) {
-      fingerprints[filePath] = fingerprint;
-    }
-    const toggles: Record<string, Record<WasteToggleId, boolean>> = {};
-    for (const [id, value] of this.toggles) {
-      toggles[id] = { ...value };
-    }
-    writeStoreDump(
-      {
-        version: STORE_DUMP_VERSION,
-        pricingContext: pricingCacheContext(),
-        sources: [...this.sources.values()].map((snap) => ({
-          ...snap,
-          children: [],
-        })),
-        toggles,
-        fingerprints,
-      },
-      this.cacheHome,
-    );
-    this.lastDumpSourceIds = sourceIds;
-    this.lastDumpFingerprintIds = fingerprintIds;
+    const removedIds = [...this.persistedRevisions.keys()].filter((id) => !this.sources.has(id));
+    const removedPaths = [...this.persistedFingerprints.keys()].filter((file) => !this.fingerprints.has(file));
+    const updates = [...this.pendingSources.values()].filter(({ index }) =>
+      this.sources.get(index.id)?.revision === index.revision &&
+      this.persistedRevisions.get(index.id) !== index.revision);
+    const fingerprints = [...this.fingerprints].filter(([file, value]) =>
+      !fingerprintsMatch(this.persistedFingerprints.get(file), value));
+    writeStoreChanges(this.cacheHome, {
+      version: STORE_DUMP_VERSION,
+      pricingContext: this.accountedPrices,
+      replace: !this.hasPersistedBase,
+      sources: updates,
+      fingerprints,
+      removedIds,
+      removedPaths,
+    });
+    this.hasPersistedBase = true;
+    for (const id of removedIds) this.persistedRevisions.delete(id);
+    for (const { index } of updates) this.persistedRevisions.set(index.id, index.revision);
+    this.persistedFingerprints = new Map(this.fingerprints);
+    this.pendingSources.clear();
     this.dumpDirty = false;
   }
 
   private keepSource(
-    snap: SessionSnapshot,
-    nextSources: Map<string, SessionSnapshot>,
+    snap: SessionSnapshot | SessionIndex,
+    nextSources: Map<string, SessionIndex>,
     nextToggles: Map<string, Record<WasteToggleId, boolean>>,
     live?: boolean,
   ): void {
@@ -394,12 +420,15 @@ export class SessionStore {
     if (incumbent?.path.endsWith(".vscdb") && !snap.path.endsWith(".vscdb")) {
       return;
     }
-    nextSources.set(snap.id, {
-      ...snap,
-      children: [],
-      ...(live != null ? { live } : {}),
-    });
+    const index = "tree" in snap ? this.prepare(snap) : snap;
+    nextSources.set(index.id, live == null || live === index.live ? index : { ...index, live });
     nextToggles.set(snap.id, this.toggles.get(snap.id) ?? { ...snap.toggles });
+  }
+
+  private prepare(snap: SessionSnapshot): SessionIndex {
+    const prepared = prepareSource(snap);
+    this.pendingSources.set(snap.id, prepared);
+    return prepared.index;
   }
 
   private liveReingestPending = new Set<string>();
@@ -419,17 +448,9 @@ export class SessionStore {
       this.liveReingestTimer = undefined;
       const paths = [...this.liveReingestPending];
       this.liveReingestPending.clear();
-      try {
-        for (const pendingPath of paths) {
-          try {
-            this.ingestPath(pendingPath);
-          } catch {
-            // Watcher / next list will retry; never block the request path.
-          }
-        }
-      } finally {
-        resolveBatch();
-      }
+      void Promise.allSettled(paths.map((pendingPath) =>
+        this.ingestPathBatched(pendingPath, { reparse: true }),
+      )).then(resolveBatch);
     }, 250);
     this.liveReingestTimer.unref?.();
   }
@@ -449,6 +470,7 @@ export class SessionStore {
     pruneInactiveLiveReadStates();
     let changed = false;
     for (const [id, source] of this.sources) {
+      if (source.finalized) continue;
       const resolved = path.resolve(source.path);
       if (source.path.endsWith(".vscdb") || path.basename(source.path) === "opencode.db") {
         const live = source.lastEventAt != null && isLive(Date.parse(source.lastEventAt));
@@ -483,13 +505,35 @@ export class SessionStore {
 
   refresh(
     paths: string[],
-    opts?: { onError?: (filePath: string, err: Error) => void },
+    opts?: {
+      onError?: (filePath: string, err: Error) => void;
+      /** If provided, paths outside this full scan and its deferred/linked files are obsolete. */
+      retainPaths?: readonly string[];
+    },
   ): void {
-    const nextSources = new Map<string, SessionSnapshot>();
+    let mutated = false;
+    if (opts?.retainPaths) {
+      const retained = new Set([...paths, ...opts.retainPaths].map((file) => path.resolve(file)));
+      for (const [id, source] of this.sources) {
+        if (retained.has(path.resolve(source.path))) continue;
+        this.sources.delete(id);
+        this.toggles.delete(id);
+        clearLiveReadState(source.path);
+        mutated = true;
+      }
+      for (const file of this.fingerprints.keys()) {
+        if (retained.has(file)) continue;
+        this.fingerprints.delete(file);
+        this.sqliteIngestAt.delete(file);
+        this.liveMtimeMs.delete(file);
+        mutated = true;
+      }
+      if (mutated) this.reindexPaths();
+    }
+    const nextSources = new Map<string, SessionIndex>();
     const nextToggles = new Map<string, Record<WasteToggleId, boolean>>();
     const nextFingerprints = new Map<string, FileFingerprint>();
     const refreshedPaths = new Set<string>();
-    let mutated = false;
 
     for (const p of paths) {
       if (!isSessionFile(p)) continue;
@@ -498,6 +542,7 @@ export class SessionStore {
       try {
         const current = fileFingerprint(p);
         const previous = this.sourcesForPath(resolved);
+        const finalized = previous.some((snap) => snap.finalized);
         const recorded = this.fingerprints.get(resolved);
         // Trust the fingerprint over the 2-minute isLive window. Cursor's
         // state.vscdb (~GB) stays "live" whenever the app is open; requiring
@@ -505,14 +550,16 @@ export class SessionStore {
         // when inode/size/mtime/WAL were unchanged since the dump.
         // Empty previous is OK: Cursor JSONL dupes are fingerprint-only when
         // state.vscdb already owns those session ids.
-        const unchanged = fingerprintsMatch(recorded, current);
+        const isSqlite = p.endsWith(".vscdb") || path.basename(p) === "opencode.db";
+        const expiredLiveFile = !isSqlite && !isLive(current.mtimeMs) && previous.some((snap) => snap.live);
+        const unchanged = !expiredLiveFile && fingerprintsMatch(recorded, current);
         const deferredWal = !unchanged && this.shouldSkipSqliteWal(p, current);
         if (unchanged || deferredWal) {
           for (const snap of previous) {
             // vscdb live is derived from lastEventAt, not file mtime.
-            const reusedLive = snap.path.endsWith(".vscdb") || path.basename(snap.path) === "opencode.db"
+            const reusedLive = !snap.finalized && (isSqlite
               ? snap.lastEventAt != null && isLive(Date.parse(snap.lastEventAt))
-              : isLive(current.mtimeMs);
+              : isLive(current.mtimeMs));
             this.keepSource(snap, nextSources, nextToggles, reusedLive);
           }
           // A deferred WAL-only change was NOT parsed. Keep the fingerprint of
@@ -531,6 +578,7 @@ export class SessionStore {
           // Live JSONL may only have grown since the dump; allow append-state
           // when the watcher later continues the same file.
           allowAppend: isLive(current.mtimeMs),
+          finalized,
         });
         for (const snap of ingested) {
           this.keepSource(snap, nextSources, nextToggles);
@@ -622,14 +670,19 @@ export class SessionStore {
   }
 
   refreshPricing(): number {
-    const refreshedSources = new Map<string, SessionSnapshot>();
+    const prices = pricingCacheContext();
+    const refreshedSources = new Map<string, SessionIndex>();
+    const updated = new Map<string, PreparedSource>();
     const refreshedToggles = new Map<string, Record<WasteToggleId, boolean>>();
     const refreshedFingerprints = new Map<string, FileFingerprint>();
 
     for (const filePath of new Set([...this.sources.values()].map((source) => source.path))) {
-      for (const refreshed of ingestSessions(filePath, { cacheHome: this.cacheHome })) {
+      const finalized = this.sourcesForPath(path.resolve(filePath)).some((snap) => snap.finalized);
+      for (const refreshed of ingestSessions(filePath, { cacheHome: this.cacheHome, finalized })) {
         if (refreshedSources.get(refreshed.id)?.path.endsWith(".vscdb") && !filePath.endsWith(".vscdb")) continue;
-        refreshedSources.set(refreshed.id, { ...refreshed, children: [] });
+        const prepared = prepareSource(refreshed);
+        refreshedSources.set(refreshed.id, prepared.index);
+        updated.set(refreshed.id, prepared);
         refreshedToggles.set(
           refreshed.id,
           this.toggles.get(refreshed.id) ?? { ...refreshed.toggles },
@@ -642,6 +695,8 @@ export class SessionStore {
       }
     }
 
+    this.accountedPrices = prices;
+    this.pendingSources = updated;
     this.sources = refreshedSources;
     this.toggles = refreshedToggles;
     this.fingerprints = refreshedFingerprints;
@@ -649,6 +704,57 @@ export class SessionStore {
     this.rebuildAll();
     this.scheduleDump();
     return refreshedSources.size;
+  }
+
+  /** Called inside the price-card transaction. Reads keep using the previous
+   * complete ledger until all files have been priced successfully. */
+  async repriceInBackground(): Promise<number> {
+    const prices = pricingCacheContext();
+    if (prices === this.accountedPrices) {
+      this.overviewCache.clear(); // publication dates may have changed
+      return this.sources.size;
+    }
+    const previous = new Map(this.sources);
+    const next = new Map<string, SessionIndex>();
+    const details = new Map(this.pendingSources);
+    const fingerprints = new Map(this.fingerprints);
+    const changedWhileReading: string[] = [];
+    for (const file of new Set([...previous.values()].map((source) => source.path))) {
+      const resolved = path.resolve(file);
+      const stored = this.sourcesForPath(resolved);
+      const input = fileFingerprint(file);
+      const update = await this.parser.read(file, {
+        cacheHome: this.cacheHome, finalized: stored.some((snap) => snap.finalized),
+      }, new Map(stored.map((snap) => [snap.id, snap.revision])), prices);
+      if (!update) throw new Error("prices_changed_during_recalculation");
+      const updates = new Map(update.updated.map((item) => [item.index.id, item]));
+      for (const id of update.ids) {
+        if (next.get(id)?.path.endsWith(".vscdb") && !file.endsWith(".vscdb")) continue;
+        const prepared = updates.get(id);
+        const index = prepared?.index ?? previous.get(id);
+        if (!index) throw new Error("session_changed_during_recalculation");
+        next.set(id, index);
+        if (prepared) details.set(id, prepared);
+      }
+      fingerprints.set(resolved, input);
+      if (!fingerprintsMatch(input, fileFingerprint(file))) changedWhileReading.push(file);
+    }
+    if (prices !== pricingCacheContext() || previous.size !== this.sources.size ||
+        [...previous].some(([id, old]) => this.sources.get(id)?.revision !== old.revision)) {
+      throw new Error("session_changed_during_recalculation");
+    }
+    this.accountedPrices = prices;
+    this.pendingSources = details;
+    this.sources = next;
+    this.fingerprints = fingerprints;
+    for (const [id, source] of next) {
+      if (!this.toggles.has(id)) this.toggles.set(id, { ...source.toggles });
+    }
+    this.reindexPaths();
+    this.rebuildAll();
+    this.scheduleDump();
+    for (const file of changedWhileReading) this.scheduleBatchedRefresh(file, { reparse: true });
+    return next.size;
   }
 
   removePath(filePath: string): { id: string; parentId: string | null } | undefined {
@@ -671,34 +777,47 @@ export class SessionStore {
     return removed;
   }
 
-  private installSnapshots(
-    filePath: string,
-    snapshots: SessionSnapshot[],
+  private installFile(
+    file: string,
+    update: FileUpdate,
+    input: FileFingerprint,
     opts?: SessionIngestOptions,
   ): string | undefined {
-    const resolved = path.resolve(filePath);
-    const ids = new Set(snapshots.map((snap) => snap.id));
-    const removedIds: string[] = [];
-    for (const [id, source] of this.sources) {
-      if (ids.has(id)) continue;
-      if (path.resolve(source.path) !== resolved) continue;
+    const resolved = path.resolve(file);
+    const ids = new Set(update.ids);
+    const removedIds = (this.sourcesByPath.get(resolved) ?? []).filter((id) => !ids.has(id));
+    for (const id of removedIds) {
       this.sources.delete(id);
+      this.pendingSources.delete(id);
       this.toggles.delete(id);
-      removedIds.push(id);
     }
-    for (const snap of snapshots) {
+    let changed = removedIds.length > 0;
+    for (const prepared of update.updated) {
+      const snap = prepared.index;
       const existing = this.sources.get(snap.id);
       if (opts?.skipExisting && existing) continue;
-      if (existing?.path.endsWith(".vscdb") && !filePath.endsWith(".vscdb")) continue;
+      if (existing?.revision === snap.revision &&
+          (this.persistedRevisions.get(snap.id) === snap.revision ||
+           this.pendingSources.get(snap.id)?.index.revision === snap.revision)) continue;
+      if (existing && existing.path !== snap.path && opts?.precedence &&
+          !(snap.path.endsWith(".vscdb") && !existing.path.endsWith(".vscdb")) &&
+          (opts.precedence.get(existing.path) ?? Infinity) > (opts.precedence.get(snap.path) ?? Infinity)) continue;
+      if (existing?.path.endsWith(".vscdb") && !file.endsWith(".vscdb")) continue;
       if (!this.toggles.has(snap.id)) this.toggles.set(snap.id, { ...snap.toggles });
-      this.sources.set(snap.id, { ...snap, children: [] });
+      this.sources.set(snap.id, snap);
+      this.pendingSources.set(snap.id, prepared);
+      changed = true;
     }
-    if (removedIds.length > 0) deleteStoredToggles(this.cacheHome, removedIds);
-    this.rememberFingerprint(filePath);
-    this.reindexPaths();
-    this.rebuildAll();
-    this.scheduleDump();
-    return snapshots[0]?.id;
+    if (removedIds.length) deleteStoredToggles(this.cacheHome, removedIds);
+    const fingerprintChanged = !fingerprintsMatch(this.fingerprints.get(resolved), input);
+    this.fingerprints.set(resolved, input);
+    if (isSqliteFile(resolved)) this.sqliteIngestAt.set(resolved, Date.now());
+    if (changed) {
+      this.reindexPaths();
+      this.rebuildAll();
+    }
+    if (changed || fingerprintChanged) this.scheduleDump();
+    return update.ids[0];
   }
 
   ingestPath(
@@ -708,10 +827,10 @@ export class SessionStore {
     const resolved = path.resolve(filePath);
     try {
       const current = fileFingerprint(filePath);
-      if (
+      if (!opts?.reparse && (
         fingerprintsMatch(this.fingerprints.get(resolved), current) ||
         this.shouldSkipSqliteWal(filePath, current)
-      ) {
+      )) {
         // Unchanged since last ingest/dump — skip the (possibly multi‑MB) parse.
         const existing = this.sourcesForPath(resolved);
         if (opts?.skipExisting && existing[0]) return existing[0].id;
@@ -723,25 +842,25 @@ export class SessionStore {
     const snapshots = ingestSessions(filePath, {
       cacheHome: this.cacheHome,
       allowAppend: opts?.allowAppend,
+      finalized: opts?.finalized,
     });
-    return this.installSnapshots(filePath, snapshots, opts);
+    return this.installFile(filePath, {
+      ids: snapshots.map((snap) => snap.id),
+      updated: snapshots.map((snap) => prepareSource(snap)),
+    }, fileFingerprint(filePath), opts);
   }
 
   /**
-   * Ingest a multi-session DB without blocking the HTTP loop for the whole file.
-   * OpenCode/Cursor stores are analysed in batches with a tick between each.
+   * Parse away from the HTTP thread, then publish one consistent file generation.
    */
   async ingestPathBatched(
     filePath: string,
-    opts?: SessionIngestOptions & {
-      batchSize?: number;
-      onBatch?: (ids: string[]) => void;
-    },
+    opts?: SessionIngestOptions,
   ): Promise<string | undefined> {
     const resolved = path.resolve(filePath);
     const flight = this.batchedFlights.get(resolved);
     if (flight) return flight;
-    const run = this.runBatchedIngest(filePath, resolved, opts);
+    const run = withPricingLock(() => this.runBatchedIngest(filePath, resolved, opts));
     this.batchedFlights.set(resolved, run);
     try {
       return await run;
@@ -753,101 +872,41 @@ export class SessionStore {
   private async runBatchedIngest(
     filePath: string,
     resolved: string,
-    opts?: SessionIngestOptions & {
-      batchSize?: number;
-      onBatch?: (ids: string[]) => void;
-    },
+    opts?: SessionIngestOptions,
   ): Promise<string | undefined> {
-    try {
-      const current = fileFingerprint(filePath);
-      if (
-        fingerprintsMatch(this.fingerprints.get(resolved), current) ||
-        this.shouldSkipSqliteWal(filePath, current)
-      ) {
-        const existing = this.sourcesForPath(resolved);
-        if (existing[0]) return existing[0].id;
-      }
-    } catch {
-      // Fall through.
+    const input = fileFingerprint(filePath);
+    if (!opts?.reparse && (fingerprintsMatch(this.fingerprints.get(resolved), input) ||
+        this.shouldSkipSqliteWal(filePath, input))) {
+      // A matched fingerprint can legitimately contribute zero sessions.
+      return this.sourcesByPath.get(resolved)?.[0];
     }
-    let startFingerprint: FileFingerprint | undefined;
-    try {
-      startFingerprint = fileFingerprint(filePath);
-    } catch {
-      // Missing file: the parse below reports the failure.
+    const known = new Map(this.sourcesForPath(resolved).map((source) => [source.id, source.revision]));
+    const prices = pricingCacheContext();
+    const update = await this.parser.read(filePath, {
+      cacheHome: this.cacheHome, allowAppend: opts?.allowAppend, finalized: opts?.finalized,
+    }, known, prices);
+    if (!existsSync(filePath)) {
+      this.removePath(filePath);
+      return undefined;
     }
-    const groups = filePath.endsWith(".vscdb")
-      ? await readCursorSessionsCooperative(filePath)
-      : readMultiSessionEvents(filePath);
-    if (!groups) return this.ingestPath(filePath, opts);
-    const batchSize = Math.max(1, opts?.batchSize ?? 20);
-    const previousIds = new Set(this.sourcesByPath.get(resolved) ?? []);
-    // Sources are replaced batch by batch; toggles stay until reconciliation
-    // so a refresh never resets preferences for sessions that survive it.
-    for (const [id, source] of this.sources) {
-      if (path.resolve(source.path) !== resolved) continue;
-      this.sources.delete(id);
+    const current = fileFingerprint(filePath);
+    const changedDuringRun = !fingerprintsMatch(input, current);
+    if (!update || prices !== pricingCacheContext() ||
+        known.size !== (this.sourcesByPath.get(resolved)?.length ?? 0) ||
+        [...known].some(([id, version]) => this.sources.get(id)?.revision !== version)) {
+      this.scheduleBatchedRefresh(filePath, { ...opts, reparse: true });
+      return this.sourcesByPath.get(resolved)?.[0];
     }
-    let firstId: string | undefined;
-    const surviving = new Set<string>();
-    for (let offset = 0; offset < groups.length; offset += batchSize) {
-      const batchIds: string[] = [];
-      for (const events of groups.slice(offset, offset + batchSize)) {
-        const snap = snapshotFromEvents(events, filePath);
-        if (opts?.skipExisting && this.sources.has(snap.id)) {
-          surviving.add(snap.id);
-          continue;
-        }
-        if (!this.toggles.has(snap.id)) this.toggles.set(snap.id, { ...snap.toggles });
-        this.sources.set(snap.id, { ...snap, children: [] });
-        surviving.add(snap.id);
-        batchIds.push(snap.id);
-        firstId ??= snap.id;
-      }
-      this.reindexPaths();
-      this.rebuildAll();
-      opts?.onBatch?.(batchIds);
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    // Finalize even when the database yielded zero sessions, so stale
-    // snapshots cannot outlive an emptied source.
-    this.reindexPaths();
-    this.rebuildAll();
-    const removedIds = [...previousIds].filter((id) => !surviving.has(id));
-    for (const id of removedIds) this.toggles.delete(id);
-    if (removedIds.length > 0) deleteStoredToggles(this.cacheHome, removedIds);
-    let changedDuringRun = startFingerprint == null;
-    try {
-      changedDuringRun =
-        startFingerprint == null ||
-        !fingerprintsMatch(startFingerprint, fileFingerprint(filePath));
-    } catch {
-      changedDuringRun = true;
-    }
+    const firstId = this.installFile(filePath, update, input, opts);
     if (changedDuringRun) {
-      // Commits landed while batches were processing: keep the input
-      // fingerprint so the change is detected. A live SQLite WAL never sits
-      // still, so an immediate refresh parses the same database forever and
-      // session requests wait behind it. The cooldown is the same one the
-      // watcher already uses.
-      if (startFingerprint) this.fingerprints.set(resolved, startFingerprint);
-      else this.fingerprints.delete(resolved);
-      const sqlite = resolved.endsWith(".vscdb") || path.basename(resolved) === "opencode.db";
-      if (sqlite) this.sqliteIngestAt.set(resolved, Date.now());
-      this.scheduleBatchedRefresh(filePath, opts, sqlite ? SQLITE_WAL_REPARSE_COOLDOWN_MS : 0);
-    } else {
-      this.rememberFingerprint(filePath);
+      this.scheduleBatchedRefresh(filePath, opts, isSqliteFile(filePath) ? SQLITE_WAL_REPARSE_COOLDOWN_MS : 0);
     }
-    this.scheduleDump();
     return firstId;
   }
 
   private scheduleBatchedRefresh(
     filePath: string,
-    opts?: SessionIngestOptions & {
-      batchSize?: number;
-      onBatch?: (ids: string[]) => void;
-    },
+    opts?: SessionIngestOptions,
     delayMs = 0,
   ): void {
     const resolved = path.resolve(filePath);
@@ -864,6 +923,23 @@ export class SessionStore {
   knowsPath(filePath: string): boolean {
     const resolved = path.resolve(filePath);
     return this.fingerprints.has(resolved) || this.sourcesForPath(resolved).length > 0;
+  }
+
+  sourceOwners(): Map<string, string> {
+    return new Map([...this.sources].map(([id, source]) => [id, source.path]));
+  }
+
+  needsStartupIngest(file: string, imported = false): boolean {
+    const resolved = path.resolve(file);
+    try {
+      const current = fileFingerprint(file);
+      if (!fingerprintsMatch(this.fingerprints.get(resolved), current)) return true;
+      const previous = this.sourcesForPath(resolved);
+      if (imported && previous.length === 0) return true;
+      return !isSqliteFile(file) && !isLive(current.mtimeMs) && previous.some((source) => source.live && !source.finalized);
+    } catch {
+      return true;
+    }
   }
 
   /** Skip the first watch scan when the dump is still a valid read of this file. */
@@ -887,8 +963,9 @@ export class SessionStore {
       .map((snap) => snap.id);
   }
 
-  private rootSnapshots(): SessionSnapshot[] {
+  private rootSnapshots(): SessionIndex[] {
     this.refreshLiveFlags();
+    if (this.roots) return this.roots;
     const roots = [...this.snapshots.values()].filter(
       (s) => s.parentId == null || !this.sources.has(s.parentId),
     );
@@ -898,6 +975,7 @@ export class SessionStore {
       const bTime = b.lastEventAt ?? "";
       return bTime.localeCompare(aTime);
     });
+    this.roots = roots;
     return roots;
   }
 
@@ -905,17 +983,73 @@ export class SessionStore {
     return this.rootSnapshots().map(toListItem);
   }
 
-  overview(
-    opts: Omit<OverviewOptions, "now">,
-  ): Overview {
-    return buildOverview(this.rootSnapshots(), opts);
+  overview(opts: OverviewOptions): Overview {
+    this.refreshLiveFlags();
+    if (!opts.now) return buildOverview(this.rootSnapshots(), opts);
+    const key = JSON.stringify(opts);
+    const cached = this.overviewCache.get(key);
+    if (cached) return cached;
+    const result = buildOverview(this.rootSnapshots(), opts);
+    if (this.overviewCache.size >= 12) {
+      const oldest = this.overviewCache.keys().next().value;
+      if (oldest != null) this.overviewCache.delete(oldest);
+    }
+    this.overviewCache.set(key, result);
+    return result;
+  }
+
+  behaviorSessions(
+    behavior: OverviewSliceKey,
+    opts: Pick<OverviewOptions, "source" | "sinceMs" | "untilMs">,
+  ): string[] {
+    return behaviorSessionIds(this.rootSnapshots(), behavior, opts);
+  }
+
+  hasSession(id: string): boolean {
+    return this.sources.has(id);
+  }
+
+  parentOf(id: string): string | null {
+    return this.sources.get(id)?.parentId ?? null;
+  }
+
+  private detail(index: SessionIndex): SessionSnapshot {
+    const cached = this.detailViews.get(index);
+    if (cached) return cached;
+    const pending = this.pendingSources.get(index.id);
+    const raw: SessionSnapshot | undefined = pending?.index.revision === index.revision
+      ? JSON.parse(pending.json) : readSourceDetail(this.cacheHome, index);
+    if (!raw) throw new MissingDetail(index);
+    const snapshot = rebuildDerived({
+      ...raw,
+      live: index.live,
+      toggles: index.toggles,
+      children: index.children.map((child) => this.detail(child)),
+    });
+    this.detailViews.set(index, snapshot);
+    if (this.detailViews.size > 8) {
+      const oldest = this.detailViews.keys().next().value;
+      if (oldest) this.detailViews.delete(oldest);
+    }
+    return snapshot;
   }
 
   get(id: string): SessionSnapshot | undefined {
     this.refreshLiveFlags();
-    const snap = this.snapshots.get(id);
-    if (!snap) return undefined;
-    return snap;
+    const repaired = new Set<string>();
+    for (;;) {
+      const index = this.snapshots.get(id);
+      if (!index) return undefined;
+      try {
+        return this.detail(index);
+      } catch (error) {
+        if (!(error instanceof MissingDetail) || repaired.has(error.index.path)) throw error;
+        repaired.add(error.index.path);
+        this.persistedRevisions.delete(error.index.id);
+        // Never join evidence written by another process to an older parent.
+        this.ingestPath(error.index.path, { reparse: true, finalized: error.index.finalized });
+      }
+    }
   }
 
   setToggles(
@@ -929,7 +1063,6 @@ export class SessionStore {
     // snapshot dump may be rebuilt or invalidated without touching them.
     writeStoredToggle(this.cacheHome, id, this.toggles.get(id)!);
     this.rebuildAll();
-    this.scheduleDump();
   }
 }
 

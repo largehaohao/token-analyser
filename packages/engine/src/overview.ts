@@ -3,8 +3,8 @@ import {
   emptyCost,
   emptyMaybeCost,
   type Cost,
-  type SessionSnapshot,
-  type Turn,
+  type AnalysisSession,
+  type AnalysisTurn,
   type PerformanceSummary,
   type SessionSource,
 } from "./types.ts";
@@ -14,11 +14,11 @@ import { loadApiPrices } from "./native-pricing.ts";
 import {
   collectTaskTimings,
   durationClocks,
-  flattenSessionTurns,
   performanceDistribution,
   requestTimings,
   summarizePerformance,
   type PerformanceDistribution,
+  type TimedSample,
 } from "./performance.ts";
 
 export const OVERVIEW_SLICE_KEYS = [
@@ -65,6 +65,8 @@ export type OverviewRateLimits = {
   raw: unknown;
 };
 
+export type RankedSession = { id: string; nickname: string | null; cost: Cost };
+
 export type Overview = {
   sessionCount: number;
   turnCount: number;
@@ -87,6 +89,7 @@ export type Overview = {
   days: OverviewDay[];
   slices: OverviewSlice[];
   models: OverviewModel[];
+  topSessions: Record<"tokens" | "credits" | "usd", RankedSession[]>;
   performance: PerformanceSummary;
   performanceDistribution: PerformanceDistribution;
   rateLimits: OverviewRateLimits | null;
@@ -123,7 +126,7 @@ export const OVERVIEW_LATER_DATE = "later";
 const SLICE_SET = new Set<string>(OVERVIEW_SLICE_KEYS);
 
 function collectQuality(
-  session: SessionSnapshot,
+  session: AnalysisSession,
 ): { ledgerWarningSessions: number; parseErrors: number } {
   let ledgerWarningSessions = session.ledger_warning ? 1 : 0;
   let parseErrors = session.parse_errors.length;
@@ -152,17 +155,17 @@ function createTimezoneFormatter(
 }
 
 function calendarDay(
-  iso: string,
+  time: number | null,
   timezoneFormatter: Intl.DateTimeFormat | undefined,
   timezoneOffsetMinutes = 0,
 ): string | null {
-  const time = Date.parse(iso);
-  if (!Number.isFinite(time)) return null;
+  if (time == null) return null;
   if (timezoneFormatter) {
+    const day = timezoneFormatter.format(time);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
     const parts = timezoneFormatter.formatToParts(time);
     const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-    const day = `${value.year}-${value.month}-${value.day}`;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
+    return `${value.year}-${value.month}-${value.day}`;
   }
   const day = new Date(time + timezoneOffsetMinutes * 60_000)
     .toISOString()
@@ -177,7 +180,7 @@ function dayRange(
   timezoneOffsetMinutes = 0,
 ): string[] {
   const currentDay = calendarDay(
-    nowIso,
+    parseTimeMs(nowIso),
     timezoneFormatter,
     timezoneOffsetMinutes,
   );
@@ -210,7 +213,7 @@ function parseTimeMs(iso: string | null | undefined): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
-function sessionTimeMs(session: SessionSnapshot): number | null {
+function sessionTimeMs(session: AnalysisSession): number | null {
   let best = parseTimeMs(session.lastEventAt ?? session.startedAt);
   for (const child of session.children) {
     const childMs = sessionTimeMs(child);
@@ -220,13 +223,13 @@ function sessionTimeMs(session: SessionSnapshot): number | null {
 }
 
 function latestRateLimits(
-  sessions: SessionSnapshot[],
+  sessions: AnalysisSession[],
   sinceMs?: number,
   untilMs?: number,
 ): OverviewRateLimits | null {
   let best: OverviewRateLimits | null = null;
   let bestMs = Number.NEGATIVE_INFINITY;
-  function visit(session: SessionSnapshot): void {
+  function visit(session: AnalysisSession): void {
     for (const snapshot of session.rateLimitSnapshots ?? []) {
       const ms = parseTimeMs(snapshot.capturedAt);
       if (ms == null || (sinceMs != null && ms < sinceMs) || (untilMs != null && ms >= untilMs)) continue;
@@ -247,12 +250,12 @@ function latestRateLimits(
 }
 
 function hasTurnInRange(
-  session: SessionSnapshot,
+  session: AnalysisSession,
   sinceMs: number | undefined,
   untilMs: number | undefined,
 ): boolean {
   for (const turn of session.turns)
-    if (turnInRange(turn, sinceMs, untilMs)) return true;
+    if (timeInWindow(turnTimeMs(turn), sinceMs, untilMs)) return true;
   for (const timing of session.taskTimings ?? []) {
     const ended = parseTimeMs(timing.endedAt);
     if (ended == null) continue;
@@ -265,48 +268,22 @@ function hasTurnInRange(
   );
 }
 
-function inRange(
-  session: SessionSnapshot,
-  sinceMs?: number,
-  untilMs?: number,
-): boolean {
-  if (sinceMs != null) {
-    const t = sessionTimeMs(session);
-    const activeSince = t != null && t >= sinceMs;
-    if (!activeSince && !hasTurnInRange(session, sinceMs, untilMs)) return false;
-  }
-  // A session that stayed active across the upper bound still belongs to the
-  // earlier window; its turns are filtered separately.
-  if (untilMs != null) {
-    const t = sessionTimeMs(session);
-    const endedBefore = t != null && t < untilMs;
-    if (!endedBefore && !hasTurnInRange(session, undefined, untilMs))
-      return false;
-  }
-  return true;
+function timeInWindow(time: number | null, sinceMs?: number, untilMs?: number): boolean {
+  if (sinceMs == null && untilMs == null) return true;
+  return time != null && (sinceMs == null || time >= sinceMs) && (untilMs == null || time < untilMs);
 }
 
-function turnTimeMs(turn: Turn): number | null {
-  const iso = turn.endedAt || turn.startedAt;
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  return Number.isFinite(t) ? t : null;
+function inRange(session: AnalysisSession, sinceMs?: number, untilMs?: number): boolean {
+  return timeInWindow(sessionTimeMs(session), sinceMs, untilMs) || hasTurnInRange(session, sinceMs, untilMs);
 }
 
-function turnInRange(turn: Turn, sinceMs?: number, untilMs?: number): boolean {
-  const t = turnTimeMs(turn);
-  if (sinceMs != null && !(t != null && t >= sinceMs)) return false;
-  if (untilMs != null && !(t != null && t < untilMs)) return false;
-  return true;
-}
-
-function inWindowRange(turn: Turn, sinceMs: number | undefined, untilMs: number | undefined): boolean {
-  return turnInRange(turn, sinceMs, untilMs);
+function turnTimeMs(turn: AnalysisTurn): number | null {
+  return parseTimeMs(turn.endedAt || turn.startedAt);
 }
 
 function walkTurns(
-  session: SessionSnapshot,
-  visit: (turn: Turn, flagged: boolean, nested: boolean) => void,
+  session: AnalysisSession,
+  visit: (turn: AnalysisTurn, flagged: boolean, nested: boolean) => void,
   nested = false,
 ): void {
   const flagged =
@@ -315,76 +292,39 @@ function walkTurns(
   for (const child of session.children) walkTurns(child, visit, true);
 }
 
-function turnMatchesModel(turn: Turn, model: string | undefined): boolean {
+function turnMatchesModel(turn: AnalysisTurn, model: string | undefined): boolean {
   if (model == null || model === "") return true;
   return turnModelKey(turn.model) === model;
 }
 
-function collectTurnsById(
-  session: SessionSnapshot,
-  map = new Map<string, Turn>(),
-): Map<string, Turn> {
-  for (const turn of session.turns) map.set(turn.id, turn);
-  for (const child of session.children) collectTurnsById(child, map);
-  return map;
-}
-
-function windowTurnIds(
-  session: SessionSnapshot,
-  sinceMs?: number,
-  untilMs?: number,
-): Set<string> {
-  const ids = new Set<string>();
-  walkTurns(session, (turn) => {
-    if (inWindowRange(turn, sinceMs, untilMs)) ids.add(turn.id);
-  });
-  return ids;
-}
-
-function windowedWaste(
-  session: SessionSnapshot,
-  sinceMs?: number,
-  untilMs?: number,
-  model?: string,
-): Cost {
-  const { turnIds } = computeWaste({
-    turns: session.turns,
-    children: session.children,
-    toggles: session.toggles,
-  });
-  const inWindow = windowTurnIds(session, sinceMs, untilMs);
-  const byId = collectTurnsById(session);
-  let waste = emptyMaybeCost();
-  for (const id of turnIds) {
-    if (!inWindow.has(id)) continue;
-    const turn = byId.get(id)!;
-    if (!turnMatchesModel(turn, model)) continue;
-    waste = addKnownCost(waste, turn.cost);
-  }
-  return normalizeCost(waste);
-}
-
-function filterSessionTurns(
-  session: SessionSnapshot,
-  sinceMs?: number,
-  untilMs?: number,
-): SessionSnapshot {
-  if (sinceMs == null && untilMs == null) return session;
-  return {
-    ...session,
-    turns: session.turns.filter((turn) => inWindowRange(turn, sinceMs, untilMs)),
-    children: session.children.map((child) =>
-      filterSessionTurns(child, sinceMs, untilMs),
-    ),
-  };
-}
-
-function sliceKey(turn: Turn, nested: boolean): OverviewSliceKey {
+function sliceKey(turn: AnalysisTurn, nested: boolean): OverviewSliceKey {
   if (nested) return "subagents";
   const bucket = turn.bucket ?? "other";
   if (bucket === "waiting.poll" || bucket === "waiting.coord") return "waiting";
   if (SLICE_SET.has(bucket)) return bucket as OverviewSliceKey;
   return "other";
+}
+
+export function isOverviewSliceKey(value: string): value is OverviewSliceKey {
+  return SLICE_SET.has(value);
+}
+
+export function behaviorSessionIds(
+  sessions: AnalysisSession[],
+  behavior: OverviewSliceKey,
+  opts: Pick<OverviewOptions, "source" | "sinceMs" | "untilMs">,
+): string[] {
+  function matches(session: AnalysisSession, nested: boolean): boolean {
+    return session.turns.some((turn) =>
+      sliceKey(turn, nested) === behavior &&
+      (turn.cost.raw > 0 || (turn.cost.usd ?? 0) > 0 || (turn.cost.credits ?? 0) > 0) &&
+      timeInWindow(turnTimeMs(turn), opts.sinceMs, opts.untilMs),
+    ) || session.children.some((child) => matches(child, true));
+  }
+  return sessions
+    .filter((session) => !opts.source || (session.source ?? "codex") === opts.source)
+    .filter((session) => matches(session, false))
+    .map((session) => session.id);
 }
 
 function normalizeCost(cost: Cost): Cost {
@@ -401,7 +341,7 @@ function makeDay(date: string, cost: Cost, flagged: Cost, unpricedRaw: number): 
 }
 
 export function buildOverview(
-  sessions: SessionSnapshot[],
+  sessions: AnalysisSession[],
   opts: OverviewOptions,
 ): Overview {
   const now = opts.now ?? new Date().toISOString();
@@ -415,7 +355,7 @@ export function buildOverview(
   const timezoneFormatter = createTimezoneFormatter(opts.timezone);
   const timezoneOffsetMinutes = opts.timezoneOffsetMinutes ?? 0;
   const days = dayRange(
-    now,
+    opts.untilMs == null ? now : new Date(opts.untilMs - 1).toISOString(),
     dayCount,
     timezoneFormatter,
     timezoneOffsetMinutes,
@@ -434,6 +374,10 @@ export function buildOverview(
   let waste = emptyMaybeCost();
   let turnCount = 0;
   let sessionCount = 0;
+  const rankedSessions: RankedSession[] = [];
+  const taskSamples: TimedSample[] = [];
+  const requestSamples: TimedSample[] = [];
+  const daysByTimestamp = new Map<number, string | null>();
   let unpricedRaw = 0;
   let overflow = emptyMaybeCost();
   let overflowFlagged = emptyMaybeCost();
@@ -446,14 +390,17 @@ export function buildOverview(
   const modelFilter = opts.model?.trim() || undefined;
 
   for (const session of included) {
-    const ranged = filterSessionTurns(session, opts.sinceMs, opts.untilMs);
-    waste = addKnownCost(
-      waste,
-      windowedWaste(session, opts.sinceMs, opts.untilMs, modelFilter),
-    );
+    const { turnIds: wasteIds } = computeWaste({
+      turns: session.turns, children: session.children, toggles: session.toggles,
+    });
+    const tasks = modelFilter ? [] : collectTaskTimings(session);
+    const requests: AnalysisTurn[] = [];
+    let sessionCost = emptyMaybeCost();
     let sessionMatched = false;
 
-    walkTurns(ranged, (turn, flagged, nested) => {
+    walkTurns(session, (turn, flagged, nested) => {
+      const timestamp = turnTimeMs(turn);
+      if (!timeInWindow(timestamp, opts.sinceMs, opts.untilMs)) return;
       const model = turnModelKey(turn.model);
       const prev = models.get(model) ?? {
         cost: emptyMaybeCost(),
@@ -465,19 +412,21 @@ export function buildOverview(
       if (turn.cost.credits == null && turn.cost.usd == null) prev.unpricedRaw += turn.cost.raw;
       models.set(model, prev);
 
-      if (!turnMatchesModel(turn, modelFilter)) return;
+      if (modelFilter && model !== modelFilter) return;
       sessionMatched = true;
+      if (tasks.length === 0) requests.push(turn);
+      sessionCost = addKnownCost(sessionCost, turn.cost);
+      if (wasteIds.has(turn.id)) waste = addKnownCost(waste, turn.cost);
       turnCount += 1;
       if (turn.cost.credits == null && turn.cost.usd == null) unpricedRaw += turn.cost.raw;
       cost = addKnownCost(cost, turn.cost);
       const key = sliceKey(turn, nested);
       slices[key] = addKnownCost(slices[key], turn.cost);
 
-      const day = calendarDay(
-        turn.endedAt || turn.startedAt,
-        timezoneFormatter,
-        timezoneOffsetMinutes,
-      );
+      if (timestamp != null && !daysByTimestamp.has(timestamp)) {
+        daysByTimestamp.set(timestamp, calendarDay(timestamp, timezoneFormatter, timezoneOffsetMinutes));
+      }
+      const day = timestamp == null ? null : daysByTimestamp.get(timestamp);
       const unpriced = turn.cost.credits == null && turn.cost.usd == null ? turn.cost.raw : 0;
       if (day && dayCosts.has(day)) {
         dayCosts.set(day, addKnownCost(dayCosts.get(day)!, turn.cost));
@@ -495,6 +444,18 @@ export function buildOverview(
         if (flagged) overflowFlagged = addKnownCost(overflowFlagged, turn.cost);
       }
     });
+    if (sessionMatched) rankedSessions.push({ id: session.id, nickname: session.nickname, cost: sessionCost });
+    for (const task of tasks) {
+      if (timeInWindow(parseTimeMs(task.endedAt), opts.sinceMs, opts.untilMs)) {
+        taskSamples.push({ ...task, basis: "task" });
+      }
+    }
+    for (const request of requestTimings(requests)) {
+      if (modelFilter || timeInWindow(parseTimeMs(request.endedAt), opts.sinceMs, opts.untilMs)) {
+        request.basis = "request";
+        requestSamples.push(request);
+      }
+    }
     // Quality follows the same session membership as cost/days when filtered.
     if (sessionMatched || modelFilter == null) {
       sessionCount += 1;
@@ -521,37 +482,14 @@ export function buildOverview(
     chartDays.push(makeDay(OVERVIEW_LATER_DATE, later, laterFlagged, laterUnpriced));
   }
 
-  const pooledSamples = included.flatMap((session) => {
-    const ranged = filterSessionTurns(session, opts.sinceMs, opts.untilMs);
-    // Model filters are turn-scoped; task windows are not attributed to a model.
-    if (modelFilter) {
-      const turns = flattenSessionTurns(ranged).filter((turn) =>
-        turnMatchesModel(turn, modelFilter),
-      );
-      return requestTimings(turns).map((sample) => ({
-        ...sample,
-        basis: "request" as const,
-      }));
-    }
-    const taskSamples = collectTaskTimings(session);
-    const hasTasks = taskSamples.length > 0;
-    // Sources without agent-task windows time a single model request.
-    // Request timing includes child sessions; cost and duration already do.
-    return (hasTasks ? taskSamples : requestTimings(flattenSessionTurns(session)))
-      .map((sample) => ({ ...sample, basis: hasTasks ? ("task" as const) : ("request" as const) }))
-      .filter((sample) =>
-        (opts.sinceMs == null || (sample.endedAt != null && Date.parse(sample.endedAt) >= opts.sinceMs)) &&
-          (opts.untilMs == null || (sample.endedAt != null && Date.parse(sample.endedAt) < opts.untilMs)),
-      );
-  });
-
-  // One figure never mixes agent-task windows with request decode windows:
-  // when any included session records tasks, the overview reports that basis
-  // and aggregates only task samples; request-only sources keep their basis.
-  const hasTaskSamples = pooledSamples.some((sample) => sample.basis === "task");
-  const timedSamples = hasTaskSamples
-    ? pooledSamples.filter((sample) => sample.basis === "task")
-    : pooledSamples;
+  // Task-level timing and request-level timing keep independent denominators.
+  const timedSamples = taskSamples.length > 0 ? taskSamples : requestSamples;
+  function topSessions(value: (cost: Cost) => number | null): RankedSession[] {
+    return rankedSessions
+      .filter((session) => (value(session.cost) ?? 0) > 0)
+      .sort((left, right) => value(right.cost)! - value(left.cost)! || left.id.localeCompare(right.id))
+      .slice(0, 5);
+  }
 
   const card = loadRateCard();
   return {
@@ -587,6 +525,11 @@ export function buildOverview(
         unpricedRaw: entry.unpricedRaw,
       }))
       .sort((a, b) => b.cost.raw - a.cost.raw || a.model.localeCompare(b.model)),
+    topSessions: {
+      tokens: topSessions((cost) => cost.raw),
+      credits: topSessions((cost) => cost.credits),
+      usd: topSessions((cost) => cost.usd),
+    },
     performance: {
       ...summarizePerformance(timedSamples),
       ...durationClocks(included, {

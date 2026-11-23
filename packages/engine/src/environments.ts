@@ -1,9 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
+import { withPricingLock } from "./pricing-lock.ts";
 import { tokenAnalyserHome } from "./config.ts";
 import { collectSessionFiles } from "./session-files.ts";
 import { SessionStore } from "./store.ts";
+import { fileFingerprint, fingerprintsMatch, type FileFingerprint } from "./store-dump.ts";
+import { readRemoteSyncState, writeRemoteSyncState } from "./store-db.ts";
 
 /** Machines the dashboard can read sessions from. Ids are stable query values. */
 export const LOCAL_ENVIRONMENT_ID = "local";
@@ -22,7 +25,7 @@ const SSH_OPTS = [
   "-o", "StrictHostKeyChecking=yes",
 ];
 
-type RemoteRoot = { remote: string; local: string; kind: "dir" | "file" };
+type RemoteRoot = { remote: string; local: string; kind: "dir" | "file" | "sqlite" };
 
 /** Session roots on the remote home, mirrored under the local cache. */
 export const SSH_SESSION_ROOTS: RemoteRoot[] = [
@@ -42,10 +45,8 @@ export const SSH_SESSION_ROOTS: RemoteRoot[] = [
   { remote: ".cursor/projects", local: "cursor/projects", kind: "dir" },
   { remote: ".cursor/chats", local: "cursor/chats", kind: "dir" },
   { remote: ".config/Cursor/User/workspaceStorage", local: "cursor/workspaceStorage", kind: "dir" },
-  { remote: ".config/Cursor/User/globalStorage/state.vscdb", local: "cursor/global/state.vscdb", kind: "file" },
-  { remote: ".local/share/opencode/opencode.db", local: "opencode/opencode.db", kind: "file" },
-  { remote: ".local/share/opencode/opencode.db-wal", local: "opencode/opencode.db-wal", kind: "file" },
-  { remote: ".local/share/opencode/opencode.db-shm", local: "opencode/opencode.db-shm", kind: "file" },
+  { remote: ".config/Cursor/User/globalStorage/state.vscdb", local: "cursor/global/state.vscdb", kind: "sqlite" },
+  { remote: ".local/share/opencode/opencode.db", local: "opencode/opencode.db", kind: "sqlite" },
 ];
 
 export const SESSION_ENVIRONMENTS: SessionEnvironmentInfo[] = [
@@ -94,8 +95,11 @@ export function spawnCommand(argv: string[], timeoutMs = 180_000): Promise<Comma
   });
 }
 
+export type EnvironmentSync = { syncedAt: number | null; failed: boolean; refreshing?: boolean };
+
 export type SessionEnvironmentSource = {
   prepare(id: string, opts?: { force?: boolean }): Promise<SessionStore>;
+  status?(id: string): EnvironmentSync | undefined;
 };
 
 export class EnvironmentRequestError extends Error {
@@ -105,7 +109,6 @@ export class EnvironmentRequestError extends Error {
 }
 
 const FRESH_MS = 15_000;
-const HEAVY_BYTES = 10 * 1024 * 1024;
 
 function ssh(command: string): string[] {
   return ["ssh", ...SSH_OPTS, SSH_TARGET, command];
@@ -119,30 +122,74 @@ function assertHome(home: string): string {
   return trimmed;
 }
 
-async function remoteHome(runner: CommandRunner): Promise<string> {
-  const result = await runner(ssh('printf %s "$HOME"'));
-  if (result.code !== 0) {
-    throw new Error(result.stderr.trim().slice(0, 500) || "ssh failed");
+async function discoverRemoteRoots(runner: CommandRunner): Promise<{ home: string; roots: Set<RemoteRoot> }> {
+  const checks = SSH_SESSION_ROOTS.map((root) =>
+    `if test ${root.kind === "dir" ? "-d" : "-f"} "$HOME/${root.remote}"; then printf 1; else printf 0; fi`);
+  const result = await runner(ssh(`printf '%s\\n' "$HOME"; ${checks.join("; ")}; printf '\\n'`));
+  if (result.code !== 0) throw new Error(result.stderr.trim().slice(0, 500) || "ssh failed");
+  const [home, mask] = result.stdout.trim().split(/\r?\n/);
+  if (mask?.length !== SSH_SESSION_ROOTS.length || !/^[01]+$/.test(mask)) {
+    throw new Error("incomplete remote session directory listing");
   }
-  return assertHome(result.stdout);
+  return { home: assertHome(home ?? ""), roots: new Set(SSH_SESSION_ROOTS.filter((_, i) => mask[i] === "1")) };
 }
 
-async function remoteExists(runner: CommandRunner, home: string, root: RemoteRoot): Promise<boolean> {
-  const flag = root.kind === "dir" ? "-d" : "-f";
-  const result = await runner(ssh(`test ${flag} "$HOME/${root.remote}"`));
-  if (result.code === 0) return true;
-  if (result.code === 1) return false;
-  throw new Error(result.stderr.trim().slice(0, 500) || `cannot stat ${home}/${root.remote}`);
+async function sqliteGeneration(runner: CommandRunner, root: RemoteRoot): Promise<string> {
+  const result = await runner(ssh(
+    `db="$HOME/${root.remote}"; for f in "$db" "$db-wal"; do ` +
+    'if test -f "$f"; then stat -c "%i %s %y %z" "$f" || stat -f "%i %z %m %c" "$f" || exit 2; ' +
+    'else printf "missing\\n"; fi; done',
+  ));
+  if (result.code !== 0) throw new Error(`could not verify SQLite generation: ${root.remote}`);
+  return result.stdout;
 }
 
-function isHeavy(filePath: string): boolean {
-  const base = path.basename(filePath);
-  if (base === "state.vscdb" || base === "opencode.db") return true;
-  try {
-    return statSync(filePath).size >= HEAVY_BYTES;
-  } catch {
-    return false;
+async function syncSqlite(
+  runner: CommandRunner,
+  home: string,
+  root: RemoteRoot,
+  local: string,
+  transport: string,
+  generations?: Map<string, string>,
+): Promise<void> {
+  const liveDir = path.dirname(local);
+  const parent = path.dirname(liveDir);
+  const name = path.basename(local);
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  // The live directory is only replaced after both files have been read from
+  // one remote generation. SQLite rebuilds its local shared-memory index.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const before = await sqliteGeneration(runner, root);
+    if (generations?.get(local) === before && existsSync(local)) return;
+    const staging = mkdtempSync(path.join(parent, `.${path.basename(liveDir)}-`));
+    const next = path.join(staging, "next");
+    const previous = path.join(staging, "previous");
+    mkdirSync(next, { mode: 0o700 });
+    try {
+      const result = await runner([
+        "rsync", "-a", "--checksum",
+        ...(existsSync(liveDir) ? [`--link-dest=${liveDir}`] : []),
+        `--include=/${name}`, `--include=/${name}-wal`, "--exclude=*",
+        "-e", transport, `${SSH_TARGET}:${home}/${path.posix.dirname(root.remote)}/`, `${next}/`,
+      ]);
+      const after = await sqliteGeneration(runner, root);
+      if (before !== after || result.code === 24) continue;
+      if (result.code !== 0) throw new Error(result.stderr.trim().slice(0, 500) || "SQLite rsync failed");
+      if (!existsSync(path.join(next, name))) continue;
+      if (existsSync(liveDir)) renameSync(liveDir, previous);
+      try {
+        renameSync(next, liveDir);
+      } catch (error) {
+        if (existsSync(previous)) renameSync(previous, liveDir);
+        throw error;
+      }
+      generations?.set(local, after);
+      return;
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
   }
+  throw new Error(`SQLite changed while copying ${root.remote}`);
 }
 
 /**
@@ -153,16 +200,26 @@ function isHeavy(filePath: string): boolean {
 export async function syncSshMirror(opts: {
   runner?: CommandRunner;
   mirror: string;
+  sqliteGenerations?: Map<string, string>;
 }): Promise<string[]> {
   const runner = opts.runner ?? spawnCommand;
-  const home = await remoteHome(runner);
+  const { home, roots } = await discoverRemoteRoots(runner);
   const sshTransport = ["ssh", ...SSH_OPTS].join(" ");
   const copied: string[] = [];
   mkdirSync(opts.mirror, { recursive: true, mode: 0o700 });
   for (const root of SSH_SESSION_ROOTS) {
     const local = path.join(opts.mirror, root.local);
-    if (!await remoteExists(runner, home, root)) {
+    if (!roots.has(root)) {
       rmSync(local, { recursive: true, force: true });
+      if (root.kind === "sqlite") {
+        opts.sqliteGenerations?.delete(local);
+        for (const suffix of ["-wal", "-shm"]) rmSync(local + suffix, { force: true });
+      }
+      continue;
+    }
+    if (root.kind === "sqlite") {
+      await syncSqlite(runner, home, root, local, sshTransport, opts.sqliteGenerations);
+      copied.push(local);
       continue;
     }
     mkdirSync(root.kind === "dir" ? local : path.dirname(local), { recursive: true, mode: 0o700 });
@@ -180,7 +237,15 @@ export async function syncSshMirror(opts: {
   return copied;
 }
 
-type RemoteEntry = { store: SessionStore; syncedAt: number; mirror: string };
+type RemoteEntry = {
+  store: SessionStore;
+  syncedAt: number | null;
+  failedAt: number | null;
+  hasSnapshot: boolean;
+  home: string;
+  mirror: string;
+  sqliteGenerations: Map<string, string>;
+};
 
 /**
  * One local store per remote machine. A short fresh window lets the overview
@@ -188,6 +253,7 @@ type RemoteEntry = { store: SessionStore; syncedAt: number; mirror: string };
  */
 export class RemoteEnvironmentHub {
   private readonly entries = new Map<string, RemoteEntry>();
+  private readonly restoring = new Map<string, Promise<RemoteEntry>>();
   private readonly flights = new Map<string, Promise<SessionStore>>();
   private readonly runner: CommandRunner;
   private readonly now: () => number;
@@ -200,54 +266,110 @@ export class RemoteEnvironmentHub {
   }
 
   async prepare(id: string, opts?: { force?: boolean }): Promise<SessionStore> {
-    const spec = sessionEnvironment(id);
-    if (!spec || spec.kind !== "ssh") {
-      throw new EnvironmentRequestError(400, "invalid_environment");
+    if (sessionEnvironment(id)?.kind !== "ssh") throw new EnvironmentRequestError(400, "invalid_environment");
+    const entry = this.entries.get(id) ?? await this.openEntry(id);
+    const age = entry.syncedAt == null ? Infinity : this.now() - entry.syncedAt;
+    if (!opts?.force && age >= 0 && age < this.freshMs) return entry.store;
+    if (!opts?.force && entry.hasSnapshot) {
+      if (!this.flights.has(id) && (entry.failedAt == null || this.now() - entry.failedAt >= this.freshMs)) {
+        void this.synchronize(id, entry).catch((error) => {
+          console.error(`environment ${id}: ${error instanceof Error ? error.message : String(error)}`);
+        });
+      }
+      return entry.store;
     }
-    const current = this.entries.get(id);
-    const fresh = current != null && this.now() - current.syncedAt < this.freshMs;
-    if (!opts?.force && fresh) return current.store;
-    const start = () => {
-      const flight = this.flights.get(id);
-      if (flight) return flight;
-      const run = this.sync(id).finally(() => {
-        if (this.flights.get(id) === run) this.flights.delete(id);
-      });
-      this.flights.set(id, run);
-      return run;
-    };
-    // A mirror is already on disk. Answer with it and refresh behind the request
-    // so switching machines does not sit on the loading spinner for the rsync.
-    if (!opts?.force && current && current.syncedAt > 0) {
-      void start();
-      return current.store;
-    }
-    return start();
+    return this.synchronize(id, entry);
   }
 
-  private async sync(id: string): Promise<SessionStore> {
-    const home = path.join(tokenAnalyserHome(), "remotes", id);
-    let entry = this.entries.get(id);
-    if (!entry) {
-      const store = new SessionStore({ cacheDir: path.join(home, "cache") });
-      try {
-        store.loadDump();
-      } catch {
-        // A damaged remote dump must not block a fresh read.
-      }
-      entry = { store, syncedAt: 0, mirror: path.join(home, "mirror") };
+  private openEntry(id: string): Promise<RemoteEntry> {
+    const active = this.restoring.get(id);
+    if (active) return active;
+    const task = this.restore(id).then((entry) => {
       this.entries.set(id, entry);
+      return entry;
+    }).finally(() => this.restoring.delete(id));
+    this.restoring.set(id, task);
+    return task;
+  }
+
+  private async restore(id: string): Promise<RemoteEntry> {
+    const home = path.join(tokenAnalyserHome(), "remotes", id);
+    const mirror = path.join(home, "mirror");
+    const store = new SessionStore({ cacheDir: path.join(home, "cache") });
+    const entry: RemoteEntry = {
+      home, mirror, store, hasSnapshot: false, syncedAt: null, failedAt: null, sqliteGenerations: new Map(),
+    };
+    await store.restoreForStartup();
+    entry.hasSnapshot = store.restoredIndex;
+    if (!entry.hasSnapshot && existsSync(mirror)) {
+      const files = collectSessionFiles([mirror]);
+      if (files.length) {
+        await this.readMirror(entry, files);
+        entry.hasSnapshot = store.peekRootIds().length > 0;
+        store.dump();
+      }
     }
-    await syncSshMirror({ runner: this.runner, mirror: entry.mirror });
-    const files = collectSessionFiles([entry.mirror]);
-    const light: string[] = [];
-    const heavy: string[] = [];
-    for (const file of files) (isHeavy(file) ? heavy : light).push(file);
-    entry.store.refresh(light);
-    for (const file of heavy) {
-      await entry.store.ingestPathBatched(file);
+    if (entry.hasSnapshot) {
+      try {
+        const state = JSON.parse(readRemoteSyncState(home) ?? "null") as {
+          syncedAt: number; databases: Record<string, { remote: string; local: FileFingerprint }>;
+        } | null;
+        if (state && Number.isFinite(state.syncedAt)) entry.syncedAt = state.syncedAt;
+        for (const root of SSH_SESSION_ROOTS.filter((root) => root.kind === "sqlite")) {
+          const saved = state?.databases?.[root.local];
+          const local = path.join(mirror, root.local);
+          if (saved && existsSync(local) && fingerprintsMatch(saved.local, fileFingerprint(local))) {
+            entry.sqliteGenerations.set(local, saved.remote);
+          }
+        }
+      } catch { /* Older mirrors have no recorded sync time or generation stamps. */ }
     }
-    entry.syncedAt = this.now();
+    return entry;
+  }
+
+  private synchronize(id: string, entry: RemoteEntry): Promise<SessionStore> {
+    const active = this.flights.get(id);
+    if (active) return active;
+    const run = this.sync(entry).catch((error: unknown) => {
+      entry.failedAt = this.now();
+      throw error;
+    }).finally(() => this.flights.delete(id));
+    this.flights.set(id, run);
+    return run;
+  }
+
+  status(id: string): EnvironmentSync | undefined {
+    const entry = this.entries.get(id);
+    return entry && {
+      syncedAt: entry.syncedAt, failed: entry.failedAt != null,
+      ...(this.flights.has(id) ? { refreshing: true } : {}),
+    };
+  }
+
+  private async readMirror(entry: RemoteEntry, files: string[]): Promise<void> {
+    entry.store.refresh([], { retainPaths: files });
+    for (const file of files) {
+      if (entry.store.needsStartupIngest(file)) await entry.store.ingestPathBatched(file, { reparse: true });
+    }
+  }
+
+  private async sync(entry: RemoteEntry): Promise<SessionStore> {
+    await syncSshMirror({
+      runner: this.runner, mirror: entry.mirror, sqliteGenerations: entry.sqliteGenerations,
+    });
+    await this.readMirror(entry, collectSessionFiles([entry.mirror]));
+    await withPricingLock(() => entry.store.repriceInBackground());
+    entry.store.dump({ force: !entry.store.restoredIndex });
+    const databases: Record<string, { remote: string; local: FileFingerprint }> = {};
+    for (const [local, remote] of entry.sqliteGenerations) {
+      databases[path.relative(entry.mirror, local)] = { remote, local: fileFingerprint(local) };
+    }
+    const syncedAt = this.now();
+    writeRemoteSyncState(entry.home, JSON.stringify({ syncedAt, databases }));
+    entry.syncedAt = syncedAt;
+    entry.failedAt = null;
+    entry.hasSnapshot = true;
+    void entry.store.pruneCache().catch((error) => console.error("remote cache cleanup failed", error));
     return entry.store;
   }
 }

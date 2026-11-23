@@ -17,15 +17,17 @@ pnpm install
 pnpm dev
 ```
 
-Requires Node.js 22.13 or newer (`engines` and `.nvmrc`). Cursor and OpenCode SQLite use `node:sqlite`. A startup check prints that requirement instead of a missing-module stack trace.
+Use Node.js 22.15+ on the 22.x line, or 23.8 and later. Cursor and OpenCode use `node:sqlite`; DeepSeek Harness uses the built-in Zstandard decoder. `.nvmrc` pins the minimum supported release.
 
-`pnpm dev` waits until the engine is listening on `127.0.0.1:7789`, then starts the UI at [http://127.0.0.1:7788](http://127.0.0.1:7788).
+`pnpm dev` starts Vite and the engine together. The API proxy waits for the engine on `127.0.0.1:7789`. Open the UI at [http://127.0.0.1:7788](http://127.0.0.1:7788).
 
 Single-process production-style serve (engine hosts `apps/web/dist`):
 
 ```bash
 pnpm start
 ```
+
+`pnpm start` reuses the production UI after checking the source inputs and built assets. It builds on the first run and after changes. `pnpm build` always builds explicitly.
 
 The same server is the publishable CLI entry (`package.json` `bin` and `files`). Build the UI once, then:
 
@@ -121,7 +123,11 @@ or cache-hit figures.
 
 Use the visible **环境** control to read sessions from this machine or from `192.168.1.102` (SSH as `john`, read-only). Use **会话来源** to select all sources,
 Codex, Claude Code, Cursor, pi, DeepSeek Harness, OpenCode, or Antigravity in both the overview and session detail views.
-Their counts include all discovered root sessions across all time. The default
+A remote environment reopens its local mirror after a restart. Previously synced
+sessions are available while SSH checks for new records, including when the host
+is offline. The UI shows the last recorded sync time when available. The global Cursor and OpenCode mirrors copy SQLite
+and its WAL together and verify that the source generation stayed stable.
+Source counts include all discovered root sessions across all time. The default
 7-day range can hide older sessions; **查看全部时间** reveals that history.
 The selected source is restored on reload and browser back navigation.
 Search the session list by source name, model, directory, or session ID.
@@ -131,7 +137,8 @@ pi forks exclude entry IDs copied from an available parent file; if that file is
 missing, only the child log can be analysed and inherited spend cannot be
 distinguished. Branch context follows entry `parentId` rather than file order.
 
-Optional `~/.token-analyser/config.json` replaces the default discovery paths:
+Optional `~/.token-analyser/config.json` replaces the default discovery paths.
+Use an empty `watch_paths` array to disable discovery while retaining imports.
 
 ```json
 {
@@ -159,10 +166,17 @@ document is fetched; session data never leaves the machine. The engine refreshes
 Qwen rates on startup and hourly whenever the card's Qwen date is not today's
 date, then re-prices local sessions; set `QWEN_PRICING_AUTO_UPDATE=0` to pin
 them.
-Parse cache / session dump: `~/.token-analyser/` (`store.db`). A dump version
-bump rebuilds it on the next start; large Cursor/OpenCode databases are refreshed
-after the UI is listening so the first paint stays within a few seconds.
-Parse cache: `~/.token-analyser/cache/`.
+`~/.token-analyser/store.db` stores full session evidence and a compact index for
+the list and overview. A compatible older dump builds the index once. Opening a
+session loads the evidence for that session and its children. Changed snapshots
+and their file fingerprints commit together.
+
+On startup the engine serves the UI and hardware routes while restoring the
+ledger. It checks the configured roots before displaying saved session data,
+then reconciles changed logs and SQLite databases in a parser worker. During
+initial indexing the dashboard shows progress and updates as files become
+available. A parser-version or effective-price change may require rebuilding
+from the source logs. The legacy parse-cache directory is `~/.token-analyser/cache/`.
 Imported `.jsonl` / `.ndjson` files are copied to
 `~/.token-analyser/imports/` and restored on the next launch. Existing imports
 are never overwritten by another file with the same name.
@@ -170,10 +184,15 @@ The CLI also accepts a Cursor `state.vscdb`; `--json` returns an array for a
 database and one snapshot for JSONL. To import a database through the API, use
 `POST /import` with JSON `{ "path": "/absolute/path/to/state.vscdb" }`; database
 uploads are not supported because an active WAL belongs to the original store.
+Path imports are saved as links and read again at startup. If a path imported
+before link tracking is outside the discovery roots, submit it once to save
+the link. Uploaded session files continue to restore from the imports directory.
 
 The dashboard shows pricing coverage and ledger/parse health beside the headline
-figures. Daily trends use the browser's IANA timezone (with numeric-offset
-fallback), and the shipped rate card is dated so historical estimates remain
+figures. The session ranking uses the same round-level window as the total
+and follows the selected unit. Open a behaviour row to filter its contributing
+sessions. Rolling windows update while the overview is visible. Daily trends
+use the browser's IANA timezone (with numeric-offset fallback), and the shipped rate card is dated so historical estimates remain
 auditable. Unknown models keep their token counts and display money as `—`
 instead of silently borrowing another model's price; model IDs must match an
 explicit entry in the dated rate card.
@@ -201,10 +220,11 @@ Open **硬件用电** (`#power`) for CPU, GPU, and whole-machine power in W,
 range energy in kWh, and electricity cost in CNY. Choose a rolling 1-hour,
 24-hour, or 7-day range, or a custom interval of up to 31 days. The default
 price is **0.6629 CNY/kWh** and stays editable. Whole-machine energy and cost
-are the page's primary readings: they carry the largest type on the page and a
+are the page's primary readings. They carry the largest type on the page and a
 compact summary under the page title, and the price label keeps all four
-decimals (0.6629, never 0.66). Whole-machine readings include
-the component readings; they must not be added to CPU and GPU again.
+decimals (0.6629, never 0.66). Whole-machine readings include the component readings. The default GPU query
+sums the distinct devices on the configured collector and merges duplicate
+scrapes for the same device.
 
 Sampling is split into two layers so the curve stays readable without
 thinning the data: the **sampling grid** feeds the trapezoid integration and is
@@ -231,7 +251,10 @@ absent readings show `—`. Demo electricity costs never enter Token cost totals
 The hardware temperature page (`#hardware-temp`) uses the same Prometheus
 configuration. It polls a current snapshot every two seconds, loads a longer
 history for the selected window, and accepts custom metric queries and device
-names via `power.temps`. A failed history read is labelled and retryable
+names via `power.temps`. Live queries limit each sensor's lookback to 20 seconds.
+Any observed GPU over-limit reading takes priority in the protection banner,
+including when another sensor is missing. The global Refresh button reloads
+telemetry for the visible hardware page. A failed history read is labelled and retryable
 without blocking live samples; no fabricated temperatures are inserted when
 the collector is unavailable.
 

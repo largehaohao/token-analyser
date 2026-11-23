@@ -251,7 +251,10 @@ export type OverviewRateLimits = {
   raw: unknown;
 };
 
+export type IndexProgress = { completed: number; total: number };
+
 export type Overview = {
+  indexing?: IndexProgress;
   sessionCount: number;
   turnCount: number;
   live: boolean;
@@ -272,10 +275,13 @@ export type Overview = {
   days: OverviewDay[];
   slices: OverviewSlice[];
   models?: OverviewModel[];
+  topSessions?: Record<"tokens" | "credits" | "usd", RankedSession[]>;
   performance?: PerformanceSummary;
   performanceDistribution?: PerformanceDistribution;
   rateLimits?: OverviewRateLimits | null;
 };
+
+export type RankedSession = { id: string; nickname: string | null; cost: Cost };
 
 export type OverviewModel = {
   model: string;
@@ -430,15 +436,17 @@ export type TempsHistoryFeed = {
   samples: TempSampleDto[];
 };
 
-export async function getTemps(signal?: AbortSignal): Promise<TempsFeed> {
-  return requestJson<TempsFeed>("/temps", { signal }, 12000);
+export async function getTemps(signal?: AbortSignal, refresh = false): Promise<TempsFeed> {
+  return requestJson<TempsFeed>(refresh ? "/temps?refresh=1" : "/temps", { signal }, 12000);
 }
 
 export async function getTempsHistory(
   seconds: number,
   signal?: AbortSignal,
+  refresh = false,
 ): Promise<TempsHistoryFeed> {
   const params = new URLSearchParams({ seconds: String(Math.round(seconds)) });
+  if (refresh) params.set("refresh", "1");
   return requestJson<TempsHistoryFeed>(
     `/temps/history?${params}`,
     { signal },
@@ -466,12 +474,14 @@ export async function getPowerFeed(
   endMs: number,
   stepMs: number,
   signal?: AbortSignal,
+  refresh = false,
 ): Promise<PowerFeed> {
   const params = new URLSearchParams({
     start: String(Math.round(startMs)),
     end: String(Math.round(endMs)),
     step: String(Math.round(stepMs)),
   });
+  if (refresh) params.set("refresh", "1");
   return requestJson<PowerFeed>(
     `/power?${params.toString()}`,
     { signal },
@@ -479,16 +489,40 @@ export async function getPowerFeed(
   );
 }
 
-export async function listSessions(opts?: { refresh?: boolean }): Promise<SessionListItem[]> {
+export type EnvironmentSync = { syncedAt: number | null; failed: boolean; refreshing?: boolean };
+
+export async function listSessions(opts?: {
+  refresh?: boolean;
+  signal?: AbortSignal;
+}): Promise<{ sessions: SessionListItem[]; sync?: EnvironmentSync; indexing?: IndexProgress }> {
   const params = environmentQuery(new URLSearchParams(), opts?.refresh === true);
   const query = params.toString();
   try {
-    const body = await requestJson<{ sessions: SessionListItem[] }>(
+    return await requestJson(
       query ? `/sessions?${query}` : "/sessions",
-      undefined,
+      { signal: opts?.signal },
       environmentTimeout(45_000),
     );
-    return body.sessions;
+  } catch (error) {
+    rethrowEnvironment(error);
+  }
+}
+
+export async function getBehaviorSessions(
+  behavior: OverviewSlice["key"],
+  range: SessionRangeId,
+  asOf: number,
+  source: SessionSourceFilter,
+  signal: AbortSignal,
+): Promise<string[]> {
+  const window = overviewQuery(range, asOf);
+  const params = environmentQuery(new URLSearchParams({ behavior, source, as_of: new Date(asOf).toISOString() }));
+  if (window.since) params.set("since", window.since);
+  try {
+    const response = await requestJson<{ sessionIds: string[] }>(
+      `/sessions?${params}`, { signal }, environmentTimeout(20_000),
+    );
+    return response.sessionIds;
   } catch (error) {
     rethrowEnvironment(error);
   }
@@ -509,7 +543,7 @@ export async function getOverview(
         until: new Date(window.untilMs).toISOString(),
       }
     : overviewQuery(range, nowMs);
-  const params = new URLSearchParams();
+  const params = new URLSearchParams({ as_of: new Date(nowMs).toISOString() });
   if (source !== "all") params.set("source", source);
   if (query.since) params.set("since", query.since);
   if ("until" in query && query.until) params.set("until", query.until);
@@ -627,12 +661,12 @@ export async function updateModelPrices(): Promise<ModelPricingUpdate> {
   }
 }
 
-export async function getSession(id: string): Promise<SessionSnapshot> {
+export async function getSession(id: string, signal?: AbortSignal): Promise<SessionSnapshot> {
   const query = environmentQuery(new URLSearchParams()).toString();
   try {
     return await requestJson<SessionSnapshot>(
       `/sessions/${encodeURIComponent(id)}${query ? `?${query}` : ""}`,
-      undefined,
+      { signal },
       environmentTimeout(20_000),
     );
   } catch (error) {

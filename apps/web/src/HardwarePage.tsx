@@ -1,7 +1,9 @@
-import { HardwarePowerPage } from "./HardwarePowerPage";
-import { SystemTemperaturePage } from "./SystemTemperaturePage";
-import { Icon, SegmentedControl } from "./ui";
+import { lazy, Suspense } from "react";
+import { Icon, SegmentedControl, StatePanel } from "./ui";
 import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
+
+const HardwarePowerPage = lazy(() => import("./HardwarePowerPage").then((module) => ({ default: module.HardwarePowerPage })));
+const SystemTemperaturePage = lazy(() => import("./SystemTemperaturePage").then((module) => ({ default: module.SystemTemperaturePage })));
 
 type Tab = "temps" | "power";
 
@@ -9,6 +11,7 @@ export function HardwarePage(props: {
   tab: Tab;
   onTabChange: (tab: Tab) => void;
   now: number;
+  refreshKey: number;
 }) {
   return (
     <div className="hardware-page" data-testid="hardware-page">
@@ -44,11 +47,13 @@ export function HardwarePage(props: {
           />
         </nav>
       </div>
-      {props.tab === "temps" ? (
-        <SystemTemperaturePage now={props.now} />
-      ) : (
-        <HardwarePowerPage now={props.now} />
-      )}
+      <Suspense fallback={<StatePanel kind="loading" title="正在加载硬件监控" />}>
+        {props.tab === "temps" ? (
+          <SystemTemperaturePage now={props.now} refreshKey={props.refreshKey} />
+        ) : (
+          <HardwarePowerPage now={props.now} refreshKey={props.refreshKey} />
+        )}
+      </Suspense>
     </div>
   );
 }

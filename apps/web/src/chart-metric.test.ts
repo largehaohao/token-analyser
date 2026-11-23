@@ -9,6 +9,7 @@ import {
   dayMetricValue,
   flaggedValue,
   formatChartDay,
+  formatDayReading,
   isWeekendDate,
   localDateString,
   niceChartTicks,
@@ -63,6 +64,17 @@ function day(partial: {
 }
 
 describe("dayMetricValue", () => {
+  it("distinguishes missing and partial telemetry from a measured zero", () => {
+    const missing = day({ date: "2026-08-28", raw: 0, credits: null, usd: null });
+    missing.cost.unmeasured = 2;
+    expect(dayMetricValue(missing, "tokens")).toBeNull();
+    expect(dayMetricValue(missing, "usd")).toBeNull();
+    expect(trendColumnAriaLabel(missing, "tokens")).toContain("用量未记录");
+    const partial = day({ date: missing.date, raw: 12 });
+    partial.cost.unmeasured = 1;
+    expect(formatDayReading(partial, "tokens")).toBe("≥ 12");
+    expect(dayMetricValue(day({ date: missing.date, raw: 0 }), "tokens")).toBe(0);
+  });
   it("does not coerce unknown money to zero", () => {
     const unknown = day({ date: "2026-08-28", raw: 7653600, credits: null, usd: null });
     expect(dayMetricValue(unknown, "tokens")).toBe(7653600);

@@ -273,7 +273,7 @@ describe("updateRateCardFromOfficial", () => {
     try {
       const response = await fetch(`${server.url}/pricing/update`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Origin: server.url },
         body: "{}",
       });
       expect(response.status).toBe(200);

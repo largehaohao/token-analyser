@@ -198,6 +198,8 @@ export type SessionSnapshot = {
   nickname: string | null;
   cwd: string | null;
   live: boolean;
+  /** Uploaded copies have a fixed end even when their mtime is recent. */
+  finalized?: true;
   path: string;
   startedAt: string | null;
   lastEventAt: string | null;
@@ -222,6 +224,16 @@ export type SessionSnapshot = {
   taskTimings?: TaskTiming[];
   performance?: PerformanceSummary;
 };
+
+/** Inputs to accounting, classification totals and timing. Snapshots also carry per-request evidence. */
+export type AnalysisTurn = Pick<Turn,
+  "id" | "startedAt" | "endedAt" | "model" | "bucket" | "labels" | "cost" | "usageRecorded" | "requestPerformance"
+> & { usage: Pick<TokenUsage, "output_tokens"> };
+
+export type AnalysisSession = Pick<SessionSnapshot,
+  "id" | "nickname" | "source" | "startedAt" | "lastEventAt" | "live" | "ledger_warning" |
+  "parse_errors" | "rateLimitSnapshots" | "taskTimings" | "toggles" | "cost" | "waste"
+> & { turns: AnalysisTurn[]; children: AnalysisSession[] };
 
 export type SessionListItem = {
   id: string;

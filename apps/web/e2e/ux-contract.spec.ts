@@ -189,7 +189,8 @@ test("overview updates model pricing with visible loading and success states", a
   await expect(page.getByTestId("overview-page")).toBeVisible({
     timeout: 10_000,
   });
-  const button = page.getByRole("button", { name: "更新模型价格" });
+  await page.getByRole("button", { name: "模型价格", exact: true }).click();
+  const button = page.getByRole("button", { name: "更新模型价格", exact: true });
   await expect(button).toBeVisible();
   await button.click();
   await expect(button).toBeDisabled();
@@ -226,7 +227,8 @@ test("overview explains the price source that failed to respond", async ({
   await expect(page.getByTestId("overview-page")).toBeVisible({
     timeout: 10_000,
   });
-  await page.getByRole("button", { name: "更新模型价格" }).click();
+  await page.getByRole("button", { name: "模型价格", exact: true }).click();
+  await page.getByRole("button", { name: "更新模型价格", exact: true }).click();
   await expect(
     page.getByText(
       "已同步 千问 1 种模型价格（2026-10-19），Codex价格未更新（OpenAI 官网价格页无法访问），价格保持不变，并重新计算本地成本。",

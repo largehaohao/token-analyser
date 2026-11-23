@@ -27,7 +27,7 @@ The older brief's classification list is refined by the maintained README and cu
 | Choice controls | `ui.tsx:SegmentedControl`                                            | This contract                   | Time range / display unit                            | Pressed state and keyboard tests                       |
 | Read/detail     | `CostTree.tsx`, `TurnTable.tsx`, `DetailSection.tsx`                 | Product brief and this contract | Session / category / turn evidence                   | Disclosure, paging, keyboard tests                     |
 | Analysis update | `WasteToggles.tsx`                                                   | Waste PATCH API                 | Serialized preference updates                        | Success, rollback, recovery tests                      |
-| Analysis surface | `LedgerHero.tsx`, `LedgerStrip.tsx`, `TrendPanel.tsx`, `OverviewPanels.tsx`, `Histogram.tsx`, `visual-metrics.ts`, `perf-buckets.ts`, `session-range.ts` | Engine overview payload; this contract | Hero total + sparkline / ledger figures with comparison / trend with overlay and heat calendar / donut composition / ranked list / histograms / rail | Fixed-bucket tests, comparison-window tests, `visual-metrics` unit tests, chart `srTable`, keyboard tooltip tests |
+| Analysis surface | `LedgerHero.tsx`, `LedgerStrip.tsx`, `TrendPanel.tsx`, `OverviewPanels.tsx`, `Histogram.tsx`, `visual-metrics.ts`, `perf-buckets.ts`, `session-range.ts` | Engine overview payload; this contract | Hero total, comparison and sparkline / secondary figures / daily trend and windowed session ranking / donut composition / behaviour ranking / histograms | Fixed-bucket tests, comparison-window tests, `visual-metrics` unit tests, chart `srTable`, keyboard tooltip tests |
 | Performance     | `PerformanceMetrics.tsx`, `ContextMeter.tsx`, `performance.ts`        | This contract; session API      | Agent-task basis / per-request basis / not recorded  | Basis label, unavailable-reason, context-meter tests   |
 
 No custom select/listbox or date-picker popup, bulk table selection, toast, modal, authentication, or delete capability is present. The hardware electricity preview uses native datetime-local inputs. Segmented buttons are not listboxes; disclosure and inline feedback do not need a modal or toast system.
@@ -88,10 +88,14 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
   samples in scope, including those without measurements.
   Turns without a recorded measurement stay out of the buckets and inside the
   stated denominator; a histogram with no samples says so instead of drawing axes.
-- The ranked behaviour list replaces the donut because small categories were
-  unreadable there. Each attributed behaviour row exposes `查看会话` — the
-  overview cannot answer “which sessions”, so the question is handed to the session
-  list with an explicit notice, and no filter is silently applied to the list.
+- Each attributed behaviour row opens `查看会话` with the same source and
+  observation window. A dismissible filter names the category. The engine matches
+  the rounds that actually contributed to that category, including descendant sessions.
+- The session ranking uses costs from the selected window and sorts on the current
+  display unit. The page refreshes rolling windows on a clock tick and on return
+  to the visible tab. Missing measurements retain their lower-bound or unknown
+  labels across the total and charts. A comparison with incomplete usage shows
+  an unavailable state.
 - Chart surfaces are never the only reading: trend, composition, ranking,
   models and histograms publish the same numbers as a screen-reader table, and the
   trend column exposes a focusable tooltip dismissed by `Escape`.
@@ -110,7 +114,8 @@ No custom select/listbox or date-picker popup, bulk table selection, toast, moda
   mirroring the segments.
 - The hero sparkline scrubs: pointer movement or `ArrowLeft`/`ArrowRight`/`Home`/`End`
   moves a crosshair and a per-day readout (with the equal-length previous window drawn
-  as a dashed ghost on the same scale); `Escape` clears it. A window with no recorded
+  as a dashed ghost on the same scale). `Enter` opens the selected day. The
+  tooltip action also accepts focus via Tab. Escape closes it and restores focus. A window with no recorded
   usage states that plainly instead of drawing a zero axis, in both the hero and the
   trend panel.
 - Trend annotations are redundant encodings of recorded data, not new data: a

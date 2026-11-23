@@ -1,22 +1,19 @@
-/** Minimum runtime: Cursor and OpenCode stores use the built-in node:sqlite. */
-export const MIN_NODE_VERSION = "22.13.0";
+/** First 22.x release with both node:sqlite and node:zlib's Zstandard decoder. */
+export const MIN_NODE_VERSION = "22.15.0";
 
 export function isNodeVersionSupported(version: string): boolean {
   const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim());
   if (!match) return false;
   const major = Number(match[1]);
   const minor = Number(match[2]);
-  const patch = Number(match[3]);
-  if (major !== 22) return major > 22;
-  if (minor !== 13) return minor > 13;
-  return patch >= 0;
+  return major >= 24 || (major === 23 && minor >= 8) || (major === 22 && minor >= 15);
 }
 
 export function unsupportedNodeMessage(current = process.version): string {
   return [
-    `token-analyser requires Node.js >= ${MIN_NODE_VERSION} (current ${current}).`,
-    "Cursor and OpenCode stores are read with node:sqlite, which this runtime does not provide.",
-    "Install Node.js 22.13 or newer (see .nvmrc) and start again.",
+    `token-analyser requires Node.js ${MIN_NODE_VERSION}+ (22.x) or 23.8+ (current ${current}).`,
+    "The engine uses node:sqlite and the built-in Zstandard decoder.",
+    "Install a supported Node.js version (see .nvmrc) and start again.",
   ].join("\n");
 }
 

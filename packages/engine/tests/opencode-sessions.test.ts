@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ingestSessions } from "../src/ingest.ts";
+import { startServer } from "../src/server.ts";
 import { SessionStore } from "../src/store.ts";
 import { fileFingerprint } from "../src/store-dump.ts";
 
@@ -67,6 +68,30 @@ function opencodeDb(dir: string) {
 }
 
 describe("OpenCode sessions", () => {
+  it("keeps message usage when a finish is incomplete and ignores end-only TTFT marks", () => {
+    const dir = home();
+    const { file, db } = opencodeDb(dir);
+    try {
+      const started = 1_760_000_000_000;
+      const assistant = {
+        model: { id: "claude-sonnet-4-6" },
+        time: { created: started, completed: started + 9_000 },
+        tokens: { input: 100, output: 25 },
+        cost: 0.25,
+      };
+      db.prepare("UPDATE session_message SET data = ? WHERE id = 'msg_asst'").run(JSON.stringify(assistant));
+      db.prepare("UPDATE part SET data = ? WHERE id = 'part_finish'").run(JSON.stringify({ type: "step-finish", reason: "stop" }));
+      db.prepare("UPDATE part SET data = ? WHERE id = 'part_text'").run(JSON.stringify({
+        type: "text", text: "Reviewed.", time: { end: started + 8_000 },
+      }));
+      const snapshot = ingestSessions(file, { cacheHome: dir }).find((item) => item.id === "opencode:ses_parent");
+      expect(snapshot?.cost).toMatchObject({ raw: 125, usd: 0.25 });
+      expect(snapshot?.turns[0]?.requestPerformance).toMatchObject({ ttftMs: null, durationMs: 8000 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("reads sqlite usage, tools, parent links, and estimates a priced model that logged zero cost", () => {
     const dir = home();
     const { file, db } = opencodeDb(dir);
@@ -369,4 +394,26 @@ describe("OpenCode sessions", () => {
       expect(snap?.lastEventAt).toBe(new Date(completed).toISOString());
     } finally { db.close(); }
   });
+});
+
+it("publishes an SSE update after a batched database loses its final sessions", async () => {
+  const dir = home();
+  const { file, db } = opencodeDb(dir);
+  const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+  await store.ingestPathBatched(file);
+  const server = await startServer({ port: 0, store });
+  const controller = new AbortController();
+  try {
+    const stream = await fetch(`${server.url}/stream`, { signal: controller.signal });
+    const reader = stream.body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain(": connected");
+    db.exec("DELETE FROM session_message; DELETE FROM session_v2;");
+    await store.ingestPathBatched(file);
+    expect(store.list()).toHaveLength(0);
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain('{"id":"*"}');
+  } finally {
+    controller.abort();
+    await server.close();
+    db.close();
+  }
 });

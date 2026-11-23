@@ -1,4 +1,4 @@
-import { watch, existsSync, readdirSync, statSync } from "node:fs";
+import { watch, existsSync, readdirSync, statSync, type Stats } from "node:fs";
 import path from "node:path";
 import { loadUserConfig } from "./config.ts";
 import type { SessionStore } from "./store.ts";
@@ -9,6 +9,8 @@ export type WatchOptions = {
   /** When false, use per-subdirectory watchers instead of recursive fs.watch. */
   recursive?: boolean;
   onError?: (id: string, reason: string) => void;
+  /** Files whose initial generation is already queued by the startup scan. */
+  startupFiles?: readonly string[];
 };
 
 function sessionPath(name: string): string {
@@ -16,36 +18,17 @@ function sessionPath(name: string): string {
   return isSessionFile(stem) ? stem : name;
 }
 
-function listDirectories(root: string): string[] {
-  const dirs = [root];
-  let entries: string[];
-  try {
-    entries = readdirSync(root);
-  } catch {
-    return dirs;
-  }
-  for (const entry of entries) {
-    const full = path.join(root, entry);
-    try {
-      if (statSync(full).isDirectory()) {
-        dirs.push(...listDirectories(full));
-      }
-    } catch {
-      // skip unreadable entries
-    }
-  }
-  return dirs;
-}
-
 export function watchSessions(
   store: SessionStore,
   onChange: (id: string) => void,
   opts?: WatchOptions,
 ): () => void {
-  const watchPaths =
-    opts?.watchPaths ?? loadUserConfig().watch_paths;
+  const watchPaths = (opts?.watchPaths ?? loadUserConfig().watch_paths)
+    .map((file) => path.resolve(file));
   const watchers: ReturnType<typeof watch>[] = [];
   const watchedDirs = new Set<string>();
+  const directoryRoots = new Set<string>();
+  const explicitFiles = new Set(watchPaths);
   const pending = new Map<string, ReturnType<typeof setTimeout>>();
   const observedFiles = new Map<string, string>();
   // fs.watch can miss a create event when a directory is watched immediately
@@ -69,7 +52,7 @@ export function watchSessions(
     return base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : base;
   }
 
-  function ingestIfSession(fullPath: string): void {
+  async function ingestIfSession(fullPath: string): Promise<void> {
     if (!isDiscoveredSessionFile(fullPath)) return;
     if (!existsSync(fullPath)) {
       observedFiles.delete(fullPath);
@@ -78,7 +61,7 @@ export function watchSessions(
       return;
     }
     try {
-      const id = store.ingestPath(fullPath, { allowAppend: true });
+      const id = await store.ingestPathBatched(fullPath, { allowAppend: true });
       rememberFile(fullPath);
       if (id) onChange(id);
       // The store may have deferred a WAL-only SQLite change to protect the
@@ -115,18 +98,18 @@ export function watchSessions(
   function scheduleIngest(fullPath: string, delayMs?: number): void {
     fullPath = sessionPath(fullPath);
     if (!isDiscoveredSessionFile(fullPath)) return;
-    const previous = pending.get(fullPath);
-    if (previous) clearTimeout(previous);
+    // A continuously appended file still gets a turn once per window.
+    if (pending.has(fullPath)) return;
     const timer = setTimeout(() => {
       pending.delete(fullPath);
-      ingestIfSession(fullPath);
+      void ingestIfSession(fullPath);
     }, delayMs ?? ingestDelayMs(fullPath));
     pending.set(fullPath, timer);
   }
 
-  function fileSignature(fullPath: string): string | undefined {
+  function fileSignature(fullPath: string, entry?: Stats): string | undefined {
     try {
-      const stat = statSync(fullPath);
+      const stat = entry ?? statSync(fullPath);
       let wal = "";
       if (fullPath.endsWith(".vscdb") || path.basename(fullPath) === "opencode.db") {
         try { const st = statSync(`${fullPath}-wal`); wal = `${st.size}:${st.mtimeMs}:${st.ctimeMs}`; } catch { /* No active WAL. */ }
@@ -137,8 +120,8 @@ export function watchSessions(
     }
   }
 
-  function scheduleIfChanged(fullPath: string): void {
-    const signature = fileSignature(fullPath);
+  function scheduleIfChanged(fullPath: string, entry?: Stats): void {
+    const signature = fileSignature(fullPath, entry);
     if (!signature || observedFiles.get(fullPath) === signature) return;
     observedFiles.set(fullPath, signature);
     // First scan would otherwise re-parse every GB-scale SQLite/JSONL the dump
@@ -167,7 +150,11 @@ export function watchSessions(
     try {
       const w = watch(dir, (_event, filename) => {
         if (!filename) return;
-        scheduleIngest(path.join(dir, filename));
+        const file = sessionPath(path.join(dir, filename));
+        if (explicitFiles.has(file) ||
+            [...directoryRoots].some((root) => file.startsWith(root.endsWith(path.sep) ? root : root + path.sep))) {
+          scheduleIngest(file);
+        }
       });
       // An async watcher failure (deleted root, EMFILE) must not become an
       // unhandled 'error' event that kills the engine; fall back to scanning.
@@ -188,67 +175,85 @@ export function watchSessions(
   }
 
   function scanForSessions(): void {
+    const found = new Set<string>();
+    const visited = new Set<string>();
+    function scanDirectory(dir: string): void {
+      if (visited.has(dir)) return;
+      visited.add(dir);
+      if (needsDirectoryScan) watchDirectory(dir);
+      try {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const file = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            scanDirectory(file);
+          } else if ((entry.isFile() || entry.isSymbolicLink()) && isDiscoveredSessionFile(file)) {
+            found.add(file);
+            scheduleIfChanged(file);
+          }
+        }
+      } catch {
+        // An unreadable directory may return on the next scan.
+      }
+    }
+
     for (const root of watchPaths) {
-      if (!existsSync(root)) continue;
-      if (statSync(root).isFile()) { scheduleIfChanged(root); continue; }
-      for (const dir of listDirectories(root)) {
-        if (needsDirectoryScan) watchDirectory(dir);
-        let entries: string[];
-        try {
-          entries = readdirSync(dir);
-        } catch {
-          continue;
+      try {
+        const stat = statSync(root);
+        if (stat.isDirectory()) {
+          directoryRoots.add(root);
+          explicitFiles.delete(root);
+          scanDirectory(root);
+        } else if (stat.isFile() && isDiscoveredSessionFile(root)) {
+          explicitFiles.add(root);
+          directoryRoots.delete(root);
+          found.add(root);
+          scheduleIfChanged(root, stat);
         }
-        for (const entry of entries) {
-          const full = path.join(dir, entry);
-          if (isDiscoveredSessionFile(full)) scheduleIfChanged(full);
-        }
+      } catch {
+        // A log root may be created after startup.
       }
     }
     for (const fullPath of observedFiles.keys()) {
-      if (!existsSync(fullPath)) ingestIfSession(fullPath);
+      if (!found.has(fullPath) && !existsSync(fullPath)) ingestIfSession(fullPath);
     }
   }
 
   for (const root of watchPaths) {
-    if (!existsSync(root)) { needsDirectoryScan = true; continue; }
-    if (statSync(root).isFile()) {
+    let stat: Stats;
+    try {
+      stat = statSync(root);
+    } catch {
+      needsDirectoryScan = true;
+      continue;
+    }
+    if (stat.isFile()) {
       needsDirectoryScan = true;
       watchDirectory(path.dirname(root));
       continue;
     }
-
-    if (useRecursive) {
-      try {
-        const w = watch(
-          root,
-          { recursive: true },
-          (_event, filename) => {
-            if (!filename) return;
-            scheduleIngest(path.join(root, filename));
-          },
-        );
-        w.on("error", () => {
-          try {
-            w.close();
-          } catch {
-            // Already closed.
-          }
-          ensureDirectoryScan();
-        });
-        watchers.push(w);
-        continue;
-      } catch {
-        // fall through to per-directory watchers
-        needsDirectoryScan = true;
-      }
-    }
-
-    for (const dir of listDirectories(root)) {
-      watchDirectory(dir);
+    if (!stat.isDirectory()) continue;
+    directoryRoots.add(root);
+    explicitFiles.delete(root);
+    if (!useRecursive) continue;
+    try {
+      const w = watch(root, { recursive: true }, (_event, filename) => {
+        if (filename) scheduleIngest(path.join(root, filename));
+      });
+      w.on("error", () => {
+        try {
+          w.close();
+        } catch {
+          // Already closed.
+        }
+        ensureDirectoryScan();
+      });
+      watchers.push(w);
+    } catch {
+      needsDirectoryScan = true;
     }
   }
 
+  for (const file of opts?.startupFiles ?? []) rememberFile(file);
   startupScan = setTimeout(() => {
     scanForSessions();
     primed = true;

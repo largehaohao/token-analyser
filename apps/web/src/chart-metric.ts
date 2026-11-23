@@ -1,6 +1,8 @@
 import type { OverviewDay } from "./api";
 import {
+  costValue,
   formatChartNumber,
+  formatCost,
   formatExactTokens,
   type CostUnit,
 } from "./format";
@@ -29,21 +31,16 @@ export function dayMetricValue(
   day: OverviewDay,
   metric: ChartMetric,
 ): number | null {
-  if (metric === "tokens") return day.cost.raw;
-  const money = metric === "credits" ? day.cost.credits : day.cost.usd;
-  if (money == null && day.cost.raw === 0) return 0;
-  return money;
+  const value = costValue(day.cost, metric);
+  return value == null && day.cost.raw === 0 && !day.cost.unmeasured ? 0 : value;
 }
 
 export function flaggedValue(
   day: OverviewDay,
   metric: ChartMetric,
 ): number | null {
-  if (metric === "tokens") return day.flaggedCost.raw;
-  const money =
-    metric === "credits" ? day.flaggedCost.credits : day.flaggedCost.usd;
-  if (money == null && day.flaggedCost.raw === 0) return 0;
-  return money;
+  const value = costValue(day.flaggedCost, metric);
+  return value == null && day.flaggedCost.raw === 0 && !day.flaggedCost.unmeasured ? 0 : value;
 }
 
 export function dayUnpricedRaw(day: OverviewDay): number {
@@ -130,13 +127,20 @@ export function chartDayTooltip(date: string): string {
   return `${date} 本地时间`;
 }
 
+export function formatDayReading(day: OverviewDay, metric: ChartMetric): string {
+  const value = dayMetricValue(day, metric);
+  if (value == null) return metric === "tokens" ? "用量未记录" : "费用未知";
+  if (metric === "tokens") return `${day.cost.unmeasured ? "≥ " : ""}${formatChartNumber(value, metric)}`;
+  if (value === 0 && costValue(day.cost, metric) == null) return formatChartNumber(value, metric);
+  return `${day.unpricedRaw > 0 ? "≥ " : ""}${formatCost(day.cost, metric)}`;
+}
+
 export function trendColumnAriaLabel(
   day: OverviewDay,
   metric: ChartMetric,
 ): string {
   const total = dayMetricValue(day, metric);
-  const value =
-    total == null ? "未定价" : formatChartNumber(total, metric);
+  const value = formatDayReading(day, metric);
   const unpriced = dayUnpricedRaw(day);
   const extra =
     unpriced > 0 && total != null

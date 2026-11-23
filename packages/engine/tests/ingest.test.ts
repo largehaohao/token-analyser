@@ -70,6 +70,21 @@ describe("readJsonlFile", () => {
     expect(parse_errors).toEqual([]);
   });
 
+  it("marks a finalized or archived tail at its byte offset and keeps valid usage", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "ingest-closed-tail-"));
+    const filePath = path.join(dir, "rollout-closed.jsonl");
+    const content = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8");
+    writeFileSync(filePath, content + '{"timestamp":');
+    const live = ingestFile(filePath, { cacheHome: dir, allowAppend: true });
+    expect(live.parse_errors).toEqual([]);
+    const imported = ingestFile(filePath, { cacheHome: dir, finalized: true });
+    expect(imported.cost.raw).toBe(live.cost.raw);
+    expect(imported.parse_errors).toMatchObject([{ offset: Buffer.byteLength(content) }]);
+    utimesSync(filePath, 1, 1);
+    const archived = ingestFile(filePath, { cacheHome: dir });
+    expect(archived.parse_errors).toMatchObject([{ offset: Buffer.byteLength(content) }]);
+  });
+
   it("resumes a live file after a line longer than the read chunk", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "ingest-long-line-"));
     const filePath = path.join(dir, "rollout-long.jsonl");

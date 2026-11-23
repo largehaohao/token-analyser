@@ -30,7 +30,7 @@ export function loadUserConfig(): UserConfig {
     const parsed = JSON.parse(readFileSync(configPath, "utf8")) as Partial<UserConfig>;
     const watchPaths = Array.isArray(parsed.watch_paths)
       ? parsed.watch_paths.filter((item): item is string => typeof item === "string")
-      : [];
+      : defaultWatchPaths();
     const usdPerCredit =
       typeof parsed.usd_per_credit === "number" &&
       Number.isFinite(parsed.usd_per_credit) &&
@@ -44,7 +44,7 @@ export function loadUserConfig(): UserConfig {
         ? parsed.usd_per_cny
         : undefined;
     return {
-      watch_paths: watchPaths.length > 0 ? watchPaths : defaultWatchPaths(),
+      watch_paths: watchPaths,
       power: mergePowerConfig(parsed.power),
       usd_per_credit: usdPerCredit,
       usd_per_cny: usdPerCny,

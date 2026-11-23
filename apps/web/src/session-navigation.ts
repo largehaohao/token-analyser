@@ -3,6 +3,7 @@ import {
   SESSION_RANGES,
   type SessionRangeId,
 } from "./session-range";
+import { SLICE_META, type SliceKey } from "./buckets";
 import { SESSION_PAGE_SIZE } from "./session-page";
 import { normalizeEnvironment, type SessionEnvironmentId } from "./session-environment";
 import { normalizeSourceFilter, type SessionSourceFilter } from "./session-source";
@@ -18,6 +19,8 @@ export type SessionNavigation = {
   source: SessionSourceFilter;
   environment: SessionEnvironmentId;
   hardwareTab?: HardwareTab;
+  day?: string;
+  behavior?: { key: SliceKey; asOf: number };
 };
 
 const STORAGE_KEY = "token-analyser.navigation.v1";
@@ -89,6 +92,7 @@ export function readSessionNavigation(): SessionNavigation {
         record.hardwareTab === "power" || record.hardwareTab === "temps"
           ? record.hardwareTab
           : fromView.hardwareTab;
+      const behavior = record.behavior as { key?: unknown; asOf?: unknown } | undefined;
       navigation = {
         view: fromView.view,
         selectedId:
@@ -101,6 +105,11 @@ export function readSessionNavigation(): SessionNavigation {
         source: normalizeSourceFilter(record.source),
         environment: normalizeEnvironment(record.environment),
         ...(hardwareTab ? { hardwareTab } : {}),
+        ...(typeof record.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(record.day) ? { day: record.day } : {}),
+        ...(typeof behavior?.key === "string" && Object.hasOwn(SLICE_META, behavior.key) &&
+          typeof behavior.asOf === "number" && Number.isFinite(behavior.asOf) && Math.abs(behavior.asOf) <= 8.64e15
+          ? { behavior: { key: behavior.key as SliceKey, asOf: behavior.asOf } }
+          : {}),
       };
     }
   } catch {
@@ -114,6 +123,10 @@ export function readSessionNavigation(): SessionNavigation {
       view: fromHash.view,
       ...(fromHash.hardwareTab ? { hardwareTab: fromHash.hardwareTab } : {}),
     };
+  }
+  if (navigation.view !== "sessions") {
+    delete navigation.day;
+    delete navigation.behavior;
   }
   return navigation;
 }

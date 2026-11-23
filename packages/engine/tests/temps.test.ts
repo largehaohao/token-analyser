@@ -483,3 +483,35 @@ describe("fetchTempHistory", () => {
     expect(result.samples[0]!.gpus[0]!.temperatures.edge.value).toBe(40);
   });
 });
+
+it("reports an over-limit sensor even when another is missing", () => {
+  expect(gpuStatus({
+    edge: { value: 105, limit: 85 },
+    junction: { value: null, limit: 100 },
+    memory: { value: 65, limit: 96 },
+  })).toBe("over");
+});
+
+it("drops old GPU samples even when CPU data keeps the collector current", async () => {
+  const result = await fetchTempSnapshot({
+    nowMs: T0 * 1000,
+    fetchImpl: async (raw) => {
+      const query = new URL(raw).searchParams;
+      expect(query.get("lookback_delta")).toBe("20s");
+      if (query.get("query")?.includes("amdgpu_temperature")) {
+        return okJson(matrixResult([{
+          metric: { name: "AMD Radeon RX 7900 XTX", card: "card0", sensor: "edge" },
+          values: [[T0 - 30, "61"]],
+        }]));
+      }
+      return okJson(matrixResult(query.get("query")?.includes("node_hwmon_temp") ? [{
+        metric: { sensor: "temp1" }, values: [[T0, "45"]],
+      }] : []));
+    },
+  });
+  expect(result.ok && result.sample).toMatchObject({
+    timestamp: T0,
+    cpu: { temperatures: { tctl: { value: 45 } } },
+    gpus: [{ status: "missing", temperatures: { edge: { value: null } } }],
+  });
+});

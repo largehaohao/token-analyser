@@ -140,7 +140,7 @@ export function SessionView({
   const pricingCoverage =
     snapshot.cost.raw > 0
       ? formatPercent((100 * pricedRaw) / snapshot.cost.raw)
-      : "100.0%";
+      : "—";
   const animatedTotal = useAnimatedNumber(snapshot.cost.raw === 0 && snapshot.cost.unmeasured ? null : (
     unit === "tokens" ? snapshot.cost.raw : unit === "credits" ? snapshot.cost.credits : snapshot.cost.usd
   ));

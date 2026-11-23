@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Cost, Overview, OverviewRateLimits } from "./api";
-import { SLICE_META } from "./buckets";
+import { SLICE_META, type SliceKey } from "./buckets";
 import {
   allocatePercents,
   cacheHitRatio,
@@ -276,7 +276,7 @@ export function CompositionPanel({
 type RankProps = {
   overview: Overview;
   unit: CostUnit;
-  onInspectSlice: (key: string, label: string) => void;
+  onInspectSlice: (key: SliceKey) => void;
   focusedSlice: string | null;
   onFocusSlice: (key: string | null) => void;
 };
@@ -349,7 +349,7 @@ export function BehaviorRankPanel({
                     label={row.label}
                     onClick={() => {
                       onFocusSlice(row.key);
-                      onInspectSlice(row.key, row.label);
+                      if (row.key !== "unattributed") onInspectSlice(row.key);
                     }}
                   />
                 )}
@@ -377,7 +377,7 @@ export function BehaviorRankPanel({
  * always accounts for the whole window.
  */
 type RankRow = {
-  key: string;
+  key: SliceKey | "unattributed";
   raw: number;
   cost: Cost;
   label: string;

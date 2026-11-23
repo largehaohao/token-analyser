@@ -1,3 +1,4 @@
+import type { SessionIndex } from "./session-index.ts";
 import {
   existsSync,
   readFileSync,
@@ -10,6 +11,7 @@ import { tokenAnalyserHome } from "./config.ts";
 import {
   clearDerivedStoreData,
   readStoreDumpDb,
+  readStoreIndexesDb,
   storeDbPath,
   writeStoreDumpDb,
   writeStoredToggle,
@@ -18,7 +20,7 @@ import type { SessionSnapshot, WasteToggleId } from "./types.ts";
 
 /** Bump when the dump shape or rebuild assumptions change. */
 /** Bump when persisted snapshots must be rebuilt (parser / schema changes). */
-export const STORE_DUMP_VERSION = 3;
+export const STORE_DUMP_VERSION = 4;
 
 export type FileFingerprint = {
   inode: number;
@@ -31,11 +33,11 @@ export type FileFingerprint = {
   shmMtimeMs: number;
 };
 
-export type StoreDump = {
+export type StoreDump<T = SessionSnapshot> = {
   version: number;
   pricingContext: string;
   /** Per-file source snapshots with `children` cleared. */
-  sources: SessionSnapshot[];
+  sources: T[];
   toggles: Record<string, Record<WasteToggleId, boolean>>;
   /** Fingerprints keyed by resolved absolute path. */
   fingerprints: Record<string, FileFingerprint>;
@@ -75,20 +77,21 @@ function antigravitySidecar(filePath: string): { size: number; mtimeMs: number }
   return { size: annotation.size + summaries.size + parseRevision, mtimeMs: Math.max(annotation.mtimeMs, summaries.mtimeMs) };
 }
 
-/** Identity of a session file, including SQLite WAL/SHM and Antigravity title sidecars. */
+/** Identity of the source and committed WAL or Antigravity metadata it depends on. */
 export function fileFingerprint(filePath: string): FileFingerprint {
   const st = statSync(filePath);
   const sqlite = filePath.endsWith(".vscdb") || path.basename(filePath) === "opencode.db";
   const wal = sqlite ? sidecarStat(`${filePath}-wal`) : antigravitySidecar(filePath);
-  const shm = sqlite ? sidecarStat(`${filePath}-shm`) : { size: 0, mtimeMs: 0 };
   return {
     inode: st.ino,
     size: st.size,
     mtimeMs: st.mtimeMs,
     walSize: wal.size,
     walMtimeMs: wal.mtimeMs,
-    shmSize: shm.size,
-    shmMtimeMs: shm.mtimeMs,
+    // The SHM file is the transient WAL index. Readers can change it without
+    // changing committed session data. Keep legacy dump fields compatible.
+    shmSize: 0,
+    shmMtimeMs: 0,
   };
 }
 
@@ -140,12 +143,25 @@ export function readStoreDump(
   home?: string,
   pricingContext?: string,
 ): StoreDump | undefined {
-  let dump = readStoreDumpDb(home);
+  return readCompatibleDump(home, pricingContext, readStoreDumpDb);
+}
+
+export function readStoreIndex(home?: string, pricingContext?: string): StoreDump<SessionIndex> | undefined {
+  return readCompatibleDump(home, pricingContext, readStoreIndexesDb);
+}
+
+function readCompatibleDump<T>(
+  home: string | undefined,
+  pricingContext: string | undefined,
+  read: (home: string | undefined, expected: { version: number; pricingContext?: string }) => StoreDump<T> | undefined,
+): StoreDump<T> | undefined {
+  const expected = { version: STORE_DUMP_VERSION, pricingContext };
+  let dump = read(home, expected);
   if (dump && dump.version !== STORE_DUMP_VERSION) {
     clearDerivedStoreData(home);
     dump = undefined;
   }
-  if (!dump) dump = migrateLegacyDump(home);
+  if (!dump && migrateLegacyDump(home)) dump = read(home, expected);
   if (!dump) return undefined;
   if (pricingContext != null && dump.pricingContext !== pricingContext) {
     clearDerivedStoreData(home);
@@ -179,9 +195,7 @@ export function fingerprintsMatch(
     recorded.size === current.size &&
     recorded.mtimeMs === current.mtimeMs &&
     (recorded.walSize ?? 0) === current.walSize &&
-    (recorded.walMtimeMs ?? 0) === current.walMtimeMs &&
-    (recorded.shmSize ?? 0) === current.shmSize &&
-    (recorded.shmMtimeMs ?? 0) === current.shmMtimeMs
+    (recorded.walMtimeMs ?? 0) === current.walMtimeMs
   );
 }
 

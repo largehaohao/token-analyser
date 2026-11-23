@@ -3,9 +3,9 @@ import type {
   PerformanceSummary,
   RequestPerformance,
   RolloutLine,
-  SessionSnapshot,
+  AnalysisSession,
   TaskTiming,
-  Turn,
+  AnalysisTurn,
 } from "./types.ts";
 
 export type DurationClocks = {
@@ -181,7 +181,7 @@ export function extractTaskTimings(
   return [...completed.values()];
 }
 
-export function collectTaskTimings(session: SessionSnapshot): TaskTiming[] {
+export function collectTaskTimings(session: AnalysisSession): TaskTiming[] {
   return [
     ...(session.taskTimings ?? []),
     ...session.children.flatMap(collectTaskTimings),
@@ -193,14 +193,14 @@ export function collectTaskTimings(session: SessionSnapshot): TaskTiming[] {
  * that request. Sources without task windows (pi, Cursor, Claude) report here.
  */
 /** Every turn in a session tree, root first. */
-export function flattenSessionTurns(session: SessionSnapshot): Turn[] {
+export function flattenSessionTurns(session: AnalysisSession): AnalysisTurn[] {
   return [
     ...session.turns,
     ...session.children.flatMap((child) => flattenSessionTurns(child)),
   ];
 }
 
-export function requestTimings(turns: Turn[]): TimedSample[] {
+export function requestTimings(turns: AnalysisTurn[]): TimedSample[] {
   return turns.map((turn) => {
     const performance = turn.requestPerformance;
     return {
@@ -221,7 +221,7 @@ export function requestTimings(turns: Turn[]): TimedSample[] {
  * the summary always states what it measured.
  */
 export function performanceSamples(
-  sessions: SessionSnapshot[],
+  sessions: AnalysisSession[],
 ): { basis: PerformanceBasis | null; samples: TimedSample[] } {
   const samples: TimedSample[] = [];
   for (const session of sessions) {
@@ -239,7 +239,7 @@ export function performanceSamples(
   return { basis: summarizePerformance(samples).basis, samples };
 }
 
-export function summarizeSessions(sessions: SessionSnapshot[]): PerformanceSummary {
+export function summarizeSessions(sessions: AnalysisSession[]): PerformanceSummary {
   const { basis, samples } = performanceSamples(sessions);
   return { ...summarizePerformance(samples), ...durationClocks(sessions), basis };
 }
@@ -285,7 +285,7 @@ function endedAtInRange(
 }
 
 function turnInClockRange(
-  turn: Turn,
+  turn: AnalysisTurn,
   sinceMs?: number,
   untilMs?: number,
 ): boolean {
@@ -299,11 +299,11 @@ function turnInClockRange(
  * session's first-request-start → last-request-end (else startedAt→lastEventAt).
  */
 export function durationClocks(
-  sessions: SessionSnapshot[],
+  sessions: AnalysisSession[],
   opts?: {
     sinceMs?: number;
     untilMs?: number;
-    turnFilter?: (turn: Turn) => boolean;
+    turnFilter?: (turn: AnalysisTurn) => boolean;
     requestOnly?: boolean;
   },
 ): DurationClocks {
@@ -315,19 +315,26 @@ export function durationClocks(
   const untilMs = opts?.untilMs;
   const ranged = sinceMs != null || untilMs != null;
 
-  function visit(session: SessionSnapshot): void {
-    const turns = session.turns.filter((turn) => {
-      if (!turnInClockRange(turn, sinceMs, untilMs)) return false;
-      return opts?.turnFilter == null || opts.turnFilter(turn);
-    });
-    for (const sample of requestTimings(turns)) {
-      const ms = positiveMs(sample.durationMs);
-      if (ms == null) continue;
-      requestSum += ms;
-      requestCount += 1;
+  function visit(session: AnalysisSession): void {
+    const ownTasks = session.taskTimings ?? [];
+    const useRequestsForSpan = opts?.requestOnly || ownTasks.length === 0;
+    let first = Infinity;
+    let last = -Infinity;
+    for (const turn of session.turns) {
+      if (!turnInClockRange(turn, sinceMs, untilMs) || (opts?.turnFilter && !opts.turnFilter(turn))) continue;
+      const ms = positiveMs(turn.requestPerformance?.durationMs);
+      if (ms != null) {
+        requestSum += ms;
+        requestCount += 1;
+      }
+      if (useRequestsForSpan) {
+        const start = parseIsoMs(turn.startedAt);
+        const end = parseIsoMs(turn.endedAt);
+        if (start != null) first = Math.min(first, start);
+        if (end != null) last = Math.max(last, end);
+      }
     }
 
-    const ownTasks = session.taskTimings ?? [];
     if (!opts?.requestOnly && ownTasks.length > 0) {
       for (const task of ownTasks) {
         if (!endedAtInRange(task.endedAt, sinceMs, untilMs)) continue;
@@ -337,10 +344,7 @@ export function durationClocks(
         taskCount += 1;
       }
     } else {
-      const span = spanMs(
-        turns.map((turn) => turn.startedAt),
-        turns.map((turn) => turn.endedAt),
-      ) ?? (!ranged && !opts?.requestOnly
+      const span = (last > first ? last - first : null) ?? (!ranged && !opts?.requestOnly
         ? spanMs([session.startedAt], [session.lastEventAt])
         : null);
       if (span != null) {

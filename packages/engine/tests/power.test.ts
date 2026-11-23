@@ -101,6 +101,28 @@ describe("fetchPowerRange", () => {
     expect(result.ok && result.samples[0]?.cpu).toBe(30);
   });
 
+  it("sums distinct GPUs and collapses duplicate scrapes of a device", async () => {
+    const ts = T0 / 1000;
+    const dual: RangeResponse = {
+      status: "success",
+      data: {
+        resultType: "matrix",
+        result: [
+          { metric: { UUID: "gpu-0", job: "first" }, values: [[ts, "100"]] },
+          { metric: { UUID: "gpu-0", job: "duplicate" }, values: [[ts, "100"]] },
+          { metric: { UUID: "gpu-1" }, values: [[ts, "200"]] },
+        ],
+      },
+    };
+    const { impl } = fetchWith({
+      "node_rapl": matrix([[ts, "30"]]),
+      "DCGM": dual,
+      "node_hwmon": matrix([[ts, "400"]]),
+    });
+    const result = await fetchPowerRange({ startMs: T0, endMs: T0 + MINUTE, stepMs: MINUTE, fetchImpl: impl });
+    expect(result.ok && result.samples[0]).toEqual({ t: T0, cpu: 30, gpu: 300, machine: 400 });
+  });
+
   it("rejects invalid ranges before any network call", async () => {
     const calls: string[] = [];
     const impl: FetchLike = async (url) => {

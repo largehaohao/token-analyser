@@ -2,10 +2,10 @@
   "name": "web",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.13.0" },
+  "engines": { "node": "^22.15.0 || >=23.8.0" },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node ../../scripts/web-build.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",

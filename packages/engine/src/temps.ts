@@ -13,6 +13,9 @@ export type { FetchLike };
 
 export const TEMP_LIMITS = { edge: 85, junction: 100, memory: 96 } as const;
 
+// A fifteen-second scrape cadence still leaves headroom for a small delay.
+const LIVE_READING_MAX_AGE_SECONDS = 20;
+
 const DEFAULT_GPU_NAME = "AMD Radeon RX 7900 XTX";
 const DEFAULT_CPU_NAME = "AMD Ryzen 7 7700";
 const DEFAULT_GPU_QUERY = "amdgpu_temperature_celsius";
@@ -177,16 +180,9 @@ function bytesToGib(bytes: number): number {
 
 export function gpuStatus(temps: GpuStatusInput): TempGpu["status"] {
   const sensors = [temps.edge, temps.junction, temps.memory] as const;
-  if (sensors.some((s) => s.value == null)) return "missing";
-  for (const s of sensors) {
-    const value = s.value!;
-    if (value > s.limit) return "over";
-  }
-  for (const s of sensors) {
-    const value = s.value!;
-    if (s.limit - value <= WARM_MARGIN_C) return "warm";
-  }
-  return "normal";
+  if (sensors.some(({ value, limit }) => value != null && value > limit)) return "over";
+  if (sensors.some(({ value, limit }) => value != null && limit - value <= WARM_MARGIN_C)) return "warm";
+  return sensors.some(({ value }) => value == null) ? "missing" : "normal";
 }
 
 function seriesByCard(
@@ -335,6 +331,7 @@ async function queryRange(options: {
   startSec: number;
   endSec: number;
   stepSec: number;
+  lookbackSeconds?: number;
   fetchImpl: FetchLike;
   timeoutMs: number;
 }): Promise<QueryPart & { query: string }> {
@@ -345,7 +342,8 @@ async function queryRange(options: {
     `?query=${encodeURIComponent(options.query)}` +
     `&start=${options.startSec}` +
     `&end=${options.endSec}` +
-    `&step=${options.stepSec}`;
+    `&step=${options.stepSec}` +
+    (options.lookbackSeconds == null ? "" : `&lookback_delta=${options.lookbackSeconds}s`);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs);
   try {
@@ -497,6 +495,7 @@ async function fetchAllQueries(options: {
   startSec: number;
   endSec: number;
   stepSec: number;
+  lookbackSeconds?: number;
   fetchImpl: FetchLike;
   timeoutMs: number;
 }): Promise<
@@ -546,11 +545,23 @@ export async function fetchTempSnapshot(options: {
     startSec,
     endSec,
     stepSec: 15,
+    lookbackSeconds: LIVE_READING_MAX_AGE_SECONDS,
     fetchImpl,
     timeoutMs,
   });
   if (!fetched.ok) return { ok: false, config, error: fetched.error };
-  return { ok: true, config, sample: aggregateSnapshot(fetched.parts, tempRuntimeConfig(config)) };
+  const minTime = endSec - LIVE_READING_MAX_AGE_SECONDS;
+  // Range responses can end at different times for each sensor. Drop old
+  // values individually before applying thresholds or labelling a reading live.
+  const originalTimestamp = sampleTimestampSec(fetched.parts);
+  for (const [key, entries] of fetched.parts) {
+    fetched.parts.set(key, entries.map((entry) => ({
+      ...entry,
+      values: entry.values?.filter(([timestamp]) => timestamp >= minTime && timestamp <= endSec),
+    })));
+  }
+  const sample = aggregateSnapshot(fetched.parts, tempRuntimeConfig(config));
+  return { ok: true, config, sample: { ...sample, timestamp: sample.timestamp || originalTimestamp } };
 }
 
 /** 最长历史窗口：对应温度页「最近 7 天」档位。 */

@@ -8,7 +8,6 @@ import {
   type ApiPrices,
   type ApiQwenModelSpec,
 } from "./native-pricing.ts";
-import type { SessionStore } from "./store.ts";
 
 /**
  * Qwen (Alibaba Model Studio) publishes its pay-as-you-go tables as a
@@ -393,7 +392,7 @@ export async function updateQwenPricesFromOfficial(
  * Set `QWEN_PRICING_AUTO_UPDATE=0` to keep the card pinned.
  */
 export function startQwenPriceAutoRefresh(
-  store: SessionStore,
+  store: { refreshPricing(): number | Promise<number> },
   opts: {
     intervalMs?: number;
     apiPricesPath?: string;
@@ -410,24 +409,26 @@ export function startQwenPriceAutoRefresh(
   async function tick(): Promise<void> {
     if (stopped) return;
     try {
-      if (!isQwenPriceCardStale(qwenPriceAsOf(opts.apiPricesPath))) return;
-      const update = await withPricingLock(() => refresh());
-      if (stopped) {
-        restoreApiPrices(update.previousContent, opts.apiPricesPath);
-        return;
-      }
-      try {
-        store.refreshPricing();
-      } catch (error) {
-        try {
+      await withPricingLock(async () => {
+        if (stopped || !isQwenPriceCardStale(qwenPriceAsOf(opts.apiPricesPath))) return;
+        const update = await refresh();
+        if (stopped) {
           restoreApiPrices(update.previousContent, opts.apiPricesPath);
-        } catch {
-          opts.onError?.("pricing_recalculation_rollback_failed");
           return;
         }
-        throw error;
-      }
-      opts.onUpdate?.({ asOf: update.asOf, modelCount: update.modelCount });
+        try {
+          await store.refreshPricing();
+        } catch (error) {
+          try {
+            restoreApiPrices(update.previousContent, opts.apiPricesPath);
+          } catch {
+            opts.onError?.("pricing_recalculation_rollback_failed");
+            return;
+          }
+          throw error;
+        }
+        opts.onUpdate?.({ asOf: update.asOf, modelCount: update.modelCount });
+      });
     } catch (error) {
       // A stale card stays auditable; the next tick retries.
       opts.onError?.(error instanceof Error ? error.message : String(error));

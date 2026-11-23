@@ -122,7 +122,7 @@ for (const scope of ["source", "range"] as const) {
       } else {
         await page.getByRole("button", { name: "5小时", exact: true }).click();
       }
-      await expect(page.locator(".ledger-value").first()).toContainText("200");
+      await expect(page.getByTestId("ledger-hero").locator(".ledger-hero-value")).toContainText("200");
       await expect(comparison).toContainText("—");
     } finally { release(); }
     await expect(comparison).toContainText(/▼ 200（50\.0%）/);
@@ -303,4 +303,122 @@ test("session detail keeps total, input and output inside one card", async ({ pa
   await expect(page.getByTestId("usage-breakdown")).toContainText(
     "占总量 75.0% / 25.0%",
   );
+});
+
+test("rolling totals advance while the local dataset is quiet", async ({ page }) => {
+  const start = new Date("2026-11-20T09:00:00Z");
+  await page.clock.install({ time: start });
+  await page.route((url) => url.pathname === "/overview", (route) => {
+    const url = new URL(route.request().url());
+    const asOf = Date.parse(url.searchParams.get("as_of") ?? "");
+    const raw = asOf - start.getTime() < 3_600_000 ? 1_100 : 0;
+    return route.fulfill({ json: overview(raw) });
+  });
+  await page.goto("/#overview");
+  await page.getByRole("button", { name: "5小时", exact: true }).click();
+  const total = page.getByTestId("ledger-hero").locator(".ledger-hero-value");
+  await expect(total).toContainText("1,100");
+  await page.clock.fastForward("06:00:00");
+  await expect(total).toHaveText("0 tokens");
+});
+
+test("a pending local list cannot block environment switching or Back", async ({ page }) => {
+  let release!: () => void;
+  const wait = new Promise<void>((resolve) => { release = resolve; });
+  const remoteRow = {
+    id: "remote-only", nickname: "远端样例", cost: cost(10), waste: cost(0), source: "pi",
+  };
+  let delayed = false;
+  await page.route((url) => url.pathname === "/sessions", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("env")) {
+      await route.fulfill({ json: { sessions: [remoteRow] } });
+    } else if (!delayed) {
+      delayed = true;
+      await wait;
+      await route.fulfill({ json: { sessions: [] } }).catch(() => undefined);
+    } else {
+      await route.fulfill({ json: { sessions: [] } });
+    }
+  });
+  const localList = page.waitForRequest((request) => new URL(request.url()).pathname === "/sessions");
+  try {
+    await page.goto("/#sessions");
+    await localList;
+    const env = page.getByRole("combobox", { name: "分析环境", exact: true });
+    await page.getByRole("button", { name: "全部", exact: true }).click();
+    await env.selectOption("192.168.1.102");
+    await expect(page.locator(".session-main")).toContainText("远端样例");
+    release();
+    await expect(page.locator(".session-main")).toContainText("远端样例");
+    await page.goBack();
+    await expect(env).toHaveValue("local");
+    await expect(page.locator(".session-main")).toHaveCount(0);
+  } finally {
+    release();
+  }
+});
+
+test("behavior ranking opens matching sessions and can be cleared", async ({ page }) => {
+  await page.goto("/#overview");
+  await page.getByRole("button", { name: "全部", exact: true }).click();
+  const waiting = page.getByTestId("behavior-rank").locator(".rank-row").filter({ hasText: "等待 / 轮询" });
+  const matching = page.waitForResponse((response) => new URL(response.url()).searchParams.get("behavior") === "waiting");
+  await waiting.getByRole("button", { name: "查看会话" }).click();
+  const { sessionIds } = await (await matching).json() as { sessionIds: string[] };
+  expect(sessionIds.length).toBeGreaterThan(0);
+  await expect(page.getByText("行为 · 等待 / 轮询")).toBeVisible();
+  await expect(page.locator(".session-main")).toHaveCount(sessionIds.length);
+  await page.getByRole("button", { name: "清除行为筛选" }).click();
+  await expect(page.locator(".session-main").nth(sessionIds.length)).toBeVisible();
+});
+
+test("any missing usage keeps the comparison uncertain and the mobile sparkline compact", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const data = overview(1_100);
+  const sample = data.days[0]!;
+  data.days = Array.from({ length: 8 }, (_, index) => ({ ...sample, date: `2026-10-${20 + index}` }));
+  const incomplete = { ...data, cost: { ...data.cost, unmeasured: 1 } };
+  await page.route((url) => url.pathname === "/overview", (route) =>
+    route.fulfill({ json: new URL(route.request().url()).searchParams.has("until") ? data : incomplete }));
+  await page.goto("/#overview");
+  const hero = page.getByTestId("ledger-hero");
+  await expect(hero).toContainText("部分用量缺失，无法比较");
+  const spark = hero.getByRole("group", { name: /统计窗口内每日用量趋势/ });
+  expect((await spark.boundingBox())!.height).toBeLessThan(120);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const firstPoint = await spark.locator("svg").evaluate((node) => {
+    const screen = new DOMPoint(3, 44).matrixTransform((node as SVGSVGElement).getScreenCTM()!);
+    return { x: screen.x, y: screen.y };
+  });
+  await page.mouse.move(firstPoint.x, firstPoint.y);
+  await expect(spark.locator(".chart-tooltip b")).toHaveText("2026-10-20");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await spark.focus();
+  await page.keyboard.press("Tab");
+  const drill = hero.getByRole("button", { name: "查看当日会话" });
+  await expect(drill).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(spark).toBeFocused();
+  await expect(drill).toHaveCount(0);
+  await spark.press("End");
+  await spark.press("Enter");
+  await expect(page.getByRole("complementary", { name: "会话列表", exact: true }).getByLabel("清除日期筛选")).toBeVisible();
+});
+
+test("an unfinished startup scan replaces a provisional empty total with progress", async ({ page }) => {
+  let scanning = true;
+  await page.route((url) => url.pathname === "/overview", (route) => route.fulfill({
+    json: scanning
+      ? { ...overview(0), sessionCount: 0, indexing: { completed: 0, total: 2 } }
+      : overview(200),
+  }));
+  await page.goto("/#overview");
+  await expect(page.getByText(/已处理 0 \/ 2 个变更文件/)).toBeVisible();
+  await expect(page.getByTestId("ledger-hero")).toHaveCount(0);
+  await expect(page.getByText("该时间范围内没有会话", { exact: true })).toHaveCount(0);
+  scanning = false;
+  await page.getByRole("button", { name: "刷新", exact: true }).click();
+  await expect(page.getByTestId("ledger-hero").locator(".ledger-hero-value")).toContainText("200");
+  await expect(page.getByText(/个变更文件/)).toHaveCount(0);
 });

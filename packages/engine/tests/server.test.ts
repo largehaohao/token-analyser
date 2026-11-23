@@ -45,6 +45,59 @@ describe("startServer", () => {
     delete process.env.TOKEN_ANALYSER_HOME;
   });
 
+  it("serves the shell config while a local ledger is restoring and exposes reconciliation progress", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-restore-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    let ready!: () => void;
+    const localReady = new Promise<void>((resolve) => { ready = resolve; });
+    let progress: { completed: number; total: number } | undefined = { completed: 1, total: 2 };
+    const server = await startServer({ port: 0, store, localReady, indexing: () => progress });
+    try {
+      let answered = false;
+      const list = fetch(`${server.url}/sessions`).then((response) => {
+        answered = true;
+        return response.json();
+      });
+      expect((await fetch(`${server.url}/config`)).ok).toBe(true);
+      expect(answered).toBe(false);
+      seedStore(store, dir);
+      ready();
+      expect(await list).toMatchObject({ sessions: [{ id: "s1" }], indexing: progress });
+      expect(await (await fetch(`${server.url}/overview`)).json()).toMatchObject({ sessionCount: 1, indexing: progress });
+      progress = undefined;
+      expect(await (await fetch(`${server.url}/overview`)).json()).not.toHaveProperty("indexing");
+    } finally {
+      ready();
+      await server.close();
+    }
+  });
+
+  it("shares same-window temperature queries and refreshes when requested", async () => {
+    let calls = 0;
+    const dir = mkdtempSync(path.join(tmpdir(), "server-temperature-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    const server = await startServer({
+      port: 0,
+      hardwareFetch: async () => {
+        calls += 1;
+        return { ok: true, status: 200, json: async () => ({
+          status: "success", data: { resultType: "matrix", result: [] },
+        }) };
+      },
+    });
+    try {
+      const endpoint = `${server.url}/temps/history?seconds=3600`;
+      const replies = await Promise.all([fetch(endpoint), fetch(endpoint)]);
+      expect(replies.map((reply) => reply.status)).toEqual([200, 200]);
+      expect(calls).toBe(8);
+      await (await fetch(endpoint + "&refresh=1")).json();
+      expect(calls).toBe(16);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("lists sessions, returns snapshot, patches toggles, imports ndjson, and streams SSE", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "server-"));
     process.env.TOKEN_ANALYSER_HOME = dir;
@@ -89,14 +142,14 @@ describe("startServer", () => {
         body: spawnCoord,
       });
       expect(importRes.status).toBe(200);
-      const imported = (await importRes.json()) as { id: string };
-      expect(imported.id).toBe("s-coord");
+      const imported = (await importRes.json()) as { id: string; live: boolean };
+      expect(imported).toMatchObject({ id: "s-coord", live: false });
 
       const listAfterImport = await fetch(`${server.url}/sessions`);
       const listAfterBody = (await listAfterImport.json()) as {
-        sessions: { id: string }[];
+        sessions: { id: string; live: boolean }[];
       };
-      expect(listAfterBody.sessions.map((s) => s.id)).toContain("s-coord");
+      expect(listAfterBody.sessions.find((session) => session.id === "s-coord")?.live).toBe(false);
 
       const events: string[] = [];
       const controller = new AbortController();

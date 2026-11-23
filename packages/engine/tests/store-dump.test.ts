@@ -7,6 +7,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +32,8 @@ import {
 } from "../src/store-db.ts";
 import { DEFAULT_WASTE_TOGGLES } from "../src/types.ts";
 import { pricingCacheContext } from "../src/ingest.ts";
+
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
 
 const fixtures = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -498,4 +501,164 @@ describe("SessionStore dump", () => {
       chmodSync(rollout, 0o600);
     }
   });
+});
+
+it("flushes changes under the same path and session ID before a restart", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "store-dump-content-"));
+  const file = path.join(dir, "rollout.jsonl");
+  const input = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8");
+  const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+  writeFileSync(file, input);
+  store.refresh([file]);
+  store.dump();
+  writeFileSync(file, input.split("\n").filter((line) => !line.includes('"token_count"')).join("\n"));
+  store.refresh([file]);
+  const last = store.get("s-poll")!.cost.raw;
+  expect(last).toBe(0);
+  store.dump();
+  const restarted = new SessionStore({ cacheDir: path.join(dir, "cache") });
+  restarted.loadDump();
+  expect(restarted.get("s-poll")?.cost.raw).toBe(last);
+});
+
+it("rebuilds from an unchanged source after a corrupt snapshot and restores its preference", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "store-corrupt-row-"));
+  const file = path.join(dir, "rollout.jsonl");
+  const cacheDir = path.join(dir, "cache");
+  writeFileSync(file, readFileSync(path.join(fixtures, "wait-poll.jsonl")));
+  const first = new SessionStore({ cacheDir });
+  first.refresh([file]);
+  first.setToggles("s-poll", { poll: false });
+  first.dump();
+  const db = new DatabaseSync(storeDbPath(dir));
+  try {
+    db.prepare("UPDATE sources SET snapshot_json = ? WHERE id = 's-poll'").run("{");
+  } finally {
+    db.close();
+  }
+  const second = new SessionStore({ cacheDir });
+  second.loadDump();
+  second.refresh([file]);
+  expect(second.get("s-poll")?.toggles.poll).toBe(false);
+});
+
+it("drops a removed watch root but retains deferred databases and imported files", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "store-scope-"));
+  const file = (name: string) => path.join(dir, name + ".jsonl");
+  const fixture = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8");
+  for (const name of ["current", "previous", "deferred", "imported"]) {
+    writeFileSync(file(name), fixture.replaceAll("s-poll", name));
+  }
+  const cacheDir = path.join(dir, "cache");
+  const first = new SessionStore({ cacheDir });
+  first.refresh(["current", "previous", "deferred", "imported"].map(file));
+  first.dump();
+  const restarted = new SessionStore({ cacheDir });
+  restarted.loadDump();
+  restarted.refresh([file("current")], { retainPaths: [file("deferred"), file("imported")] });
+  expect(restarted.list().map(({ id }) => id).sort()).toEqual(["current", "deferred", "imported"]);
+});
+
+it("serves a warm overview and list without reading evidence, then hydrates the selected session", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "store-lazy-evidence-"));
+  const cacheDir = path.join(dir, "cache");
+  const file = path.join(dir, "pi.jsonl");
+  const marker = "detail-only-evidence";
+  const fixture = readFileSync(path.join(fixtures, "../native/pi.jsonl"), "utf8").replace("Read the README", marker);
+  writeFileSync(file, fixture);
+  ageFile(file);
+  const first = new SessionStore({ cacheDir });
+  first.refresh([file]);
+  const expectedList = first.list();
+  const opts = { watchPath: "", timezone: "Asia/Singapore", now: "2026-10-08T12:00:00Z", dayCount: 2 };
+  const expectedOverview = first.overview(opts);
+  const expectedDetail = first.get("pi:native-pi");
+  expect(expectedDetail?.turns[0]?.prompt).toContain(marker);
+  first.dump();
+  const parse = vi.spyOn(JSON, "parse");
+  try {
+    const second = new SessionStore({ cacheDir });
+    second.loadDump();
+    expect(second.list()).toEqual(expectedList);
+    expect(second.overview(opts)).toEqual(expectedOverview);
+    expect(parse.mock.calls.some(([input]) => String(input).includes(marker))).toBe(false);
+    expect(second.get("pi:native-pi")).toEqual(expectedDetail);
+    expect(parse.mock.calls.some(([input]) => String(input).includes(marker))).toBe(true);
+  } finally {
+    parse.mockRestore();
+    closeStoreDb(dir);
+  }
+});
+
+it("upgrades a legacy dump without the original log and only rewrites changed evidence afterward", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "store-index-upgrade-"));
+  const cacheDir = path.join(dir, "cache");
+  const input = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8");
+  const files = ["one", "two"].map((id) => {
+    const file = path.join(dir, id + ".jsonl");
+    writeFileSync(file, input.replaceAll("s-poll", id));
+    ageFile(file);
+    return file;
+  });
+  const first = new SessionStore({ cacheDir });
+  first.refresh(files);
+  first.dump();
+  const db = new DatabaseSync(storeDbPath(dir));
+  try {
+    // Older engines have complete source rows but no companion analysis table.
+    db.exec("DELETE FROM source_index");
+    unlinkSync(files[1]!);
+    const restarted = new SessionStore({ cacheDir });
+    expect(await restarted.restoreForStartup()).toBe(2);
+    expect(restarted.get("two")?.turns).toEqual(first.get("two")?.turns);
+    expect(db.prepare("SELECT count(*) AS n FROM source_index").get()?.n).toBe(2);
+    db.exec(`CREATE TABLE source_writes(id TEXT);
+      CREATE TRIGGER changed AFTER UPDATE ON sources BEGIN INSERT INTO source_writes VALUES(NEW.id); END;`);
+    writeFileSync(files[0]!, input.replaceAll("s-poll", "one").split("\n").filter((line) => !line.includes('"token_count"')).join("\n"));
+    restarted.ingestPath(files[0]!);
+    restarted.dump();
+    expect(db.prepare("SELECT id FROM source_writes").all()).toEqual([{ id: "one" }]);
+    const final = new SessionStore({ cacheDir });
+    final.loadDump();
+    expect(final.get("one")?.cost.raw).toBe(0);
+    expect(final.get("two")?.cost.raw).toBe(first.get("two")?.cost.raw);
+  } finally {
+    db.close();
+    closeStoreDb(dir);
+  }
+});
+
+it("publishes background repricing atomically and persists it for a warm restart", async () => {
+  const prev = process.env.TOKEN_ANALYSER_HOME;
+  const dir = mkdtempSync(path.join(tmpdir(), "store-price-worker-"));
+  process.env.TOKEN_ANALYSER_HOME = dir;
+  const config = path.join(dir, "config.json");
+  const firstPath = path.join(dir, "one.jsonl");
+  const secondPath = path.join(dir, "two.jsonl");
+  const fixture = readFileSync(path.join(fixtures, "wait-poll.jsonl"), "utf8");
+  try {
+    writeFileSync(config, JSON.stringify({ usd_per_credit: 0.01 }));
+    writeFileSync(firstPath, fixture.replaceAll("s-poll", "one"));
+    writeFileSync(secondPath, fixture.replaceAll("s-poll", "two"));
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    store.refresh([firstPath, secondPath]);
+    store.dump();
+    const before = store.get("one")!.cost.usd!;
+    expect(before).toBeGreaterThan(0);
+    writeFileSync(config, JSON.stringify({ usd_per_credit: 0.02 }));
+    unlinkSync(secondPath);
+    await expect(store.repriceInBackground()).rejects.toThrow();
+    expect(store.get("one")?.cost.usd).toBe(before);
+    writeFileSync(secondPath, fixture.replaceAll("s-poll", "two"));
+    await store.repriceInBackground();
+    expect(store.get("one")?.cost.usd).toBeCloseTo(before * 2, 10);
+    store.dump();
+    const restarted = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    expect(restarted.loadDump()).toBe(2);
+    expect(restarted.get("two")?.cost.usd).toBeCloseTo(before * 2, 10);
+  } finally {
+    closeStoreDb(dir);
+    if (prev === undefined) delete process.env.TOKEN_ANALYSER_HOME;
+    else process.env.TOKEN_ANALYSER_HOME = prev;
+  }
 });

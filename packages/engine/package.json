@@ -2,7 +2,7 @@
   "name": "engine",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.13.0" },
+  "engines": { "node": "^22.15.0 || >=23.8.0" },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",

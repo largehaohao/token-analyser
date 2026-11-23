@@ -249,9 +249,11 @@ function parsePrice(raw: string): { value: number; error: string | null } {
  */
 export function HardwarePowerPage({
   now,
+  refreshKey = 0,
   adapter = demoPowerAdapter,
 }: {
   now: number;
+  refreshKey?: number;
   adapter?: PowerDataAdapter;
 }) {
   const [mode, setMode] = useState<RangeMode>({
@@ -301,8 +303,11 @@ export function HardwarePowerPage({
     error: string | null;
   }>({ loading: true, connected: false, url: null, samples: null, error: null });
   const feedRequest = useRef(0);
+  const lastRangeRefresh = useRef(refreshKey);
   useEffect(() => {
     const requestId = ++feedRequest.current;
+    const refresh = lastRangeRefresh.current !== refreshKey;
+    lastRangeRefresh.current = refreshKey;
     // 范围一切换就丢掉上一窗的 samples/connected，避免图表、积分和
     // “已接入”横幅在新范围标签下继续展示旧窗数据。
     setFeed((current) => ({
@@ -315,7 +320,7 @@ export function HardwarePowerPage({
     // 范围切换/卸载时主动取消在途请求（开发模式 StrictMode 下首轮请求
     // 会被立即取消，不能把它当“采集失败”，否则页面会闪回演示态）。
     const controller = new AbortController();
-    getPowerFeed(activeWindow.startMs, activeWindow.endMs, stepMs, controller.signal)
+    getPowerFeed(activeWindow.startMs, activeWindow.endMs, stepMs, controller.signal, refresh)
       .then((result) => {
         if (requestId !== feedRequest.current) return;
         setFeed({
@@ -344,16 +349,19 @@ export function HardwarePowerPage({
     return () => {
       controller.abort();
     };
-  }, [activeWindow.startMs, activeWindow.endMs, stepMs]);
+  }, [activeWindow.startMs, activeWindow.endMs, stepMs, refreshKey]);
 
   // 瞬时功率单独拉一段以 now 为终点的短窗，与所选统计范围解耦。
   const [instantSample, setInstantSample] = useState<PowerSample | null>(null);
   const instantRequest = useRef(0);
+  const lastInstantRefresh = useRef(refreshKey);
   useEffect(() => {
     const requestId = ++instantRequest.current;
+    const refresh = lastInstantRefresh.current !== refreshKey;
+    lastInstantRefresh.current = refreshKey;
     const controller = new AbortController();
     const startMs = now - 3 * INSTANT_STEP_MS;
-    getPowerFeed(startMs, now, INSTANT_STEP_MS, controller.signal)
+    getPowerFeed(startMs, now, INSTANT_STEP_MS, controller.signal, refresh)
       .then((result) => {
         if (requestId !== instantRequest.current) return;
         const last =
@@ -374,7 +382,7 @@ export function HardwarePowerPage({
     return () => {
       controller.abort();
     };
-  }, [now]);
+  }, [now, refreshKey]);
 
   const live = feed.connected && feed.samples != null;
   const usingDemo = !live && powerPreview;

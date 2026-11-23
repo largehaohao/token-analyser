@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { getPriceSheet, type PriceSheet as PriceSheetData } from "./api";
-import { Button } from "./ui";
+import { Button, Icon } from "./ui";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -13,9 +13,15 @@ function formatRate(value: number): string {
 export function PriceSheet({
   open,
   reloadKey,
+  onUpdate,
+  updating,
+  status,
 }: {
   open: boolean;
   reloadKey: number;
+  onUpdate: () => void;
+  updating: boolean;
+  status?: ReactNode;
 }) {
   const [sheet, setSheet] = useState<PriceSheetData | null>(null);
   const [state, setState] = useState<LoadState>("idle");
@@ -72,7 +78,11 @@ export function PriceSheet({
             ? `${rowCount} 个模型 · 单价为每百万 token，说明里的第二档不改变默认报价`
             : "正在读取本地价格表"}
         </p>
+        <Button onClick={onUpdate} busy={updating}>
+          <Icon name="refresh" /> 更新模型价格
+        </Button>
       </div>
+      {status && <div className="app-notice">{status}</div>}
 
       {state === "error" && (
         <p className="data-notice" role="alert">

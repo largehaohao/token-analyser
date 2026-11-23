@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Bucket, Cost, SessionSnapshot, Turn } from "../src/types.ts";
 import { DEFAULT_WASTE_TOGGLES } from "../src/types.ts";
 import { buildTree } from "../src/tree.ts";
-import { buildOverview } from "../src/overview.ts";
+import { behaviorSessionIds, buildOverview } from "../src/overview.ts";
 import { loadRateCard } from "../src/rate-card.ts";
 import { loadApiPrices } from "../src/native-pricing.ts";
 import { analyseSession } from "../src/snapshot.ts";
@@ -1083,4 +1083,36 @@ describe("buildOverview", () => {
     const requestOnly = buildOverview([requestSession], opts);
     expect(requestOnly.performance.basis).toBe("request");
   });
+});
+
+it("ranks only windowed usage in the selected unit and anchors previous days at the upper bound", () => {
+  const since = "2026-08-26T16:00:00.000Z";
+  const until = "2026-08-27T16:00:00.000Z";
+  const active = "2026-08-27T15:00:00.000Z";
+  const long = session({
+    id: "long",
+    startedAt: "2026-08-20T12:00:00.000Z",
+    lastEventAt: active,
+    turns: [
+      turn({ id: "historical", bucket: "reading", raw: 100_000, endedAt: "2026-08-20T12:00:00.000Z" }),
+      turn({ id: "included", bucket: "reading", raw: 100, endedAt: since }),
+      turn({ id: "excluded", bucket: "code", raw: 500, endedAt: until }),
+    ],
+  });
+  const short = session({
+    id: "short", startedAt: active, lastEventAt: active,
+    turns: [turn({ id: "in-window", bucket: "code", raw: 1_000, endedAt: active })],
+  });
+  long.turns[1]!.cost.usd = 2;
+  const options = { sinceMs: Date.parse(since), untilMs: Date.parse(until) };
+  const result = buildOverview([long, short], {
+    watchPath: "", now: "2026-11-20T00:00:00.000Z",
+    timezone: "Asia/Singapore", dayCount: 2, ...options,
+  });
+  expect(result.cost.raw).toBe(1_100);
+  expect(result.topSessions.tokens.map(({ id, cost }) => [id, cost.raw])).toEqual([["short", 1_000], ["long", 100]]);
+  expect(result.topSessions.usd.map(({ id }) => id)).toEqual(["long", "short"]);
+  expect(result.days.map(({ date, cost }) => [date, cost.raw])).toEqual([["2026-08-26", 0], ["2026-08-27", 1_100]]);
+  expect(behaviorSessionIds([long, short], "reading", options)).toEqual(["long"]);
+  expect(behaviorSessionIds([long, short], "code", options)).toEqual(["short"]);
 });

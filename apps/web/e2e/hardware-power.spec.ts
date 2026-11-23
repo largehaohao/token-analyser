@@ -127,3 +127,29 @@ test("custom dates validate and render without overflow at 390px", async ({ page
   expect(a11y.violations).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath("hardware-power-mobile.png"), fullPage: true });
 });
+
+test("hardware refresh reads only the active telemetry and CPU-only reports no threshold", async ({ page }) => {
+  let sessionCalls = 0;
+  page.on("request", (request) => {
+    if (["/sessions", "/overview"].includes(new URL(request.url()).pathname)) sessionCalls += 1;
+  });
+  const reading = {
+    timestamp: Math.floor(Date.now() / 1000),
+    cpu: { name: "CPU", status: "available", temperatures: { tctl: { value: 120 }, tccd1: { value: 117 } } },
+    gpus: [],
+  };
+  await page.route((url) => url.pathname === "/temps", (route) =>
+    route.fulfill({ json: { ...reading, connected: true, source: "prometheus" } }));
+  await page.route((url) => url.pathname === "/temps/history", (route) =>
+    route.fulfill({ json: { samples: [reading], connected: true, seconds: 3600, step: 12 } }));
+  await page.goto("/#hardware/temps");
+  const protection = page.getByRole("region", { name: "温度保护" });
+  await expect(protection).toContainText("已读取 CPU 温度");
+  const refresh = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/temps" && url.searchParams.get("refresh") === "1";
+  });
+  await page.getByRole("button", { name: "刷新", exact: true }).click();
+  await refresh;
+  expect(sessionCalls).toBe(0);
+});

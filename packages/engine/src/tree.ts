@@ -2,6 +2,8 @@ import {
   addKnownCost,
   emptyCost,
   emptyMaybeCost,
+  type AnalysisSession,
+  type AnalysisTurn,
   type Bucket,
   type Cost,
   type SessionSnapshot,
@@ -35,7 +37,7 @@ const ROOT_CHILD_LABELS = [
   "other",
 ] as const;
 
-export function sumTurns(turns: Turn[]): Cost {
+export function sumTurns(turns: Pick<Turn, "cost">[]): Cost {
   const summed = turns.reduce(
     (acc, t) => addKnownCost(acc, t.cost),
     emptyMaybeCost(),
@@ -43,7 +45,7 @@ export function sumTurns(turns: Turn[]): Cost {
   return summed.raw === 0 && !summed.unmeasured && !summed.usd ? emptyCost() : summed;
 }
 
-function bucketRaw(turns: Turn[], bucket: Bucket): number {
+function bucketRaw(turns: AnalysisTurn[], bucket: Bucket): number {
   return turns
     .filter((t) => t.bucket === bucket)
     .reduce((sum, t) => sum + t.cost.raw, 0);
@@ -174,7 +176,7 @@ export function buildTree(args: {
   };
 }
 
-export function isIdleChild(child: SessionSnapshot): boolean {
+export function isIdleChild(child: AnalysisSession): boolean {
   const ownRaw = sumTurns(child.turns).raw;
   if (ownRaw === 0) return false;
 

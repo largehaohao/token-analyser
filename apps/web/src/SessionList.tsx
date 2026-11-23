@@ -55,6 +55,8 @@ type Props = {
   onRetry: () => void;
   dayFilter: string | null;
   onClearDayFilter: () => void;
+  behaviorLabel: string | null;
+  onClearBehavior: () => void;
   environmentLabel?: string;
 };
 
@@ -73,6 +75,8 @@ export function SessionList({
   onRetry,
   dayFilter,
   onClearDayFilter,
+  behaviorLabel,
+  onClearBehavior,
   environmentLabel,
 }: Props) {
   const { unit } = useUnit();
@@ -91,7 +95,7 @@ export function SessionList({
   const listRef = useRef<HTMLElement>(null);
   const restoredScroll = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const listIdentity = sessionListIdentity(sessions);
+  const listIdentity = useMemo(() => sessionListIdentity(sessions), [sessions]);
 
   useEffect(() => {
     const justCompleted =
@@ -253,6 +257,15 @@ export function SessionList({
           </BareButton>
         </div>
       )}
+      {behaviorLabel && (
+        <div className="day-filter-chip">
+          <Icon name="layers" />
+          <span>行为 · {behaviorLabel}</span>
+          <BareButton type="button" className="day-filter-clear" onClick={onClearBehavior} aria-label="清除行为筛选">
+            清除 <Icon name="close" />
+          </BareButton>
+        </div>
+      )}
       {totalCount > 0 && (
         <SearchField id="session-search" value={query} onChange={setQuery} />
       )}
@@ -354,16 +367,20 @@ export function SessionList({
           title={
             dayFilter && sessions.length === 0
               ? "当日没有活跃会话"
-              : sessions.length === 0
-                ? EMPTY_RANGE_COPY
+              : behaviorLabel && sessions.length === 0
+                ? "该范围内没有此行为的会话"
+                : sessions.length === 0
+                  ? EMPTY_RANGE_COPY
                 : "没有匹配的会话"
           }
           description={
             dayFilter && sessions.length === 0
               ? "该日没有会话活动。清除日期筛选查看全部会话。"
-              : sessions.length === 0
-                ? "试试页顶的「全部」时间范围。"
-                : "换一个会话名称、目录或模型试试。"
+              : behaviorLabel && sessions.length === 0
+                ? "可以清除行为筛选来查看该范围的所有会话。"
+                : sessions.length === 0
+                  ? "试试页顶的「全部」时间范围。"
+                  : "换一个会话名称、目录或模型试试。"
           }
         >
           {dayFilter && (

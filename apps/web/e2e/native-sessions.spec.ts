@@ -215,5 +215,5 @@ test("source controls expand and remain accessible on mobile", async ({ page }, 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
   expect(result.violations).toEqual([]);
-  await page.locator(".source-toolbar").screenshot({ path: testInfo.outputPath("source-selector-mobile.png") });
+  await page.getByRole("region", { name: "会话来源筛选" }).screenshot({ path: testInfo.outputPath("source-selector-mobile.png") });
 });

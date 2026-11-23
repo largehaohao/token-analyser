@@ -1,84 +1,46 @@
 import { spawn } from "node:child_process";
-import net from "node:net";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertSupportedNode } from "./node-check.mjs";
+import { launchEngine } from "./start-engine.mjs";
+import { viteCli } from "./web-build.mjs";
 
-assertSupportedNode();
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const enginePort = Number.parseInt(process.env.PORT ?? "7789", 10) || 7789;
-
-function waitForPort(port, timeoutMs = 90_000) {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const attempt = () => {
-      const socket = net.connect({ port, host: "127.0.0.1" }, () => {
-        socket.end();
-        resolve();
-      });
-      socket.on("error", () => {
-        socket.destroy();
-        if (Date.now() - started > timeoutMs) {
-          reject(new Error(`Timed out waiting for port ${port}`));
-          return;
-        }
-        setTimeout(attempt, 150);
-      });
-    };
-    attempt();
-  });
-}
-
-const engine = spawn("pnpm", ["--filter", "engine", "start"], {
-  cwd: root,
-  stdio: "inherit",
-  env: process.env,
-  detached: true,
+const enginePort = Number.parseInt(process.env.PORT ?? "", 10) || 7789;
+const stdio = ["inherit", "inherit", "inherit", "ipc"];
+const engine = launchEngine({ ...process.env, PORT: String(enginePort) }, { stdio });
+const web = spawn(process.execPath, [viteCli(), ...process.argv.slice(2)], {
+  cwd: fileURLToPath(new URL("../apps/web/", import.meta.url)),
+  stdio,
+  env: {
+    ...process.env, TOKEN_ANALYSER_MANAGED_DEV: "1",
+    TOKEN_ANALYSER_API_URL: process.env.TOKEN_ANALYSER_API_URL ?? `http://127.0.0.1:${enginePort}`,
+  },
 });
 
-try {
-  await waitForPort(enginePort);
-} catch (err) {
-  killTree(engine);
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
-}
-
-const web = spawn("pnpm", ["--filter", "web", "dev"], {
-  cwd: root,
-  stdio: "inherit",
-  env: process.env,
-  detached: true,
-});
-
-function killTree(child) {
-  if (child.pid == null || child.exitCode != null) return;
-  try {
-    // Negative pid signals the whole process group (pnpm → node → tsx/vite),
-    // so restarts do not leave orphaned engines holding the port.
-    process.kill(-child.pid, "SIGTERM");
-  } catch {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // Already gone.
-    }
+let stopping = false;
+let listening = false;
+let proxyWaiting = false;
+function notifyProxy() {
+  if (listening && proxyWaiting && web.connected) {
+    proxyWaiting = false;
+    web.send({ type: "engine-listening" });
   }
 }
+engine.on("message", (message) => {
+  if (message?.type === "listening") { listening = true; notifyProxy(); }
+});
+web.on("message", (message) => {
+  if (message?.type === "proxy-waiting") { proxyWaiting = true; notifyProxy(); }
+});
 
-function shutdown(code = 0) {
-  killTree(engine);
-  killTree(web);
-  process.exit(code);
+function stop(code = 0) {
+  if (stopping) return;
+  stopping = true;
+  process.exitCode = code;
+  for (const child of [engine, web]) {
+    if (child.exitCode == null && child.signalCode == null) child.kill("SIGTERM");
+  }
 }
-
-process.on("SIGINT", () => shutdown(0));
-process.on("SIGTERM", () => shutdown(0));
-
-engine.on("exit", (code) => {
-  if (code) shutdown(code);
-});
-web.on("exit", (code) => {
-  if (code) shutdown(code);
-});
+for (const child of [engine, web]) {
+  child.on("error", (error) => { console.error(error.message); stop(1); });
+  child.once("exit", (code) => stop(code ?? 0));
+}
+for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => stop());

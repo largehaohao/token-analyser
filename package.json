@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@9.15.0",
-  "engines": { "node": ">=22.13.0" },
+  "engines": { "node": "^22.15.0 || >=23.8.0" },
   "bin": {
     "token-analyser": "./bin/token-analyser.mjs"
   },
@@ -11,6 +11,8 @@
     "bin",
     "scripts/node-check.mjs",
     "scripts/start-engine.mjs",
+    "scripts/start.mjs",
+    "scripts/web-build.mjs",
     "packages/engine/src",
     "packages/engine/package.json",
     "packages/engine/tsconfig.json",
@@ -19,11 +21,12 @@
     ".nvmrc",
     "README.md"
   ],
+  "dependencies": { "tsx": "^4.19.0" },
   "scripts": {
     "test": "pnpm --filter engine test && pnpm --filter web test && sh -c 'if [ \"$E2E\" = 1 ]; then pnpm --filter web test:e2e; fi'",
     "analyse": "pnpm --filter engine analyse",
     "dev": "node scripts/dev.mjs",
-    "start": "pnpm --filter web build && SERVE_UI=1 PORT=7788 pnpm --filter engine start",
+    "start": "node scripts/start.mjs",
     "typecheck": "pnpm --filter engine typecheck && pnpm --filter web typecheck",
     "build": "pnpm --filter web build"
   }

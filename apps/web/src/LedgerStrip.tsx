@@ -1,7 +1,6 @@
 import type { Cost, Overview } from "./api";
 import {
   cacheHitRatio,
-  comparisonText,
   companionMoneyUnit,
   costValue,
   formatCompactTokens,
@@ -16,9 +15,6 @@ import { BareButton, Panel } from "./ui";
 
 type Props = {
   overview: Overview;
-  /** Equal-length window right before the current one, when one exists. */
-  previous: Overview | null;
-  previousLabel: string | null;
   unit: CostUnit;
   onOpenSessions: () => void;
 };
@@ -44,80 +40,27 @@ export function formatAnimatedCost(
   );
 }
 
-/**
- * The five numbers a cost review starts with, plus how the window compares with
- * the equal-length window before it. No chart is spent on a number that has no
- * comparison to make. Headlines count up on arrival and flash once when a live
- * refresh changes them; the exact values stay in the titles and sr text.
- */
 export function LedgerStrip({
   overview,
-  previous,
-  previousLabel,
   unit,
   onOpenSessions,
 }: Props) {
-  const current = costValue(overview.cost, unit);
-  const prev = previous ? costValue(previous.cost, unit) : null;
   const cache = cacheHitRatio(overview.cost);
-  const comparisonLabel = previousLabel ?? "上一周期";
-  const comparison = comparisonText(
-    current,
-    prev,
-    comparisonLabel,
-    (value) => formatCost(
-      unit === "credits"
-        ? { ...overview.cost, credits: value }
-        : unit === "usd"
-          ? { ...overview.cost, usd: value }
-          : { ...overview.cost, raw: value },
-      unit,
-    ),
-  );
   const moneyUnit = unit === "tokens" && overview.cost.credits == null && overview.cost.usd != null
     ? "usd" : companionMoneyUnit(unit);
 
-  const animatedCurrent = useAnimatedNumber(current);
   const animatedMoney = useAnimatedNumber(costValue(overview.cost, moneyUnit));
   const animatedSessions = useAnimatedNumber(overview.sessionCount);
   const animatedTurns = useAnimatedNumber(overview.turnCount);
   const animatedCache = useAnimatedNumber(cache == null ? null : 100 * cache);
   const animatedUnpriced = useAnimatedNumber(overview.unpricedRaw);
   const animatedWaste = useAnimatedNumber(costValue(overview.waste, unit));
-  const totalFlash = useFlashOnChange(overview.cost.raw);
   const cacheFlash = useFlashOnChange(cache);
   const unpricedFlash = useFlashOnChange(overview.unpricedRaw);
   const wasteFlash = useFlashOnChange(overview.waste.raw);
 
   return (
-    <Panel role="region" className="ledger" data-testid="ledger-strip" aria-label="当前统计范围概览">
-      <div className="ledger-item">
-        <span className="ledger-label">总支出（{unit}）</span>
-        <span
-          className={`ledger-value${totalFlash ? " value-flash" : ""}`}
-          title={formatCostTitle(overview.cost, unit)}
-        >
-          {formatAnimatedCost(overview.cost, unit, animatedCurrent)}
-          <span className="ledger-unit"> {formatUnitSuffix(unit)}</span>
-        </span>
-        <span
-          className={`ledger-delta ${comparison.direction}`}
-          title={
-            prev == null
-              ? "该统计范围没有可比较的上一周期"
-              : `上一周期 ${
-                  unit === "tokens"
-                    ? `${prev.toLocaleString()} tokens`
-                    : formatCost(
-                        { ...overview.cost, credits: prev, usd: prev },
-                        unit,
-                      )
-                }`
-          }
-        >
-          {comparison.text}
-        </span>
-      </div>
+    <Panel role="region" className={`ledger overview-metrics${unit === "tokens" ? "" : " compact"}`} data-testid="ledger-strip" aria-label="当前统计范围概览">
       {unit === "tokens" && (
         <div className="ledger-item">
           <span className="ledger-label">预估费用（{moneyUnit}）</span>
@@ -172,12 +115,12 @@ export function LedgerStrip({
         <span
           className={`ledger-value ${overview.unpricedRaw > 0 ? "warn" : ""}${unpricedFlash ? " value-flash" : ""}`}
         >
-          {formatCompactTokens(Math.round(animatedUnpriced ?? 0))}
+          {overview.cost.raw === 0 && overview.cost.unmeasured ? "—" : formatCompactTokens(Math.round(animatedUnpriced ?? 0))}
         </span>
         <span className="ledger-delta">
           {overview.unpricedRaw > 0
             ? "这些 Token 已用量，未计入费用"
-            : "全部用量已有价格"}
+            : overview.cost.raw > 0 ? "已记录用量已计价" : "无可计算用量"}
         </span>
       </div>
       <div className="ledger-item">
@@ -189,18 +132,6 @@ export function LedgerStrip({
           {share(overview.waste.raw, overview.cost.raw) == null
             ? "该范围没有用量"
             : `占 token 用量 ${formatPercent(share(overview.waste.raw, overview.cost.raw)!)}`}
-        </span>
-      </div>
-      <div className="ledger-item">
-        <span className="ledger-label">价格快照</span>
-        <span className="ledger-value">{overview.rateCardAsOf}</span>
-        <span className="ledger-delta">
-          {overview.apiPricesAsOf
-            ? `API 价格 ${overview.apiPricesAsOf}`
-            : "未记录 API 价格更新时间"}
-          {overview.fastMultiplier != null
-            ? ` · Fast ×${overview.fastMultiplier}`
-            : ""}
         </span>
       </div>
     </Panel>

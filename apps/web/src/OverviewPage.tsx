@@ -1,4 +1,6 @@
+import type { ReactNode } from "react";
 import type { Overview } from "./api";
+import type { SliceKey } from "./buckets";
 import {
   companionMoneyUnit,
   disclaimer,
@@ -45,7 +47,8 @@ type Props = {
   rangeLabel: string;
   refreshError?: boolean;
   onRetry: () => void;
-  onInspectSlice: (key: string, label: string) => void;
+  onInspectSlice: (key: SliceKey) => void;
+  topSessions: ReactNode;
   onDrillDay?: (date: string) => void;
   /** Changes when range/source/now window changes so panel model filters re-query. */
   filterScope: string;
@@ -64,6 +67,7 @@ export function OverviewPage({
   refreshError,
   onRetry,
   onInspectSlice,
+  topSessions,
   onDrillDay,
   filterScope,
   fetchOverviewForModel,
@@ -92,9 +96,12 @@ export function OverviewPage({
   const pricedCoverage =
     overview.cost.raw > 0
       ? formatPercent((100 * quality.pricedRaw) / overview.cost.raw)
-      : "100.0%";
+      : null;
   const issueCount = quality.ledgerWarningSessions + quality.parseErrors;
   const money = companionMoneyUnit(unit);
+  const pricingStatus = pricingUpdateNotice && (
+    <Notice tone={pricingUpdateNotice.tone}>{pricingUpdateNotice.message}</Notice>
+  );
 
   return (
     <main
@@ -111,7 +118,6 @@ export function OverviewPage({
               {rangeLabel}
             </Badge>
           </div>
-          <p>从总量到每轮调用，看清用量花在哪里。</p>
         </div>
         <div className="page-heading-actions">
           <Button
@@ -122,23 +128,21 @@ export function OverviewPage({
             <Icon name="layers" />
             模型价格
           </Button>
-          <Button onClick={onUpdateModelPrices} busy={updatingModelPrices}>
-            <Icon name="refresh" />
-            更新模型价格
-          </Button>
           <Button emphasis="solid" intent="brand" onClick={onOpenSessions}>
             查看会话 <Icon name="arrow" />
           </Button>
         </div>
       </header>
 
-      <PriceSheet open={priceSheetOpen} reloadKey={priceSheetReload} />
+      <PriceSheet
+        open={priceSheetOpen}
+        reloadKey={priceSheetReload}
+        onUpdate={onUpdateModelPrices}
+        updating={updatingModelPrices}
+        status={pricingStatus}
+      />
 
-      {pricingUpdateNotice && (
-        <div className="app-notice">
-          <Notice tone={pricingUpdateNotice.tone}>{pricingUpdateNotice.message}</Notice>
-        </div>
-      )}
+      {!priceSheetOpen && pricingStatus && <div className="app-notice">{pricingStatus}</div>}
       {refreshError && (
         <div className="list-error">
           <p role="alert">总览更新失败，当前显示上次成功读取的数据。</p>
@@ -172,13 +176,7 @@ export function OverviewPage({
         onDrillDay={onDrillDay}
       />
 
-      <LedgerStrip
-        overview={overview}
-        previous={previous}
-        previousLabel={previousLabel}
-        unit={unit}
-        onOpenSessions={onOpenSessions}
-      />
+      <LedgerStrip overview={overview} unit={unit} onOpenSessions={onOpenSessions} />
 
       {overview.sessionCount === 0 && (
         <div className="empty-overview">
@@ -193,7 +191,7 @@ export function OverviewPage({
         </div>
       )}
 
-      <div className="panel-grid">
+      <div className="overview-insights">
         <TrendPanel
           overview={overview}
           chartMetric={unit}
@@ -203,23 +201,25 @@ export function OverviewPage({
           onFocusSlice={setFocusedSlice}
           onDrillDay={onDrillDay}
         />
-        <CompositionPanel overview={overview} focusedSlice={focusedSlice} />
+        {topSessions}
       </div>
 
       <div className="panel-grid">
+        <CompositionPanel overview={overview} focusedSlice={focusedSlice} />
         <PerformancePanel
           overview={overview}
           filterScope={filterScope}
           fetchOverviewForModel={fetchOverviewForModel}
         />
-        <BehaviorRankPanel
-          overview={overview}
-          unit={unit}
-          onInspectSlice={onInspectSlice}
-          focusedSlice={focusedSlice}
-          onFocusSlice={setFocusedSlice}
-        />
       </div>
+
+      <BehaviorRankPanel
+        overview={overview}
+        unit={unit}
+        onInspectSlice={onInspectSlice}
+        focusedSlice={focusedSlice}
+        onFocusSlice={setFocusedSlice}
+      />
 
       <div className="detail-stack">
         <DetailSection
@@ -238,7 +238,7 @@ export function OverviewPage({
         )}
         <DetailSection
           title="数据质量与统计口径"
-          description={`定价覆盖 ${pricedCoverage} · ${
+          description={`定价覆盖 ${pricedCoverage ?? "—"} · ${
             issueCount > 0 ? `${issueCount} 项异常需核对` : "账本校验通过"
           }`}
         >
@@ -257,13 +257,15 @@ export function OverviewPage({
               }
             >
               <span>定价覆盖</span>
-              <strong>{pricedCoverage}</strong>
+              <strong>{pricedCoverage ?? "—"}</strong>
               <small>
                 {quality.unpricedRaw > 0
                   ? `${formatExactTokens(quality.unpricedRaw)} tokens 未定价`
-                  : overview.cost.unmeasured
-                    ? "已记录用量已计价；另有调用用量缺失"
-                    : "已记录用量已计价"}
+                  : pricedCoverage == null
+                    ? "无可计算用量"
+                    : overview.cost.unmeasured
+                      ? "已记录用量已计价，部分调用缺少遥测"
+                      : "已记录用量已计价"}
               </small>
             </div>
             <div
@@ -292,6 +294,10 @@ export function OverviewPage({
           <p className="chart-desc">
             跨日会话按每轮结束时间拆分；窗口外用量记在「更早 /
             之后」。趋势不是逐 token 实时扣费。
+          </p>
+          <p className="source-path">
+            价格快照 · Codex {overview.rateCardAsOf}
+            {overview.apiPricesAsOf ? ` · API ${overview.apiPricesAsOf}` : ""}
           </p>
           <p className="source-path">采集目录：{overview.watchPath}</p>
           {overview.unpricedRaw > 0 && (

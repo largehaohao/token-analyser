@@ -3,13 +3,13 @@ import {
   emptyCost,
   emptyMaybeCost,
   type Cost,
-  type SessionSnapshot,
-  type Turn,
+  type AnalysisSession,
+  type AnalysisTurn,
   type WasteToggleId,
 } from "./types.ts";
 import { isIdleChild } from "./tree.ts";
 
-function isOwnTurnWaste(turn: Turn, toggles: Record<WasteToggleId, boolean>): boolean {
+function isOwnTurnWaste(turn: AnalysisTurn, toggles: Record<WasteToggleId, boolean>): boolean {
   if (toggles.poll && turn.bucket === "waiting.poll") return true;
   if (toggles.reread && turn.bucket === "reread") return true;
   if (toggles.compaction_loop && turn.labels.includes("compaction_loop")) return true;
@@ -19,7 +19,7 @@ function isOwnTurnWaste(turn: Turn, toggles: Record<WasteToggleId, boolean>): bo
   return false;
 }
 
-function collectChildTurns(child: SessionSnapshot, idle: boolean): Turn[] {
+function collectChildTurns(child: AnalysisSession, idle: boolean): AnalysisTurn[] {
   const matchesIdle = isIdleChild(child);
   const turns = matchesIdle === idle ? [...child.turns] : [];
   for (const grandchild of child.children) {
@@ -29,22 +29,22 @@ function collectChildTurns(child: SessionSnapshot, idle: boolean): Turn[] {
 }
 
 function walkTurns(
-  session: SessionSnapshot,
-  visit: (turn: Turn) => void,
+  session: AnalysisSession,
+  visit: (turn: AnalysisTurn) => void,
 ): void {
   for (const turn of session.turns) visit(turn);
   for (const child of session.children) walkTurns(child, visit);
 }
 
 export function computeWaste(args: {
-  turns: Turn[];
-  children: SessionSnapshot[];
+  turns: AnalysisTurn[];
+  children: AnalysisSession[];
   toggles: Record<WasteToggleId, boolean>;
 }): { waste: Cost; turnIds: Set<string> } {
   const turnIds = new Set<string>();
-  const turnById = new Map<string, Turn>();
+  const turnById = new Map<string, AnalysisTurn>();
 
-  const consider = (turn: Turn): void => {
+  const consider = (turn: AnalysisTurn): void => {
     if (isOwnTurnWaste(turn, args.toggles)) {
       turnIds.add(turn.id);
       turnById.set(turn.id, turn);

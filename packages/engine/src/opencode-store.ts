@@ -13,22 +13,19 @@ type StepUsage = {
   reasoning: number;
   cacheRead: number;
   cacheWrite: number;
-  cost: number;
 };
 
-function stepUsage(parts: Record<string, unknown>[]): StepUsage | null {
-  const finishes = parts.filter((part) => part.type === "step-finish");
+function stepUsage(finishes: Record<string, unknown>[]): StepUsage | null {
   if (finishes.length === 0) return null;
-  const usage: StepUsage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  const usage: StepUsage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
   for (const step of finishes) {
-    const tokens = record(step.tokens);
-    const cache = record(tokens.cache);
-    usage.input += number(tokens.input) ?? 0;
-    usage.output += number(tokens.output) ?? 0;
-    usage.reasoning += number(tokens.reasoning) ?? 0;
-    usage.cacheRead += number(cache.read) ?? 0;
-    usage.cacheWrite += number(cache.write) ?? 0;
-    usage.cost += number(step.cost) ?? 0;
+    const measured = tokensFromMessage(step);
+    if (!measured) return null;
+    usage.input += measured.input;
+    usage.output += measured.output;
+    usage.reasoning += measured.reasoning;
+    usage.cacheRead += measured.cacheRead;
+    usage.cacheWrite += measured.cacheWrite;
   }
   return usage;
 }
@@ -66,28 +63,21 @@ function requestTiming(
   const time = record(data.time);
   const started = number(time.created);
   if (started == null) return {};
-  const streamMarks: number[] = [];
-  const pushMark = (value: unknown) => {
-    const mark = number(value);
-    if (mark != null) streamMarks.push(mark);
-  };
-  for (const part of parts) {
+  const content = Array.isArray(data.content) ? data.content.map(record) : [];
+  let firstStream: number | null = null;
+  let lastContent: number | null = null;
+  for (const part of [...parts, ...content]) {
     if (part.type !== "text" && part.type !== "reasoning") continue;
-    const partTime = record(part.time);
-    pushMark(partTime.start ?? partTime.created);
-    pushMark(partTime.end ?? partTime.completed);
-  }
-  if (Array.isArray(data.content)) {
-    for (const item of data.content) {
-      const block = record(item);
-      if (block.type !== "text" && block.type !== "reasoning") continue;
-      const blockTime = record(block.time);
-      pushMark(blockTime.created ?? blockTime.start);
-      pushMark(blockTime.completed ?? blockTime.end);
+    const time = record(part.time);
+    const first = number(time.start ?? time.created);
+    const last = number(time.end ?? time.completed);
+    if (first != null && first >= started && (firstStream == null || first < firstStream)) {
+      firstStream = first;
+    }
+    if (last != null && last >= started && (lastContent == null || last > lastContent)) {
+      lastContent = last;
     }
   }
-  const firstStream = streamMarks.length > 0 ? Math.min(...streamMarks) : null;
-  const lastContent = streamMarks.length > 0 ? Math.max(...streamMarks) : null;
   const streamed = number(time.streamed);
   const ended = streamed != null && (firstStream == null || streamed >= firstStream)
     ? streamed
@@ -137,7 +127,6 @@ function tokensFromMessage(data: Record<string, unknown>): StepUsage | null {
   return {
     input, output, reasoning: number(tokens.reasoning) ?? 0,
     cacheRead: number(cache.read) ?? 0, cacheWrite: number(cache.write) ?? 0,
-    cost: number(data.cost) ?? 0,
   };
 }
 
@@ -202,10 +191,14 @@ function buildSessionEvents(
     if (role !== "assistant") continue;
     hasAssistant = true;
     const model = record(data.model);
-    const usage = stepUsage(parts);
+    const finishes = parts.filter((part) => part.type === "step-finish");
+    const stepCosts = finishes.map((step) => number(step.cost));
+    const recordedCost = stepCosts.length > 0 && stepCosts.every((cost) => cost != null)
+      ? stepCosts.reduce((sum, cost) => sum + cost, 0)
+      : number(data.cost);
     const body = messageText(data, parts);
     const content: Record<string, unknown>[] = body ? [{ type: "text", text: body }] : [];
-    const produced = usage ?? tokensFromMessage(data);
+    const produced = stepUsage(finishes) ?? tokensFromMessage(data);
     for (const tool of toolsForMessage(data, parts)) {
       const callId = tool.id || text(message.id);
       content.push({ type: "tool_use", id: callId, name: tool.name, input: tool.input });
@@ -227,8 +220,8 @@ function buildSessionEvents(
           cacheRead: produced.cacheRead,
           cacheWrite: produced.cacheWrite,
           reasoningTokens: produced.reasoning,
-          cost: { total: produced.cost },
         } : undefined,
+        ...(recordedCost != null ? { costUSD: recordedCost } : {}),
       },
     });
   }

@@ -6,7 +6,7 @@ import {
 } from "react";
 import type { Overview } from "./api";
 import { ChartTooltip, useChartTooltip } from "./ChartTooltip";
-import { localDateString } from "./chart-metric";
+import { dayMetricValue, formatDayReading, localDateString } from "./chart-metric";
 import {
   costValue,
   comparisonText,
@@ -88,7 +88,11 @@ export function LedgerHero({
 }) {
   const current = costValue(overview.cost, unit);
   const prev = previous ? costValue(previous.cost, unit) : null;
-  const comparison = comparisonText(
+  const comparable = previous && !overview.cost.unmeasured && !previous.cost.unmeasured &&
+    (unit === "tokens" || (overview.unpricedRaw === 0 && previous.unpricedRaw === 0));
+  const comparison = previous && !comparable
+    ? { text: "部分用量缺失，无法比较", direction: "flat" as const }
+    : comparisonText(
     current,
     prev,
     previousLabel ?? "上一周期",
@@ -104,10 +108,12 @@ export function LedgerHero({
   const animated = useAnimatedNumber(current);
   const flash = useFlashOnChange(overview.cost.raw);
   const today = localDateString(new Date());
-  const values = metricSeries(overview.days, unit).map((point) => point.value);
-  const prevValues = previous
-    ? metricSeries(previous.days, unit).map((point) => point.value)
-    : null;
+  const dated = overview.days.filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day.date));
+  const priorDays = previous?.days.filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day.date));
+  const values = metricSeries(dated, unit).map((point) => point.value);
+  // Align the end of the equal-length period even if overflow buckets differ.
+  const alignedPrevious = priorDays && dated.map((_, index) => priorDays[index + priorDays.length - dated.length]);
+  const prevValues = alignedPrevious?.map((day) => day ? dayMetricValue(day, unit) : null);
   const known = [...values, ...(prevValues ?? [])].filter(
     (value): value is number => value != null,
   );
@@ -118,8 +124,7 @@ export function LedgerHero({
     prevValues && prevValues.filter((value) => value != null).length >= 2
       ? sparkRuns(sparkPoints(prevValues, max))
       : null;
-  const dated = overview.days.filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day.date));
-  const lastIsToday = dated.length > 0 && dated[dated.length - 1]!.date === today;
+  const lastIsToday = dated.at(-1)?.date === today && values.at(-1) != null;
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const tip = useChartTooltip();
@@ -137,22 +142,30 @@ export function LedgerHero({
   }
 
   function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const ratio = (event.clientX - rect.left) / rect.width;
+    if (event.target instanceof Element && event.target.closest(".chart-tooltip")) return;
+    const transform = event.currentTarget.querySelector("svg")?.getScreenCTM();
+    if (!transform) return;
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(transform.inverse());
+    const ratio = (point.x - PAD) / (WIDTH - 2 * PAD);
     scrubTo(Math.round(ratio * (values.length - 1)));
   }
 
-  const scrubDate = scrub != null ? overview.days[scrub]?.date : null;
-  const scrubPoint = scrub != null ? sparkPoints(values, max)[scrub] : null;
+  const scrubDay = scrub != null ? dated[scrub] : undefined;
+  const scrubDate = scrubDay?.date;
+  const priorDay = scrub != null ? alignedPrevious?.[scrub] : undefined;
+  const scrubPoint = tip.active && scrub != null ? sparkPoints(values, max)[scrub] : null;
   const scrubX = scrubPoint ? scrubPoint.split(",")[0] : null;
   const scrubY = scrubPoint ? scrubPoint.split(",")[1] : null;
-  const scrubValue = scrub != null ? values[scrub] : null;
+  function drill() {
+    if (!scrubDate || !onDrillDay) return;
+    scrubTo(null);
+    onDrillDay(scrubDate);
+  }
 
   return (
     <section className="ledger-hero" data-testid="ledger-hero" aria-label="当前范围总用量">
       <div className="ledger-hero-copy">
-        <span className="ledger-hero-label">总用量 · {unit}</span>
+        <span className="ledger-hero-label">{unit === "tokens" ? "总用量" : "预估费用"}</span>
         <span
           className={`ledger-hero-value${flash ? " value-flash" : ""}`}
           title={formatCostTitle(overview.cost, unit)}
@@ -161,11 +174,8 @@ export function LedgerHero({
           <span className="ledger-unit"> {formatUnitSuffix(unit)}</span>
         </span>
         <span className="ledger-hero-meta">
-          <span className={`ledger-delta ${comparison.direction}`}>
-            {comparison.text}
-          </span>
-          <span>{overview.sessionCount.toLocaleString("en-US")} 个会话 · {overview.turnCount.toLocaleString("en-US")} 轮</span>
-          <span>{overview.days.length} 天趋势</span>
+          {previousLabel && <span className={`ledger-delta ${comparison.direction}`}>{comparison.text}</span>}
+          <span>{dated.length} 天趋势</span>
         </span>
       </div>
       {shape ? (
@@ -174,17 +184,36 @@ export function LedgerHero({
           className="ledger-hero-spark-wrap"
           tabIndex={0}
           role="group"
-          aria-label="统计窗口内每日用量趋势；左右方向键逐日读数，Esc 关闭"
+          aria-label="统计窗口内每日用量趋势。方向键逐日查看，回车打开当天会话，Escape 关闭读数"
           onPointerMove={handlePointerMove}
-          onPointerLeave={() => scrubTo(null)}
-          onFocus={() => scrubTo(values.length - 1)}
-          onBlur={() => scrubTo(null)}
+          onPointerDown={handlePointerMove}
+          onPointerLeave={() => {
+            if (!wrapRef.current?.contains(document.activeElement)) tip.scheduleHide();
+          }}
+          onFocus={(event) => {
+            if (event.currentTarget === event.target) scrubTo(values.length - 1);
+            else tip.cancelHide();
+          }}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) scrubTo(null);
+          }}
           onKeyDown={(event) => {
-            if (event.key === "Escape") scrubTo(null);
-            else if (event.key === "ArrowLeft") scrubTo((scrub ?? values.length - 1) - 1);
-            else if (event.key === "ArrowRight") scrubTo((scrub ?? 0) + 1);
-            else if (event.key === "Home") scrubTo(0);
-            else if (event.key === "End") scrubTo(values.length - 1);
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.currentTarget.focus();
+              scrubTo(null);
+              return;
+            }
+            if (event.target !== event.currentTarget) return;
+            if (event.key === "Enter" && onDrillDay) {
+              event.preventDefault();
+              drill();
+            } else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+              event.preventDefault();
+              if (event.key === "ArrowLeft") scrubTo((scrub ?? values.length - 1) - 1);
+              else if (event.key === "ArrowRight") scrubTo((scrub ?? 0) + 1);
+              else scrubTo(event.key === "Home" ? 0 : values.length - 1);
+            }
           }}
         >
           <svg
@@ -205,7 +234,7 @@ export function LedgerHero({
                 <circle cx={scrubX} cy={scrubY} r={3} />
               </g>
             )}
-            {lastIsToday && scrub == null && (
+            {lastIsToday && !tip.active && (
               <circle
                 className="hero-spark-today"
                 cx={shape.lastX}
@@ -215,32 +244,23 @@ export function LedgerHero({
               />
             )}
           </svg>
-          {scrub != null && scrubDate && (
+          {tip.active && scrubDay && (
             <ChartTooltip
               position={tip.position}
               onMouseEnter={tip.cancelHide}
-              onMouseLeave={() => scrubTo(null)}
+              onMouseLeave={() => {
+                if (!wrapRef.current?.contains(document.activeElement)) tip.scheduleHide();
+              }}
             >
               <b>{scrubDate}</b>
-              <span>
-                {scrubValue == null ? "未记录" : `${scrubValue.toLocaleString()} ${unit}`}
-              </span>
-              {ghost && scrub != null && prevValues?.[scrub] != null && (
-                <span className="sep">上一周期同序 {prevValues[scrub]!.toLocaleString()}</span>
+              <span>{formatDayReading(scrubDay, unit)}</span>
+              {ghost && priorDay && (
+                <span className="sep">上一周期 {priorDay.date} · {formatDayReading(priorDay, unit)}</span>
               )}
               {onDrillDay && (
-                /^\d{4}-\d{2}-\d{2}$/.test(scrubDate) && (
-                <BareButton
-                  type="button"
-                  className="tooltip-action"
-                  onClick={() => {
-                    scrubTo(null);
-                    onDrillDay(scrubDate);
-                  }}
-                >
+                <BareButton type="button" className="tooltip-action" onClick={drill}>
                   查看当日会话 <Icon name="arrow" />
                 </BareButton>
-                )
               )}
             </ChartTooltip>
           )}

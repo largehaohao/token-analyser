@@ -21,7 +21,7 @@ test("overview keeps secondary analysis collapsed and accessible by keyboard", a
   await expect(viewNavigation.getByRole("link")).toHaveCount(3);
   await expect(page.getByRole("group", { name: "时间范围" })).toBeVisible();
   await expect(
-    page.locator(".ledger-label", { hasText: "总支出（tokens）" }),
+    page.getByTestId("ledger-hero").locator(".ledger-hero-label", { hasText: "总用量" }),
   ).toBeVisible();
   await expect(
     page.locator(".ledger-label", { hasText: "预估费用" }),
@@ -59,31 +59,28 @@ test("unit switcher keeps tokens paired with credits instead of duplicating toke
   await expect(
     unitSwitch.getByRole("button", { name: "Tokens", exact: true }),
   ).toHaveClass(/active/);
-  const tokenRow = page
-    .locator(".ledger-item")
-    .filter({ has: page.locator(".ledger-label", { hasText: "总支出" }) });
+  const total = page.getByTestId("ledger-hero");
+  const value = total.locator(".ledger-hero-value");
   const moneyRow = page
     .locator(".ledger-item")
     .filter({ has: page.locator(".ledger-label", { hasText: "预估费用" }) });
-  await expect(tokenRow.locator(".ledger-value")).toContainText("tokens");
+  await expect(value).toContainText("tokens");
   await expect(moneyRow.locator(".ledger-value")).toContainText("credits");
-  const tokenText = await tokenRow.locator(".ledger-value").innerText();
+  const tokenText = await value.innerText();
   const moneyText = await moneyRow.locator(".ledger-value").innerText();
   expect(tokenText).not.toEqual(moneyText);
 
   await unitSwitch.getByRole("button", { name: "Credits" }).click();
   await expect(
-    page.locator(".ledger-label", { hasText: "总支出（credits）" }),
+    total.locator(".ledger-hero-label", { hasText: "预估费用" }),
   ).toBeVisible();
+  await expect(value).toContainText("credits");
   await expect(
     page.locator(".ledger-label", { hasText: "预估费用" }),
   ).toHaveCount(0);
 
   await unitSwitch.getByRole("button", { name: "USD" }).click();
-  await expect(
-    page.locator(".ledger-label", { hasText: "总支出（usd）" }),
-  ).toBeVisible();
-  await expect(tokenRow.locator(".ledger-value")).toContainText("USD");
+  await expect(value).toContainText("USD");
   await unitSwitch.getByRole("button", { name: "Tokens" }).click();
 });
 

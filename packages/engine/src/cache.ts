@@ -17,8 +17,8 @@ import {
   writeCacheRow,
 } from "./store-db.ts";
 
-// v18 records Antigravity request windows (previous step -> planner).
-export const CACHE_VERSION = 18;
+// v19 records finalized JSONL tail errors and corrected OpenCode usage/timing.
+export const CACHE_VERSION = 19;
 
 export function cacheDir(home?: string): string {
   return legacyCacheDir(home ?? tokenAnalyserHome());

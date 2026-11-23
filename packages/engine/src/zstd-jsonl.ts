@@ -3,61 +3,67 @@ import { zstdDecompressSync } from "node:zlib";
 import { parseJsonlLine } from "./parse-jsonl.ts";
 import type { ParseError, RolloutLine } from "./types.ts";
 
-const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+const ZSTD_MAGIC = 0xfd2fb528;
+const SKIPPABLE_MAGIC = 0x184d2a50;
+
+function isSkippable(magic: number): boolean {
+  return magic >= SKIPPABLE_MAGIC && magic <= SKIPPABLE_MAGIC + 0xf;
+}
+
+/** Find one complete frame using the header and block lengths from RFC 8878. */
+function frameEnd(raw: Buffer, start: number): number | undefined {
+  const descriptor = raw[start + 4];
+  if (descriptor == null || (descriptor & 0x08) !== 0) return undefined;
+  const singleSegment = (descriptor & 0x20) !== 0;
+  const sizeFlag = descriptor >> 6;
+  const contentSizeBytes = sizeFlag === 0 ? Number(singleSegment) : 1 << sizeFlag;
+  const dictionaryBytes = [0, 1, 2, 4][descriptor & 0x03]!;
+  let offset = start + 5 + Number(!singleSegment) + dictionaryBytes + contentSizeBytes;
+
+  while (offset + 3 <= raw.length) {
+    const header = raw.readUIntLE(offset, 3);
+    const blockType = (header >> 1) & 0x03;
+    if (blockType === 3) return undefined;
+    offset += 3 + (blockType === 1 ? 1 : header >> 3);
+    if ((header & 1) !== 0) {
+      const end = offset + ((descriptor & 0x04) !== 0 ? 4 : 0);
+      return end <= raw.length ? end : undefined;
+    }
+  }
+  return undefined;
+}
 
 /**
- * DeepSeek Harness writes concatenated zstd frames; Node only returns the
- * first. A live file can end mid-frame: keep the valid prefix and report the
- * incomplete tail instead of failing the whole read.
+ * Some Node versions return partial output for a short input. Detect frame
+ * boundaries before decoding so appended or damaged tails have the same
+ * behavior across supported runtimes.
  */
 export function decompressZstdFrames(raw: Buffer): { data: Buffer; truncated: boolean } {
-  if (raw.length < 4 || !raw.subarray(0, 4).equals(ZSTD_MAGIC)) {
+  if (raw.length < 4 || (raw.readUInt32LE(0) !== ZSTD_MAGIC && !isSkippable(raw.readUInt32LE(0)))) {
     throw new Error("not a zstd frame");
-  }
-  // Discover candidate boundaries once. The previous loop rescanned the
-  // remaining buffer for magic bytes for every frame (quadratic in frames).
-  const candidates: number[] = [];
-  for (let index = 4; index <= raw.length - 4; index += 1) {
-    if (
-      raw[index] === 0x28 &&
-      raw[index + 1] === 0xb5 &&
-      raw[index + 2] === 0x2f &&
-      raw[index + 3] === 0xfd
-    ) {
-      candidates.push(index);
-    }
   }
   const parts: Buffer[] = [];
   let offset = 0;
-  while (offset < raw.length) {
-    if (
-      offset + 4 > raw.length ||
-      raw[offset] !== 0x28 ||
-      raw[offset + 1] !== 0xb5 ||
-      raw[offset + 2] !== 0x2f ||
-      raw[offset + 3] !== 0xfd
-    ) {
-      return { data: Buffer.concat(parts), truncated: true };
+  while (offset + 4 <= raw.length) {
+    const magic = raw.readUInt32LE(offset);
+    if (isSkippable(magic)) {
+      if (offset + 8 > raw.length) break;
+      const end = offset + 8 + raw.readUInt32LE(offset + 4);
+      if (end > raw.length) break;
+      offset = end;
+      continue;
     }
-    const ends = [...candidates.filter((candidate) => candidate > offset), raw.length];
-    let decoded: Buffer | null = null;
-    let consumed = 0;
-    for (const end of ends) {
-      try {
-        decoded = zstdDecompressSync(raw.subarray(offset, end));
-        consumed = end - offset;
-        break;
-      } catch {
-        /* try the next candidate frame boundary */
-      }
+    if (magic !== ZSTD_MAGIC) break;
+    const end = frameEnd(raw, offset);
+    if (end == null) break;
+    try {
+      parts.push(zstdDecompressSync(raw.subarray(offset, end)));
+    } catch {
+      break;
     }
-    if (!decoded || consumed === 0) {
-      return { data: Buffer.concat(parts), truncated: true };
-    }
-    parts.push(decoded);
-    offset += consumed;
+    offset = end;
   }
-  return { data: Buffer.concat(parts), truncated: false };
+  return { data: Buffer.concat(parts), truncated: offset !== raw.length };
 }
 
 export function isZstdSessionFile(filePath: string): boolean {

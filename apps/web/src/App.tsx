@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   bindSessionEnvironment,
+  getBehaviorSessions,
   getOverview,
   getSession,
   importNdjson,
   listSessions,
   openStream,
   sessionSummary,
+  type EnvironmentSync,
+  type IndexProgress,
   type Overview,
   type SessionListItem,
   type SessionSnapshot,
@@ -21,10 +24,10 @@ import {
 import { errorMessage, isNotFound, streamErrorBanner } from "./app-errors";
 import { UnitProvider, useUnit } from "./UnitContext";
 import {
-  formatCompactTokens,
+  costValue,
+  formatAbsoluteTime,
   formatCost,
   formatCostTokens,
-  formatPercent,
   type CostUnit,
 } from "./format";
 import { OverviewPage } from "./OverviewPage";
@@ -39,7 +42,7 @@ import {
   SESSION_SOURCES,
   type SessionSourceFilter,
 } from "./session-source";
-import { SessionView } from "./SessionView";
+import { SLICE_META, type SliceKey } from "./buckets";
 import { UnitSwitcher } from "./UnitSwitcher";
 import { NowProvider, useNow } from "./useNow";
 import { readUnitPref, writeUnitPref } from "./unit-pref";
@@ -81,6 +84,8 @@ import {
   type SessionRangeId,
 } from "./session-range";
 
+const SessionView = lazy(() => import("./SessionView").then((module) => ({ default: module.SessionView })));
+
 type View = SessionNavigationView;
 type PricingUpdateNotice = {
   tone: "info" | "warning" | "error" | "success";
@@ -106,9 +111,12 @@ function AppShell() {
   const [previousOverview, setPreviousOverview] = useState<Overview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [appliedScope, setAppliedScope] = useState<string | null>(null);
+  const [appliedAt, setAppliedAt] = useState(now);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [listIndexing, setListIndexing] = useState<IndexProgress | null>(null);
+  const [remoteSync, setRemoteSync] = useState<EnvironmentSync | null>(null);
   const [sessionLoad, setSessionLoad] = useState<{
     id: string;
     status: "loading" | "ready" | "missing" | "error";
@@ -124,7 +132,11 @@ function AppShell() {
   const [mobileSessionPane, setMobileSessionPane] = useState<"list" | "detail">("list");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [range, setRange] = useState<SessionRangeId>(initialNavigation.range);
-  const [dayFilter, setDayFilter] = useState<string | null>(null);
+  const [dayFilter, setDayFilter] = useState<string | null>(initialNavigation.day ?? null);
+  const [behavior, setBehavior] = useState(initialNavigation.behavior ?? null);
+  const [behaviorResult, setBehaviorResult] = useState<{ scope: string; ids: Set<string> } | null>(null);
+  const [behaviorError, setBehaviorError] = useState<string | null>(null);
+  const [hardwareRefreshKey, setHardwareRefreshKey] = useState(0);
   const [source, setSource] = useState<SessionSourceFilter>(
     initialNavigation.source,
   );
@@ -146,10 +158,15 @@ function AppShell() {
   /** Bumped by confirmed mutations so older in-flight reads cannot roll them back. */
   const sessionMutationRev = useRef(0);
   const overviewRequest = useRef(0);
-  const listInFlight = useRef<Promise<SessionListItem[]> | null>(null);
+  const listInFlight = useRef<{
+    environment: SessionEnvironmentId;
+    controller: AbortController;
+    promise: Promise<SessionListItem[]>;
+  } | null>(null);
   const sessionInFlight = useRef<{
     id: string;
     requestId: number;
+    controller: AbortController;
     promise: Promise<SessionSnapshot | undefined>;
   } | null>(null);
   const overviewInFlight = useRef<{
@@ -212,8 +229,10 @@ function AppShell() {
       source,
       environment,
       ...(view === "hardware" ? { hardwareTab } : {}),
+      ...(view === "sessions" && dayFilter ? { day: dayFilter } : {}),
+      ...(view === "sessions" && behavior ? { behavior } : {}),
     });
-  }, [selectedId, view, range, source, environment, hardwareTab]);
+  }, [selectedId, view, range, source, environment, hardwareTab, dayFilter, behavior]);
 
   useEffect(() => {
     if (previousView.current === view) return;
@@ -229,12 +248,42 @@ function AppShell() {
     return () => cancelAnimationFrame(frame);
   }, [view, mobileSessionPane]);
 
+  const changeEnvironment = useCallback((next: SessionEnvironmentId) => {
+    if (next === environmentRef.current) return;
+    environmentRef.current = next;
+    bindSessionEnvironment(next);
+    setEnvironment(next);
+    listRequest.current += 1;
+    listInFlight.current?.controller.abort();
+    listInFlight.current = null;
+    overviewRequest.current += 1;
+    overviewInFlight.current = null;
+    sessionRequest.current += 1;
+    sessionInFlight.current?.controller.abort();
+    sessionInFlight.current = null;
+    setSessions([]);
+    setSessionsLoaded(false);
+    setSessionsError(null);
+    setRemoteSync(null);
+    setListIndexing(null);
+    setOverview(null);
+    setPreviousOverview(null);
+    setSnapshot(null);
+  }, []);
+
   useEffect(() => {
     function restoreNavigation() {
       withViewTransition(() => {
         mobileContextTarget.current = false;
         const next = readSessionNavigation();
+        changeEnvironment(next.environment);
+        rangeRef.current = next.range;
+        sourceRef.current = next.source;
+        selectedIdRef.current = next.selectedId;
         preferredSessionIdRef.current = next.selectedId;
+        setDayFilter(next.day ?? null);
+        setBehavior(next.behavior ?? null);
+        setMobileSessionPane("list");
         setView(next.view);
         setHardwareTab(next.hardwareTab ?? "temps");
         setSelectedId(next.selectedId);
@@ -246,7 +295,7 @@ function AppShell() {
     }
     window.addEventListener("popstate", restoreNavigation);
     return () => window.removeEventListener("popstate", restoreNavigation);
-  }, []);
+  }, [changeEnvironment]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -280,19 +329,36 @@ function AppShell() {
     [sessions, source],
   );
   const counts = useMemo(() => sourceCounts(sessions), [sessions]);
-  const visibleSessions = useMemo(
-    () => {
-      const ranged = filterSessionsByRange(matchingSource, range, now);
-      return dayFilter ? filterSessionsByDay(ranged, dayFilter) : ranged;
-    },
-    [matchingSource, range, now, dayFilter],
-  );
+  const behaviorScope = behavior ? `${environment}:${source}:${range}:${behavior.key}:${behavior.asOf}` : null;
+  const behaviorIds = behaviorResult?.scope === behaviorScope ? behaviorResult?.ids : undefined;
+  const listAsOf = behavior?.asOf ?? (view === "overview" && appliedScope === `${environment}:${source}:${range}` ? appliedAt : now);
+  const visibleSessions = useMemo(() => {
+    // Behavior evidence comes directly from windowed turns, including children.
+    if (behaviorScope) return behaviorIds ? matchingSource.filter((session) => behaviorIds.has(session.id)) : [];
+    const ranged = filterSessionsByRange(matchingSource, range, listAsOf);
+    return dayFilter ? filterSessionsByDay(ranged, dayFilter) : ranged;
+  }, [matchingSource, range, listAsOf, dayFilter, behaviorScope, behaviorIds]);
+
+  useEffect(() => {
+    if (!behavior || !behaviorScope || !sessionsLoaded || view !== "sessions") return;
+    const controller = new AbortController();
+    setBehaviorError(null);
+    void getBehaviorSessions(behavior.key, range, behavior.asOf, source, controller.signal)
+      .then((ids) => {
+        if (!controller.signal.aborted) setBehaviorResult({ scope: behaviorScope, ids: new Set(ids) });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setBehaviorError(errorMessage(error, "加载行为筛选失败"));
+      });
+    return () => controller.abort();
+  }, [behavior, behaviorScope, sessions, sessionsLoaded, view, range, source]);
+
   const rangeLabel =
     SESSION_RANGES.find((item) => item.id === range)?.label ?? range;
 
   const fetchOverviewForModel = useCallback(
-    (model: string) => getOverview(range, now, source, undefined, model),
-    [range, now, source],
+    (model: string) => getOverview(range, appliedAt, source, undefined, model),
+    [range, appliedAt, source, environment],
   );
 
   const refreshOverview = useCallback(async (force = false) => {
@@ -318,11 +384,12 @@ function AppShell() {
         if (requestId !== overviewRequest.current) return data;
         setOverview(data);
         setAppliedScope(requestedScope);
+        setAppliedAt(requestedAt);
         setPreviousOverview(null);
         setOverviewError(null);
         // The ledger strip compares the window with the equal-length window
         // right before it. 全部 has no previous window, so nothing is guessed.
-        const comparison = previousWindow(requestedRange, requestedAt);
+        const comparison = data.indexing ? null : previousWindow(requestedRange, requestedAt);
         if (comparison)
           void getOverview(
             requestedRange,
@@ -357,44 +424,48 @@ function AppShell() {
       },
     );
     return promise;
-  }, [environment]);
+  }, []);
 
   const refreshList = useCallback(async (force = false) => {
-    if (!force && listInFlight.current) return listInFlight.current;
+    const requestedEnv = environmentRef.current;
+    const active = listInFlight.current;
+    if (!force && active?.environment === requestedEnv) return active.promise;
+    active?.controller.abort();
+    const controller = new AbortController();
     const requestId = ++listRequest.current;
     const promise = (async () => {
       try {
-        const list = await listSessions({ refresh: force });
+        const { sessions: list, sync, indexing } = await listSessions({ refresh: force, signal: controller.signal });
         if (requestId === listRequest.current) {
           setSessions(list);
-          setSessionsLoaded(true);
+          setSessionsLoaded(!indexing || list.length > 0);
           setSessionsError(null);
+          setListIndexing(indexing ?? null);
+          setRemoteSync(sync ?? null);
         }
         return list;
       } catch (err) {
-        if (requestId === listRequest.current) {
+        if (requestId === listRequest.current && !controller.signal.aborted) {
           setSessionsError(errorMessage(err, "加载会话列表失败"));
         }
         throw err;
       }
     })();
-    listInFlight.current = promise;
-    void promise.then(
-      () => {
-        if (listInFlight.current === promise) listInFlight.current = null;
-      },
-      () => {
-        if (listInFlight.current === promise) listInFlight.current = null;
-      },
-    );
+    listInFlight.current = { environment: requestedEnv, controller, promise };
+    function clearFlight() {
+      if (listInFlight.current?.promise === promise) listInFlight.current = null;
+    }
+    void promise.then(clearFlight, clearFlight);
     return promise;
-  }, [environment]);
+  }, []);
 
   const refreshSession = useCallback(async (id: string) => {
     const active = sessionInFlight.current;
     if (active?.id === id && active.requestId === sessionRequest.current) {
       return active.promise;
     }
+    active?.controller.abort();
+    const controller = new AbortController();
     const requestId = ++sessionRequest.current;
     const mutationRev = sessionMutationRev.current;
     setSessionLoad((current) =>
@@ -404,7 +475,7 @@ function AppShell() {
     );
     const promise = (async () => {
       try {
-        const snap = await getSession(id);
+        const snap = await getSession(id, controller.signal);
         if (
           requestId === sessionRequest.current &&
           selectedIdRef.current === id
@@ -438,7 +509,7 @@ function AppShell() {
         throw err;
       }
     })();
-    sessionInFlight.current = { id, requestId, promise };
+    sessionInFlight.current = { id, requestId, controller, promise };
     void promise.then(
       () => {
         if (sessionInFlight.current?.promise === promise) {
@@ -505,16 +576,33 @@ function AppShell() {
     }
   }, [refreshList, refreshOverview, refreshSession]);
 
+  const showSessionData = view !== "hardware";
   useEffect(() => {
-    void refreshOverview().catch(() => undefined);
-  }, [range, source, environment, refreshOverview]);
+    if (view === "overview") void refreshOverview().catch(() => undefined);
+  }, [range, source, environment, view, refreshOverview]);
 
   useEffect(() => {
-    void refreshList().catch(() => undefined);
-  }, [refreshList]);
+    if (showSessionData) void refreshList().catch(() => undefined);
+  }, [environment, showSessionData, refreshList]);
 
   useEffect(() => {
-    if (!sessionsError) return;
+    if (view !== "overview" || environment !== "local") return;
+    const refreshOnResume = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshOverview().catch(() => undefined);
+    };
+    document.addEventListener("visibilitychange", refreshOnResume);
+    return () => document.removeEventListener("visibilitychange", refreshOnResume);
+  }, [view, environment, refreshOverview]);
+
+  useEffect(() => {
+    if (view !== "overview" || environment !== "local" || document.visibilityState === "hidden") return;
+    if (range === "all" && new Date(appliedAt).toDateString() === new Date(now).toDateString()) return;
+    if (now > appliedAt) void refreshOverview().catch(() => undefined);
+  }, [now, appliedAt, range, view, environment, refreshOverview]);
+
+  useEffect(() => {
+    if (!sessionsError || !showSessionData) return;
     // A hung engine can keep a request in flight for the full 45s timeout.
     // Wait for each retry to settle so polling cannot stack up a dozen
     // overlapping /sessions requests against a recovering engine.
@@ -528,13 +616,13 @@ function AppShell() {
       );
     }, 3_000);
     return () => clearInterval(timer);
-  }, [sessionsError, refreshList]);
+  }, [sessionsError, showSessionData, refreshList]);
 
   useEffect(() => {
-    if (view !== "sessions") return;
+    if (view !== "sessions" || (behaviorScope && !behaviorIds)) return;
     const preferredId = preferredSessionIdRef.current;
     if (preferredId) {
-      if (!sessionsLoaded) return;
+      if (!sessionsLoaded || (listIndexing && !visibleSessions.some((item) => item.id === preferredId))) return;
       preferredSessionIdRef.current = null;
     }
     const nextId = resolveSelectedSession(selectedId, visibleSessions);
@@ -543,7 +631,7 @@ function AppShell() {
     setSelectedNodeId(null);
     setContextOpen(null);
     if (!nextId) setSnapshot(null);
-  }, [visibleSessions, sessions, sessionsLoaded, selectedId, view]);
+  }, [visibleSessions, sessionsLoaded, selectedId, view, behaviorScope, behaviorIds, listIndexing]);
 
   useEffect(() => {
     if (selectedId && view === "sessions") {
@@ -554,40 +642,78 @@ function AppShell() {
       // new selection is loaded, so doing it before that call would also
       // invalidate a request that is about to be coalesced.
       sessionRequest.current += 1;
+      sessionInFlight.current?.controller.abort();
+      sessionInFlight.current = null;
       if (!selectedId) setSnapshot(null);
     }
   }, [selectedId, refreshSession, view]);
 
   useEffect(() => {
-    return openStream((event) => {
-      // Local file events must not pull the remote machine on every append.
+    if (!showSessionData || environment !== "local") return;
+    let disposed = false;
+    let syncing = false;
+    let queued = false;
+    let timer: number | undefined;
+
+    async function sync() {
+      if (disposed || syncing || !queued || environmentRef.current !== "local") return;
+      syncing = true;
+      queued = false;
+      // A connection event can race the initial read. Wait for that read, then
+      // apply this event to the latest generation.
+      await Promise.allSettled([listInFlight.current?.promise, overviewInFlight.current?.promise]);
+      if (!disposed && environmentRef.current === "local") {
+        const currentId = selectedIdRef.current;
+        await Promise.allSettled([
+          refreshList(),
+          viewRef.current === "overview" ? refreshOverview() : undefined,
+          currentId && viewRef.current === "sessions" ? refreshSession(currentId) : undefined,
+        ]);
+      }
+      syncing = false;
+      if (queued && !disposed) scheduleSync();
+    }
+
+    function scheduleSync() {
+      if (syncing || timer != null) return;
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        void sync();
+      }, 80);
+    }
+
+    const close = openStream((event) => {
       if (environmentRef.current !== "local") return;
       const banner = streamErrorBanner(event);
       if (banner) setAppError(banner);
-      void refreshOverview().catch(() => undefined);
-      void refreshList().catch(() => undefined);
-      const currentId = selectedIdRef.current;
-      if (currentId && viewRef.current === "sessions") {
-        void refreshSession(currentId).catch(() => undefined);
-      }
+      queued = true;
+      scheduleSync();
     }, setStreamStatus);
-  }, [refreshList, refreshOverview, refreshSession]);
+    return () => {
+      disposed = true;
+      close();
+      if (timer != null) window.clearTimeout(timer);
+    };
+  }, [showSessionData, environment, refreshList, refreshOverview, refreshSession]);
 
   useEffect(() => {
-    if (environment === "local") return;
+    if (environment === "local" || !showSessionData) return;
     const timer = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
       void refreshList().catch(() => undefined);
-      void refreshOverview().catch(() => undefined);
+      if (viewRef.current === "overview") void refreshOverview().catch(() => undefined);
       const currentId = selectedIdRef.current;
       if (currentId && viewRef.current === "sessions") {
         void refreshSession(currentId).catch(() => undefined);
       }
     }, 20_000);
     return () => window.clearInterval(timer);
-  }, [environment, refreshList, refreshOverview, refreshSession]);
+  }, [environment, showSessionData, refreshList, refreshOverview, refreshSession]);
 
   function openImportedSession(snap: SessionSnapshot) {
     mobileContextTarget.current = false;
+    setDayFilter(null);
+    setBehavior(null);
     if (viewRef.current !== "sessions")
       pushSessionNavigation({
         view: "sessions",
@@ -622,13 +748,10 @@ function AppShell() {
       const snap = await importNdjson(filename, text);
       importedSnapshot.current = snap;
       // Imports land in the local store. Show that machine, not the remote mirror.
-      if (environmentRef.current !== "local") {
-        environmentRef.current = "local";
-        bindSessionEnvironment("local");
-        setEnvironment("local");
-      }
+      changeEnvironment("local");
       // A list read started before the import must not erase the confirmed record.
       listRequest.current += 1;
+      listInFlight.current?.controller.abort();
       listInFlight.current = null;
       setSessions((current) => [
         sessionSummary(snap),
@@ -643,7 +766,7 @@ function AppShell() {
       if (viewRef.current === "sessions") openImportedSession(snap);
       setImportStatus({ state: "success", filename });
       void refreshList().catch(() => undefined);
-      void refreshOverview().catch(() => undefined);
+      if (viewRef.current === "overview") void refreshOverview().catch(() => undefined);
     } catch (err) {
       setImportStatus({
         state: "error",
@@ -667,6 +790,8 @@ function AppShell() {
     if (view !== "sessions") {
       withViewTransition(() => {
         pushSessionNavigation({ view: "sessions", selectedId: id, range, source, environment });
+        setBehavior(null);
+        setDayFilter(null);
         setView("sessions");
         select();
       });
@@ -690,28 +815,22 @@ function AppShell() {
 
   function handleEnvironmentChange(next: SessionEnvironmentId) {
     if (next === environment) return;
-    environmentRef.current = next;
-    bindSessionEnvironment(next);
-    setEnvironment(next);
-    setSessions([]);
-    setSessionsLoaded(false);
-    setSessionsError(null);
-    setOverview(null);
-    setPreviousOverview(null);
-    setSnapshot(null);
+    pushSessionNavigation({ view, selectedId: null, range, source, environment: next });
+    changeEnvironment(next);
+    preferredSessionIdRef.current = null;
+    selectedIdRef.current = null;
     setSelectedId(null);
     setSelectedNodeId(null);
     setContextOpen(null);
     setMobileSessionPane("list");
-    preferredSessionIdRef.current = null;
-    listRequest.current += 1;
-    overviewRequest.current += 1;
-    sessionRequest.current += 1;
+    setDayFilter(null);
+    setBehavior(null);
   }
 
   function handleSourceChange(next: SessionSourceFilter) {
     if (next === source) return;
     setDayFilter(null);
+    setBehavior(null);
     const nextId = resolveSelectedSession(
       null,
       filterSessionsByRange(filterSessionsBySource(sessions, next), range, now),
@@ -743,23 +862,35 @@ function AppShell() {
     error: overviewError,
   });
 
+  const indexing = view === "overview" ? overview?.indexing : listIndexing;
+
   function refreshAll() {
+    if (view === "hardware") {
+      setHardwareRefreshKey((value) => value + 1);
+      return;
+    }
     setRefreshing(true);
-    void Promise.all([
-      refreshOverview(true),
+    void Promise.allSettled([
+      view === "overview" ? refreshOverview(true) : undefined,
       refreshList(true),
-      selectedId ? refreshSession(selectedId) : Promise.resolve(),
-    ])
-      .catch(() => undefined)
-      .finally(() => setRefreshing(false));
+      view === "sessions" && selectedId ? refreshSession(selectedId) : undefined,
+    ]).finally(() => setRefreshing(false));
   }
 
-  function inspectSlice(key: string, label: string) {
-    // The overview ranking answers "which sessions did this"; the session list
-    // is the only surface that can answer it, so hand the question over.
-    openSessions();
-    setAppError(`已切到会话明细：按「${label}」查看会话，可在列表里搜索关键词。`);
-    void key;
+  function inspectSlice(key: SliceKey) {
+    const filter = { key, asOf: appliedAt };
+    mobileContextTarget.current = false;
+    writeSessionListState({ query: "", limit: SESSION_PAGE_SIZE, scrollTop: 0 });
+    withViewTransition(() => {
+      pushSessionNavigation({ view: "sessions", selectedId: null, range, source, environment, behavior: filter });
+      setSelectedId(null);
+      setSelectedNodeId(null);
+      setContextOpen(null);
+      setDayFilter(null);
+      setBehavior(filter);
+      setView("sessions");
+      setMobileSessionPane("list");
+    });
   }
 
   function drillToDay(date: string) {
@@ -767,6 +898,7 @@ function AppShell() {
     mobileContextTarget.current = false;
     setContextOpen(null);
     setDayFilter(date);
+    setBehavior(null);
     rangeRef.current = "all";
     setRange("all");
     writeSessionListState({ query: "", limit: SESSION_PAGE_SIZE, scrollTop: 0 });
@@ -782,6 +914,7 @@ function AppShell() {
         range: "all",
         source,
         environment,
+        day: date,
       });
       setView("sessions");
       setMobileSessionPane("list");
@@ -794,8 +927,11 @@ function AppShell() {
     setContextOpen(null);
     const nextId = resolveSelectedSession(selectedId, visibleSessions);
     withViewTransition(() => {
-      if (view !== "sessions")
+      if (view !== "sessions") {
         pushSessionNavigation({ view: "sessions", selectedId: nextId, range, source, environment });
+        setDayFilter(null);
+        setBehavior(null);
+      }
       setView("sessions");
       setMobileSessionPane("list");
       setSelectedId(nextId);
@@ -825,6 +961,8 @@ function AppShell() {
           environment,
           ...(tab ? { hardwareTab: tab } : {}),
         });
+        setDayFilter(null);
+        setBehavior(null);
         setView(next);
       });
     }
@@ -917,16 +1055,18 @@ function AppShell() {
             </nav>
           </div>
           <div className="header-right app-tools">
-            <div className="status-pills" role="status" aria-live="polite">
+            {showSessionData && <div className="status-pills" role="status" aria-live="polite">
               <Badge asChild variant="outline">
                 <span>
-                  <i
-                    className={`dot ${streamStatus === "open" ? "live" : streamStatus === "error" ? "err" : "idle"}`}
-                  />
-                  {STREAM_LABEL[streamStatus]}
+                  <i className={`dot ${(environment === "local" ? streamStatus === "error" : remoteSync?.failed)
+                    ? "err"
+                    : (environment === "local" ? streamStatus === "open" : remoteSync?.syncedAt != null)
+                      ? "live" : "idle"}`} />
+                  {environment === "local" ? STREAM_LABEL[streamStatus]
+                    : remoteSync?.failed ? "同步中断" : remoteSync?.refreshing ? "正在同步镜像" : remoteSync?.syncedAt != null ? "已同步" : "正在同步"}
                 </span>
               </Badge>
-            </div>
+            </div>}
             <Button
               className="theme-toggle"
               emphasis="ghost"
@@ -986,7 +1126,7 @@ function AppShell() {
           visibleCount={visibleSessions.length}
           rangeLabel={rangeLabel}
           onChange={handleSourceChange}
-          onShowAllTime={() => setRange("all")}
+          onShowAllTime={() => { setBehavior(null); setDayFilter(null); setRange("all"); }}
         />
           <div className="scope-controls">
             <div className="filter-field">
@@ -995,6 +1135,7 @@ function AppShell() {
                 range={range}
                 onChange={(next) => {
                   setDayFilter(null);
+                  setBehavior(null);
                   setRange(next);
                 }}
               />
@@ -1033,7 +1174,20 @@ function AppShell() {
             </Notice>
           </div>
         )}
-        {appError && (
+        {showSessionData && environment === "local" && indexing && (
+          <div className="app-notice" role="status">
+            正在更新会话索引 · 已处理 {indexing.completed} / {indexing.total} 个变更文件。当前统计会随读取进度更新。
+          </div>
+        )}
+        {showSessionData && environment !== "local" && remoteSync?.failed && (
+          <div className="app-notice">
+            <Notice tone="warning">
+              远端同步中断，正在显示缓存会话。
+              {remoteSync.syncedAt != null && `上次成功同步于 ${formatAbsoluteTime(new Date(remoteSync.syncedAt).toISOString())}。`}
+            </Notice>
+          </div>
+        )}
+        {showSessionData && appError && (
           <div className="app-notice">
             <Notice
               tone="error"
@@ -1058,9 +1212,10 @@ function AppShell() {
               tab={hardwareTab}
               onTabChange={handleHardwareTabChange}
               now={now}
+              refreshKey={hardwareRefreshKey}
             />
           ) : view === "overview" ? (
-            overviewState === "ready" && overview ? (
+            overviewState === "ready" && overview && !(overview.indexing && overview.sessionCount === 0) ? (
               <div className="layout overview-layout">
                 <OverviewPage
                   overview={overview}
@@ -1077,25 +1232,24 @@ function AppShell() {
                   refreshError={overviewError != null}
                   onRetry={() => void refreshOverview().catch(() => undefined)}
                   onInspectSlice={inspectSlice}
+                  topSessions={
+                    <OverviewRail
+                      topSessions={overview.topSessions?.[unit] ?? []}
+                      rangeLabel={rangeLabel}
+                      onSelectSession={handleSelectSession}
+                      onOpenSessions={openSessions}
+                    />
+                  }
                   onDrillDay={drillToDay}
                   rangeLabel={
                     range === "all"
                       ? `${rangeLabel}（趋势为近 30 个本地日）`
                       : rangeLabel
                   }
-                  filterScope={`${source}:${range}:${overview.sessionCount}:${overview.turnCount}:${overview.cost.raw}`}
+                  filterScope={`${environment}:${source}:${range}:${appliedAt}`}
                   fetchOverviewForModel={fetchOverviewForModel}
                 />
-                <OverviewRail
-                  overview={overview}
-                  topSessions={[...visibleSessions]
-                    .sort((a, b) => b.cost.raw - a.cost.raw)
-                    .slice(0, 5)}
-                  onSelectSession={handleSelectSession}
-                  onOpenSessions={openSessions}
-                  watchPath={overview.watchPath}
-                  collectingLabel={environment === "local" ? "正在采集本地会话" : `正在采集 ${environmentLabel(environment)}`}
-                />
+
               </div>
             ) : overviewState === "error" ? (
               <main className="overview">
@@ -1149,14 +1303,16 @@ function AppShell() {
                 totalCount={matchingSource.length}
                 dayFilter={dayFilter}
                 onClearDayFilter={() => setDayFilter(null)}
+                behaviorLabel={behavior ? SLICE_META[behavior.key].label : null}
+                onClearBehavior={() => setBehavior(null)}
                 selectedId={selectedId}
                 contextOpen={contextOpen}
                 onSelect={handleSelectSession}
                 onInspectContext={handleInspectContext}
                 onImport={handleImport}
                 importStatus={importStatus}
-                loaded={sessionsLoaded}
-                error={sessionsError}
+                loaded={sessionsLoaded && (!behaviorScope || !!behaviorIds)}
+                error={behaviorScope ? behaviorError ?? sessionsError : sessionsError}
                 onRetry={() => void refreshList().catch(() => undefined)}
               />
               <main className="main-panel" ref={detailRef} tabIndex={-1} aria-label="会话详情">
@@ -1184,21 +1340,23 @@ function AppShell() {
                           会话更新失败，当前显示上次成功读取的数据。
                         </Notice>
                       )}
-                    <SessionView
-                      key={snapshot.id}
-                      snapshot={snapshot}
-                      selectedNodeId={selectedNodeId}
-                      onSelectNode={setSelectedNodeId}
-                    onUpdate={(next) => {
-                      sessionMutationRev.current += 1;
-                      setSnapshot((current) =>
-                        current?.id === next.id ? next : current,
-                      );
-                    }}
-                      contextOpen={contextOpen}
-                      onContextOpen={setContextOpen}
-                    />
+                    <Suspense fallback={<StatePanel kind="loading" title="正在加载会话详情" />}>
+                      <SessionView
+                        key={snapshot.id}
+                        snapshot={snapshot}
+                        selectedNodeId={selectedNodeId}
+                        onSelectNode={setSelectedNodeId}
+                        onUpdate={(next) => {
+                          sessionMutationRev.current += 1;
+                          setSnapshot((current) => current?.id === next.id ? next : current);
+                        }}
+                        contextOpen={contextOpen}
+                        onContextOpen={setContextOpen}
+                      />
+                    </Suspense>
                   </>
+                ) : selectedId && listIndexing && !sessions.some((session) => session.id === selectedId) ? (
+                  <StatePanel kind="loading" title="正在索引所选会话" description="读取完成后会自动显示详情。" />
                 ) : selectedId &&
                   sessionLoad?.id === selectedId &&
                   sessionLoad.status === "missing" ? (
@@ -1273,86 +1431,29 @@ function AppShell() {
   );
 }
 
-/**
- * The overview rail answers "is this number trustworthy, and which sessions are
- * biggest" without leaving the page. It is supporting context, so it collapses
- * away on narrow screens.
- */
 function OverviewRail({
-  overview,
   topSessions,
+  rangeLabel,
   onSelectSession,
   onOpenSessions,
-  watchPath,
-  collectingLabel,
 }: {
-  overview: Overview;
-  topSessions: SessionListItem[];
+  topSessions: NonNullable<Overview["topSessions"]>["tokens"];
+  rangeLabel: string;
   onSelectSession: (id: string) => void;
   onOpenSessions: () => void;
-  watchPath: string;
-  collectingLabel: string;
 }) {
   const { unit } = useUnit();
-  const quality = overview.quality;
-  const issueCount =
-    (quality?.ledgerWarningSessions ?? 0) + (quality?.parseErrors ?? 0);
-  const coverage =
-    overview.cost.raw > 0 && quality
-      ? formatPercent((100 * quality.pricedRaw) / overview.cost.raw)
-      : null;
-  const max = Math.max(...topSessions.map((session) => session.cost.raw), 1);
+  const max = Math.max(...topSessions.map((session) => costValue(session.cost, unit) ?? 0), 0);
   return (
     <aside className="rail overview-rail" aria-label="总览侧栏" tabIndex={-1}>
       <Panel className="rail-panel">
-        <h2 className="rail-title">账本状态</h2>
-        <div className="dq-list">
-          <div className={`dq ${overview.unpricedRaw > 0 ? "warn" : "ok"}`}>
-            <span className="dot" aria-hidden="true" />
-            <div>
-              <b>
-                {overview.unpricedRaw > 0
-                  ? "部分用量未定价"
-                  : "定价覆盖完整"}
-              </b>
-              <span>
-                {overview.unpricedRaw > 0
-                  ? `${formatCompactTokens(overview.unpricedRaw)} tokens 未计入费用`
-                  : coverage == null
-                    ? "该范围没有用量"
-                    : `定价覆盖 ${coverage}`}
-              </span>
-            </div>
-          </div>
-          <div className={`dq ${issueCount > 0 ? "warn" : "ok"}`}>
-            <span className="dot" aria-hidden="true" />
-            <div>
-              <b>{issueCount > 0 ? `${issueCount} 项异常需核对` : "账本校验通过"}</b>
-              <span>
-                解析错误 {quality?.parseErrors ?? 0} · 账本警告{" "}
-                {quality?.ledgerWarningSessions ?? 0}
-              </span>
-            </div>
-          </div>
-          <div className="dq">
-            <span className="dot" aria-hidden="true" />
-            <div>
-              <b>{overview.live ? "有实时会话" : "静态账本"}</b>
-              <span>
-                {overview.collecting ? collectingLabel : "未开启自动采集"} ·{" "}
-                {overview.sessionCount.toLocaleString("en-US")} 个会话
-              </span>
-            </div>
-          </div>
-        </div>
-      </Panel>
-      <Panel className="rail-panel">
-        <h2 className="rail-title">范围 Top 会话</h2>
+        <h2 className="rail-title">用量最高的会话</h2>
+        <p className="rail-meta">{rangeLabel} · 按 {unit === "usd" ? "USD" : unit === "credits" ? "Credits" : "Tokens"}</p>
         {topSessions.length === 0 ? (
-          <p className="empty-copy">该范围内没有会话。</p>
+          <p className="empty-copy">该范围内没有可排行的用量。</p>
         ) : (
           <div className="rail-ranks">
-            {topSessions.map((session, index) => (
+            {topSessions.map((session) => (
               <BareButton
                 type="button"
                 className="rail-rank"
@@ -1360,7 +1461,6 @@ function OverviewRail({
                 onClick={() => onSelectSession(session.id)}
                 title={`查看 ${session.nickname ?? session.id} 的费用明细`}
               >
-                <span className="rk">{index + 1}</span>
                 <span className="rail-rank-main">
                   <span className="rail-rank-top">
                     <span className="rail-rank-name">
@@ -1375,7 +1475,7 @@ function OverviewRail({
                   <span className="rail-rank-bar">
                     <i
                       style={{
-                        width: `${(100 * session.cost.raw) / max}%`,
+                        width: `${max > 0 ? 100 * (costValue(session.cost, unit) ?? 0) / max : 0}%`,
                       }}
                     />
                   </span>
@@ -1387,14 +1487,6 @@ function OverviewRail({
         <Button className="rail-more" onClick={onOpenSessions}>
           查看全部会话 <Icon name="arrow" />
         </Button>
-      </Panel>
-      <Panel className="rail-panel">
-        <h2 className="rail-title">数据源</h2>
-        <p className="rail-meta">采集目录：{watchPath}</p>
-        <p className="rail-meta">
-          时区：{Intl.DateTimeFormat().resolvedOptions().timeZone || "本地时区"}
-        </p>
-        <p className="rail-meta">价格快照：{overview.rateCardAsOf}</p>
       </Panel>
     </aside>
   );
