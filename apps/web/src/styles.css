@@ -1070,10 +1070,34 @@ button:not(:disabled):active,
   margin-left: auto;
 }
 
+.tree-line {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.tree-toggle,
+.tree-toggle-spacer {
+  width: 1.25rem;
+  flex-shrink: 0;
+}
+
+.tree-toggle {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
 .tree-row {
   display: flex;
   align-items: center;
-  width: 100%;
+  width: auto;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   background: transparent;
   border: none;
@@ -1433,9 +1457,16 @@ button:not(:disabled):active,
 
 .price-sheet table {
   width: 100%;
+  min-width: 900px;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
 }
+
+.price-sheet-col-model { width: 30%; }
+.price-sheet-col-rate { width: 11%; }
+.price-sheet-col-note { width: 22%; }
+.price-sheet-col-action { width: 72px; }
 
 .price-sheet th,
 .price-sheet td {
@@ -1452,10 +1483,18 @@ button:not(:disabled):active,
   white-space: nowrap;
 }
 
-.price-sheet td:nth-child(n + 2),
-.price-sheet thead th:nth-child(n + 2):not(:last-child) {
+.price-sheet td:nth-child(3),
+.price-sheet td:nth-child(4),
+.price-sheet td:nth-child(5),
+.price-sheet thead th:nth-child(3),
+.price-sheet thead th:nth-child(4),
+.price-sheet thead th:nth-child(5) {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.price-sheet thead th:nth-child(5) {
+  padding-right: 10px;
 }
 
 .price-sheet tbody th {
@@ -1464,10 +1503,86 @@ button:not(:disabled):active,
   white-space: nowrap;
 }
 
-.price-sheet td:last-child {
+.price-sheet td:nth-child(6) {
   color: var(--text-muted);
   text-align: left;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.price-sheet .price-sheet-action {
+  color: var(--text-muted);
+  padding-left: 0;
+  padding-right: 8px;
+  text-align: left;
+}
+
+.price-sheet-ignore {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  min-width: 42px;
+  padding: 3px 8px;
+}
+
+.price-sheet-ignore:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.price-sheet-ignored {
+  margin: 0.8rem 0 0.4rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.7rem;
+}
+
+.price-sheet-ignored summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.price-sheet-ignored p,
+.price-sheet-ignored ul {
+  margin: 0.45rem 0 0;
+}
+
+.price-sheet-ignored ul {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0;
+  list-style: none;
+}
+
+.price-sheet-ignored li {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem;
+}
+
+.price-sheet-ignored li span {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.55rem;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.price-sheet-ignored li b {
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.price-sheet-ignore:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .page-heading h1 {

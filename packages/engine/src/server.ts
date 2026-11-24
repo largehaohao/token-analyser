@@ -32,6 +32,11 @@ import {
   type CatalogUpdateOptions,
 } from "./price-catalog.ts";
 import { buildPriceSheet } from "./price-sheet.ts";
+import {
+  ignorePrice,
+  loadIgnoredPrices,
+  restorePrice,
+} from "./price-ignore.ts";
 import { isOverviewSliceKey } from "./overview.ts";
 import { SessionStore, type SessionIngestOptions } from "./store.ts";
 import {
@@ -573,10 +578,11 @@ async function runPricingUpdate(
   catalogUpdate?: CatalogUpdateOptions,
 ): Promise<{ error?: string; body?: Record<string, unknown> }> {
   const catalogEnabled = catalogUpdate?.enabled !== false;
+  const ignored = loadIgnoredPrices().models;
   const [codexUpdate, qwenUpdate, catalogUpdateResult] = await Promise.all([
     (async () => {
       try {
-        const result = await updateRateCardFromOfficial(pricingUpdate);
+        const result = await updateRateCardFromOfficial({ ...pricingUpdate, ignoredModels: ignored });
         return {
           source: { status: "ok", asOf: result.asOf, modelCount: result.modelCount } satisfies PricingSourceResult,
           previous: result.previousContent,
@@ -594,7 +600,7 @@ async function runPricingUpdate(
     })(),
     (async () => {
       try {
-        const result = await updateQwenPricesFromOfficial(qwenPricingUpdate);
+        const result = await updateQwenPricesFromOfficial({ ...qwenPricingUpdate, ignoredModels: ignored });
         return {
           source: { status: "ok", asOf: result.asOf, modelCount: result.modelCount } satisfies PricingSourceResult,
           previous: result.previousContent,
@@ -613,7 +619,7 @@ async function runPricingUpdate(
     (async () => {
       if (!catalogEnabled) return null;
       try {
-        return await updateCatalogFromOfficial(catalogUpdate);
+        return await updateCatalogFromOfficial({ ...catalogUpdate, ignoredModels: ignored });
       } catch (err) {
         return {
           failed: err instanceof Error && err.message ? err.message : "catalog_read_failed",
@@ -813,6 +819,68 @@ export async function startServer(opts?: {
 
     if (req.method === "GET" && parts[0] === "prices" && parts.length === 1) {
       sendJson(res, 200, buildPriceSheet());
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      parts[0] === "prices" &&
+      parts[1] === "ignore" &&
+      parts.length === 2
+    ) {
+      const chunks: Buffer[] = [];
+      let bodyBytes = 0;
+      req.on("data", (chunk: Buffer) => {
+        bodyBytes += chunk.length;
+        if (bodyBytes <= 16_384) chunks.push(chunk);
+      });
+      req.on("end", () => {
+        let scope: { group: string; model: string };
+        try {
+          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Partial<{ group: string; model: string }>;
+          if (!parsed.group || !parsed.model) throw new Error("invalid_price_scope");
+          scope = { group: parsed.group, model: parsed.model };
+        } catch {
+          sendJson(res, 400, { error: "invalid_price_scope" });
+          return;
+        }
+        withPricingLock(() => Promise.resolve(ignorePrice(scope))).then(() => {
+          sendJson(res, 200, { ignored: true, group: scope.group, model: scope.model });
+        }, (err) => {
+          sendJson(res, 500, { error: err instanceof Error ? err.message : "price_ignore_failed" });
+        });
+      });
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      parts[0] === "prices" &&
+      parts[1] === "restore" &&
+      parts.length === 2
+    ) {
+      const chunks: Buffer[] = [];
+      let bodyBytes = 0;
+      req.on("data", (chunk: Buffer) => {
+        bodyBytes += chunk.length;
+        if (bodyBytes <= 16_384) chunks.push(chunk);
+      });
+      req.on("end", () => {
+        let scope: { group: string; model: string };
+        try {
+          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Partial<{ group: string; model: string }>;
+          if (!parsed.group || !parsed.model) throw new Error("invalid_price_scope");
+          scope = { group: parsed.group, model: parsed.model };
+        } catch {
+          sendJson(res, 400, { error: "invalid_price_scope" });
+          return;
+        }
+        withPricingLock(() => Promise.resolve(restorePrice(scope))).then(() => {
+          sendJson(res, 200, { restored: true, group: scope.group, model: scope.model });
+        }, (err) => {
+          sendJson(res, 500, { error: err instanceof Error ? err.message : "price_restore_failed" });
+        });
+      });
       return;
     }
 

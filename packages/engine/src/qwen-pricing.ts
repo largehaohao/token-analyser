@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { writeFileAtomically } from "./atomic-write.ts";
 import { loadUserConfig } from "./config.ts";
+import { loadIgnoredPrices } from "./price-ignore.ts";
 import { withPricingLock } from "./pricing-lock.ts";
 import {
   API_PRICES_PATH,
@@ -27,6 +28,7 @@ export type QwenPricingUpdateOptions = {
   apiPricesPath?: string;
   fetcher?: typeof fetch;
   now?: Date;
+  ignoredModels?: Iterable<string>;
 };
 
 type OfficialRate = {
@@ -342,7 +344,9 @@ export async function updateQwenPricesFromOfficial(
 
   const models = { ...current.models };
   const qwenModels: Record<string, ApiQwenModelSpec> = {};
+  const ignored = new Set(options?.ignoredModels ?? []);
   for (const [id, spec] of specs) {
+    if (ignored.has(id)) continue;
     const rate = officialRate(markdown, spec, hit);
     const entry: ApiModelPrice = {
       input: round(rate.input * usdPerCny, USD_PLACES),
@@ -383,7 +387,7 @@ export async function updateQwenPricesFromOfficial(
     throw new Error("api_prices_write_failed");
   }
 
-  return { asOf, modelCount: specs.length, usdPerCny, previousContent };
+  return { asOf, modelCount: Object.keys(qwenModels).length, usdPerCny, previousContent };
 }
 
 /**
@@ -402,7 +406,9 @@ export function startQwenPriceAutoRefresh(
   } = {},
 ): () => void {
   if (process.env.QWEN_PRICING_AUTO_UPDATE === "0") return () => {};
-  const refresh = opts.update ?? updateQwenPricesFromOfficial;
+  const refresh = opts.update ?? (() => updateQwenPricesFromOfficial({
+    ignoredModels: loadIgnoredPrices().models,
+  }));
   let stopped = false;
   let running = false;
 

@@ -98,6 +98,8 @@ describe("official model catalog", () => {
     expect(catalog.aliases["Gemini 4 Carbon"]).toBe("gemini-4-carbon");
     expect(catalog.models["gemini-3.5-flash-lite"]).toMatchObject({ input: 0.3, cached: 0.03, output: 2.5 });
     expect(catalog.aliases["deepseek-v4-flash"]).toBe("deepseek-flash");
+    expect(catalog.aliases["deepseek-v4.1-flash"]).toBe("deepseek-flash");
+    expect(quoteCatalog("deepseek-v4.1-flash", catalog)?.rates).toMatchObject({ input: 0.3, cached: 0.006, output: 1.2 });
     expect(catalog.aliases["Gemini 3.8 Flash"]).toBe("gemini-3.8-flash");
     expect(catalog.aliases["gemini-3.8-flash-high"]).toBe("gemini-3.8-flash");
     expect(catalog.aliases["grok/grok-4.7-build-fast"]).toBe("grok-4.7");
@@ -177,6 +179,7 @@ describe("official model catalog", () => {
   it("estimates logged aliases from the committed catalog", () => {
     const catalog = loadPriceCatalog();
     expect(quoteCatalog("deepseek-v4-flash", catalog)?.rates).toMatchObject({ input: 0.3, cached: 0.006, output: 1.2 });
+    expect(quoteCatalog("deepseek-v4.1-flash", catalog)?.rates).toMatchObject({ input: 0.3, cached: 0.006, output: 1.2 });
     expect(quoteCatalog("grok-4.7", catalog, 250_000)?.rates.output).toBe(12);
     const flash = nativeCost(usage(), "deepseek-v4-flash", { provider: "opencode", recordedUsd: 0 });
     const account = nativeCost(usage(), "deepseek-flash", { provider: "deepseek-account" });

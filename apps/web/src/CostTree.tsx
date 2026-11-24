@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { TreeNode } from "./api";
 import { treeAppearance } from "./buckets";
 import { useUnit } from "./UnitContext";
@@ -30,6 +30,9 @@ function TreeRow({
   selectedNodeId,
   displayPercent,
   showEmpty,
+  open,
+  isOpen,
+  onToggle,
   onSelect,
 }: {
   node: TreeNode;
@@ -39,6 +42,9 @@ function TreeRow({
   selectedNodeId: string | null;
   displayPercent: number;
   showEmpty: boolean;
+  open: boolean;
+  isOpen: (id: string) => boolean;
+  onToggle: (id: string) => void;
   onSelect: (id: string) => void;
 }) {
   const { unit } = useUnit();
@@ -58,8 +64,23 @@ function TreeRow({
   );
   const childPercents = siblingDisplayPercents(children);
 
+  const hasChildren = children.length > 0;
   return (
     <>
+      <div className="tree-line">
+      {hasChildren ? (
+        <button
+          type="button"
+          className="tree-toggle"
+          aria-expanded={open}
+          aria-label={`${open ? "折叠" : "展开"} ${appearance.label}`}
+          onClick={() => onToggle(node.id)}
+        >
+          {open ? "▾" : "▸"}
+        </button>
+      ) : (
+        <span className="tree-toggle-spacer" aria-hidden="true" />
+      )}
       <BareButton
         type="button"
         className={`tree-row${selected ? " selected" : ""}${muted ? " muted" : ""}`}
@@ -98,7 +119,8 @@ function TreeRow({
             : formatCost(node.cost, unit)}
         </span>
       </BareButton>
-      {children.map((child, i) => (
+      </div>
+      {open && children.map((child, i) => (
         <TreeRow
           key={child.id}
           node={child}
@@ -108,6 +130,9 @@ function TreeRow({
           selectedNodeId={selectedNodeId}
           displayPercent={childPercents[i] ?? 0}
           showEmpty={showEmpty}
+          open={isOpen(child.id)}
+          isOpen={isOpen}
+          onToggle={onToggle}
           onSelect={onSelect}
         />
       ))}
@@ -115,8 +140,46 @@ function TreeRow({
   );
 }
 
+function ancestorIds(root: TreeNode, id: string): string[] {
+  const path: string[] = [];
+  function walk(node: TreeNode): boolean {
+    if (node.id === id) return true;
+    for (const child of node.children) {
+      if (walk(child)) {
+        path.push(node.id);
+        return true;
+      }
+    }
+    return false;
+  }
+  walk(root);
+  return path;
+}
+
 export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
   const [showEmpty, setShowEmpty] = useState(false);
+  const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set());
+
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    const ancestors = ancestorIds(tree, selectedNodeId);
+    if (ancestors.length === 0) return;
+    setOpenIds((current) => {
+      if (ancestors.every((id) => current.has(id))) return current;
+      const next = new Set(current);
+      for (const id of ancestors) next.add(id);
+      return next;
+    });
+  }, [selectedNodeId, tree]);
+
+  function toggle(id: string) {
+    setOpenIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   function hasEmptyBranches(node: TreeNode): boolean {
     return node.children.some(
@@ -136,6 +199,9 @@ export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
         selectedNodeId={selectedNodeId}
         displayPercent={100}
         showEmpty={showEmpty}
+        open={openIds.has(tree.id)}
+        isOpen={(id) => openIds.has(id)}
+        onToggle={toggle}
         onSelect={onSelect}
       />
       {hasEmptyBranches(tree) && (

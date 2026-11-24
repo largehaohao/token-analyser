@@ -600,12 +600,35 @@ export type PriceSheetGroup = {
   rows: PriceSheetRow[];
 };
 
+export type IgnoredPriceEntry = {
+  group: string;
+  label: string;
+  model: string;
+};
+
 export type PriceSheet = {
   groups: PriceSheetGroup[];
+  ignored?: IgnoredPriceEntry[];
 };
 
 export function getPriceSheet(): Promise<PriceSheet> {
   return requestJson<PriceSheet>("/prices");
+}
+
+export function ignorePriceModel(group: string, model: string): Promise<{ ignored: boolean }> {
+  return requestJson<{ ignored: boolean }>("/prices/ignore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group, model }),
+  });
+}
+
+export function restorePriceModel(group: string, model: string): Promise<{ restored: boolean }> {
+  return requestJson<{ restored: boolean }>("/prices/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group, model }),
+  });
 }
 
 export async function updateModelPrices(): Promise<ModelPricingUpdate> {

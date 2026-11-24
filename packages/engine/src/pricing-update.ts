@@ -15,6 +15,7 @@ export type PricingUpdateOptions = {
   rateCardPath?: string;
   fetcher?: typeof fetch;
   now?: Date;
+  ignoredModels?: Iterable<string>;
 };
 
 const MODEL_ID_ALIASES: Record<string, string[]> = {
@@ -231,7 +232,9 @@ export async function updateRateCardFromOfficial(
   }
 
   const models = { ...current.models };
+  const ignored = new Set(options?.ignoredModels ?? []);
   for (const [id, rate] of officialRates) {
+    if (ignored.has(id)) continue;
     models[id] = {
       ...models[id],
       ...rate,

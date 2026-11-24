@@ -153,7 +153,9 @@ test("sidebar sessions navigate and every turn value matches its header", async 
   const headers = await table.locator("thead th").allTextContents();
   const cells = table.locator("tbody tr").first().locator("td");
   await expect(cells.nth(headers.findIndex((h) => h.trim() === "本轮目的"))).toHaveText("Unique turn purpose");
-  await expect(cells.nth(headers.findIndex((h) => h.trim() === "USD"))).toHaveText("$0.20");
+  await expect(cells.nth(headers.findIndex((h) => h.trim() === "Token 输入"))).toHaveText("100");
+  await expect(cells.nth(headers.findIndex((h) => h.trim() === "Token 输出"))).toHaveText("100");
+  await expect(page.getByRole("columnheader", { name: "USD", exact: true })).toHaveCount(0);
   await expect(cells.nth(headers.findIndex((h) => h.trim() === "TTFT (s)"))).toHaveText("1.25");
   await expect(cells.nth(headers.findIndex((h) => h.trim() === "tok/s"))).toHaveText("42.00");
   expect(headers.findIndex((h) => h.trim() === "分类")).toBe(await table.locator("tbody tr").first().locator(".bucket-col").evaluate((el) => (el as HTMLTableCellElement).cellIndex));

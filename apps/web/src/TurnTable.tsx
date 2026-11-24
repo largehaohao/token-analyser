@@ -2,17 +2,14 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionSource, Turn } from "./api";
 import { LABEL_CHIP, treeAppearance } from "./buckets";
 import {
-  formatCostTokens,
   formatCost,
   formatCostTitle,
   formatExactTokens,
   formatPercent,
-  formatUnitSuffix,
   formatPerformanceNumber,
 } from "./format";
 import { MixBar } from "./MixBar";
 import { TurnSparkline } from "./TurnSparkline";
-import { useUnit } from "./UnitContext";
 import { BareButton, Button, Icon, Panel } from "./ui";
 import {
   TableBody,
@@ -68,7 +65,6 @@ export function TurnTable({
   scopeLabel,
   source,
 }: Props) {
-  const { unit } = useUnit();
   const filtered = useMemo(
     () =>
       turns
@@ -145,11 +141,11 @@ export function TurnTable({
                   <TableHead scope="col">工具</TableHead>
                   <TableHead scope="col">构成</TableHead>
                   <TableHead scope="col" className="turn-cache" title="已缓存输入 ÷ 输入">缓存</TableHead>
-                  <TableHead scope="col" className="num-col" title="该轮记录的原始 token 总量">
-                    Tokens
+                  <TableHead scope="col" className="turn-token num-col" title="输入 token，包含已缓存部分">
+                    Token 输入
                   </TableHead>
-                  <TableHead scope="col" className="num-col">
-                    {unit === "tokens" ? "Token 用量" : formatUnitSuffix(unit)}
+                  <TableHead scope="col" className="turn-token num-col" title="输出 token">
+                    Token 输出
                   </TableHead>
                   <TableHead scope="col" className="turn-performance num-col" title="本次请求发出到首 token 的等待时间">TTFT (s)</TableHead>
                   <TableHead scope="col" className="turn-performance num-col" title="本次请求的输出 token 速度；有 TTFT 时按解码时长（请求时长 − TTFT）计算">tok/s</TableHead>
@@ -298,20 +294,20 @@ export function TurnTable({
                             : "—"}
                         </TableCell>
                         <TableCell
-                          className="num-col"
-                          title={formatCostTitle(t.cost, "tokens")}
+                          className="turn-token num-col"
+                          title={`输入 ${formatExactTokens(inputTokens)} tokens · 未缓存 ${formatExactTokens(t.cost.uncached_input)} + 已缓存 ${formatExactTokens(t.cost.cached_input)}`}
                         >
                           {t.usageRecorded === false
                             ? "用量未记录"
-                            : formatExactTokens(t.cost.raw)}
+                            : formatExactTokens(inputTokens)}
                         </TableCell>
                         <TableCell
-                          className="turn-total"
-                          title={formatCostTitle(t.cost, unit)}
+                          className="turn-token num-col"
+                          title={`输出 ${formatExactTokens(t.cost.output)} tokens`}
                         >
-                          {unit === "tokens"
-                            ? formatCostTokens(t.cost)
-                            : formatCost(t.cost, unit)}
+                          {t.usageRecorded === false
+                            ? "用量未记录"
+                            : formatExactTokens(t.cost.output)}
                         </TableCell>
                         <TableCell className="turn-performance num-col" title={ttftNote}>
                           {ttft}

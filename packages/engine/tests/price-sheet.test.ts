@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildPriceSheet } from "../src/price-sheet.ts";
 
 describe("buildPriceSheet", () => {
-  const sheet = buildPriceSheet();
+  const sheet = buildPriceSheet({ version: 1, models: [], groups: {} });
 
   function group(id: string) {
     const found = sheet.groups.find((item) => item.id === id);

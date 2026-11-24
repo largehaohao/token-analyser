@@ -150,7 +150,10 @@ test("shows mix bars for headline, tree, sessions, and turns", async ({
   await expect(page.getByRole("columnheader", { name: "TTFT (s)" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "tok/s", exact: true })).toBeVisible();
   const turnRow = page.locator(".turn-table tbody tr").first();
-  const exactRaw = await turnRow.locator(".turn-total").getAttribute("title");
+  await expect(page.getByRole("columnheader", { name: "Token 输入", exact: true })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Token 输出", exact: true })).toBeVisible();
+  const tokenCounts = await turnRow.locator("td.turn-token").allTextContents();
+  const exactTotal = tokenCounts.reduce((sum, value) => sum + Number(value.replaceAll(",", "")), 0).toLocaleString("en-US");
   await turnRow.getByRole("button").press("Enter");
   const breakdown = page.getByLabel("Token 与费用明细");
   await expect(breakdown).toBeVisible();
@@ -159,17 +162,12 @@ test("shows mix bars for headline, tree, sessions, and turns", async ({
       .locator("div")
       .filter({ has: page.getByText("总 Token", { exact: true }) })
       .locator("dd"),
-  ).toHaveText(exactRaw!.replace(/ tokens$/, ""));
+  ).toHaveText(exactTotal!);
   await expect(page.getByRole("heading", { name: "提示" })).toBeVisible();
   await page.getByRole("button", { name: "Credits", exact: true }).click();
-  await expect(
-    page.getByRole("columnheader", { name: "credits", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "credits", exact: true })).toHaveCount(0);
   await expect(breakdown).toBeVisible();
-  await expect(turnRow.locator(".turn-total")).toHaveAttribute(
-    "title",
-    /credits|未定价/,
-  );
+  await expect(turnRow.locator("td.turn-token")).toHaveText(tokenCounts);
 });
 
 test("clicking skills lists the injected catalog", async ({ page }) => {

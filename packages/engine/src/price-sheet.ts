@@ -1,4 +1,5 @@
 import { loadApiPrices, type ApiModelPrice } from "./native-pricing.ts";
+import { isPriceIgnored, loadIgnoredPrices, type IgnoredPriceState } from "./price-ignore.ts";
 import { loadPriceCatalog, type CatalogModel } from "./price-catalog.ts";
 import { loadRateCard } from "./rate-card.ts";
 import type { RateCard } from "./types.ts";
@@ -22,11 +23,38 @@ export type PriceSheetGroup = {
   rows: PriceSheetRow[];
 };
 
+export type IgnoredPriceEntry = {
+  group: string;
+  label: string;
+  model: string;
+};
+
 export type PriceSheet = {
   groups: PriceSheetGroup[];
+  ignored: IgnoredPriceEntry[];
 };
 
 const SOURCE_ORDER = ["deepseek", "grok", "gemini"];
+
+const GROUP_LABELS: Record<string, string> = {
+  codex: "Codex",
+  claude: "Claude",
+  openai: "OpenAI",
+  qwen: "千问",
+  deepseek: "DeepSeek",
+  grok: "Grok",
+  gemini: "Gemini",
+};
+
+function ignoredEntries(state: IgnoredPriceState): IgnoredPriceEntry[] {
+  return Object.entries(state.groups).flatMap(([group, models]) =>
+    models.map((model) => ({
+      group,
+      label: GROUP_LABELS[group] ?? group,
+      model,
+    })),
+  );
+}
 
 function rateRow(id: string, rate: { input: number; cached: number; output: number }, note = ""): PriceSheetRow {
   return { id, input: rate.input, cached: rate.cached, output: rate.output, note };
@@ -74,11 +102,12 @@ function byId(rows: PriceSheetRow[]): PriceSheetRow[] {
 }
 
 /** The rates the ledger actually uses, grouped for the overview price sheet. */
-export function buildPriceSheet(): PriceSheet {
+export function buildPriceSheet(ignored: IgnoredPriceState = loadIgnoredPrices()): PriceSheet {
   const card = loadRateCard();
   const prices = loadApiPrices();
   const catalog = loadPriceCatalog();
   const catalogIds = new Set(Object.keys(catalog.models));
+  const visible = (group: string, id: string) => !isPriceIgnored(ignored, { group, model: id });
   const groups: PriceSheetGroup[] = [];
 
   groups.push({
@@ -88,7 +117,9 @@ export function buildPriceSheet(): PriceSheet {
     unit: "credits",
     unitLabel: "积分 / 百万 token",
     note: `Fast 模式按标价 ×${card.fast_multiplier}。1 积分 = $${card.usd_per_credit}。`,
-    rows: byId(Object.entries(card.models).map(([id, rate]) => rateRow(id, rate, codexNote(card, rate)))),
+    rows: byId(Object.entries(card.models)
+      .filter(([id]) => visible("codex", id))
+      .map(([id, rate]) => rateRow(id, rate, codexNote(card, rate)))),
   });
 
   const claude: PriceSheetRow[] = [];
@@ -96,9 +127,11 @@ export function buildPriceSheet(): PriceSheet {
   const qwen: PriceSheetRow[] = [];
   for (const [id, rate] of Object.entries(prices.models)) {
     if (catalogIds.has(id)) continue;
+    const group = prices.qwen?.models[id] || id.startsWith("qwen") ? "qwen" : id.startsWith("claude-") ? "claude" : "openai";
+    if (!visible(group, id)) continue;
     const row = rateRow(id, rate, apiNote(rate));
-    if (id.startsWith("claude-")) claude.push(row);
-    else if (prices.qwen?.models[id] || id.startsWith("qwen")) qwen.push(row);
+    if (group === "claude") claude.push(row);
+    else if (group === "qwen") qwen.push(row);
     else openai.push(row);
   }
 
@@ -139,6 +172,7 @@ export function buildPriceSheet(): PriceSheet {
 
   const catalogGroups = new Map<string, PriceSheetRow[]>();
   for (const [id, model] of Object.entries(catalog.models)) {
+    if (!visible(model.source, id)) continue;
     const rows = catalogGroups.get(model.source) ?? [];
     rows.push(rateRow(id, model, catalogNote(model)));
     catalogGroups.set(model.source, rows);
@@ -160,5 +194,5 @@ export function buildPriceSheet(): PriceSheet {
     });
   }
 
-  return { groups };
+  return { groups, ignored: ignoredEntries(ignored) };
 }

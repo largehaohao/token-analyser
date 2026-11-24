@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomically } from "./atomic-write.ts";
+import { loadIgnoredPrices } from "./price-ignore.ts";
 import { withPricingLock } from "./pricing-lock.ts";
 import { parseDeepseekPricing } from "./publishers/deepseek.ts";
 import { parseGeminiPricing } from "./publishers/gemini.ts";
@@ -67,6 +68,7 @@ export type CatalogUpdateOptions = {
   publishersDir?: string;
   fetcher?: typeof fetch;
   now?: Date;
+  ignoredModels?: Iterable<string>;
 };
 
 export type CatalogSourceResult = {
@@ -183,6 +185,7 @@ function compileCatalog(
   parsed: Map<string, Record<string, ParsedRate>>,
   previous: PriceCatalog,
   now: Date,
+  ignored: Set<string> = new Set(),
 ): PriceCatalog {
   const models: Record<string, CatalogModel> = {};
   const aliases: Record<string, string> = {};
@@ -204,7 +207,14 @@ function compileCatalog(
       continue;
     }
 
+    let activeCount = 0;
     for (const [id, rate] of Object.entries(rates)) {
+      if (ignored.has(id)) {
+        const previousModel = previous.models[id];
+        if (previousModel?.source === spec.id) models[id] = previousModel;
+        continue;
+      }
+      activeCount += 1;
       models[id] = { ...rate, source: spec.id };
       const declared = spec.models[id];
       if (declared?.display) aliases[declared.display] = id;
@@ -215,7 +225,7 @@ function compileCatalog(
       label: spec.label,
       as_of: today,
       page: spec.page,
-      model_count: Object.keys(rates).length,
+      model_count: activeCount,
     };
   }
 
@@ -267,6 +277,7 @@ export async function updateCatalogFromOfficial(
   const specs = loadPublisherSpecs(options?.publishersDir);
   if (specs.length === 0) throw new Error("catalog_targets_missing");
   const { previousContent, catalog: previous } = readPriceCatalog(catalogPath);
+  const ignored = new Set(options?.ignoredModels ?? []);
 
   const parsed = new Map<string, Record<string, ParsedRate>>();
   const results = await Promise.all(specs.map(async (spec): Promise<CatalogSourceResult> => {
@@ -275,7 +286,8 @@ export async function updateCatalogFromOfficial(
     try {
       const markdown = await fetchPublisherMarkdown(spec, fetcher);
       const rates = parse(markdown, spec, now);
-      const missing = Object.keys(spec.models).filter((id) => !rates[id]);
+      const activeIds = Object.keys(spec.models).filter((id) => !ignored.has(id));
+      const missing = activeIds.filter((id) => !rates[id]);
       if (missing.length > 0 || Object.values(rates).some((rate) => !acceptable(rate) || (rate.long_context != null && !acceptable(rate.long_context)) || (rate.off_peak != null && !acceptable(rate.off_peak)))) {
         throw new Error(`${spec.id}_pricing_format_changed`);
       }
@@ -285,7 +297,7 @@ export async function updateCatalogFromOfficial(
         label: spec.label,
         status: "ok",
         asOf: localPriceDate(now),
-        modelCount: Object.keys(rates).length,
+        modelCount: activeIds.length,
       };
     } catch (error) {
       const status = error instanceof Error && error.message
@@ -299,7 +311,7 @@ export async function updateCatalogFromOfficial(
     return { changed: false, previousContent, sources: results };
   }
 
-  const next = compileCatalog(specs, parsed, previous, now);
+  const next = compileCatalog(specs, parsed, previous, now, ignored);
   const ratesChanged = rateSignature(next) !== rateSignature(previous);
   const serialized = `${JSON.stringify(next, null, 2)}\n`;
   if (serialized === previousContent) {
@@ -371,7 +383,9 @@ export function startCatalogAutoRefresh(
   ) {
     return () => {};
   }
-  const refresh = opts.update ?? updateCatalogFromOfficial;
+  const refresh = opts.update ?? (() => updateCatalogFromOfficial({
+    ignoredModels: loadIgnoredPrices().models,
+  }));
   let stopped = false;
   let running = false;
 
