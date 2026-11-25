@@ -1503,6 +1503,16 @@ button:not(:disabled):active,
   white-space: nowrap;
 }
 
+/* Declared aliases bill at the canonical row's rates, so they read as echoes. */
+.price-sheet tbody tr.price-sheet-row-alias th,
+.price-sheet tbody tr.price-sheet-row-alias td {
+  color: var(--text-muted);
+}
+
+.price-sheet tbody tr.price-sheet-row-alias th {
+  font-weight: 400;
+}
+
 .price-sheet td:nth-child(6) {
   color: var(--text-muted);
   text-align: left;

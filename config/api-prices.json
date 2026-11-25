@@ -154,7 +154,10 @@
         "region": "华北2（北京）",
         "aliases": [
           "swift-1.5-iq3_xxs",
-          "qwen3.8-flash-next-iq3_xxs"
+          "swift-1.5-iq3_s",
+          "qwen3.8-flash-next-iq3_xxs",
+          "qwen3.8-flash-next-unsloth-ud-iq2_xs",
+          "qwen3.8-flash-next-unsloth-ud-iq3_xxs"
         ],
         "tier": "0<Token≤1M",
         "cny": {

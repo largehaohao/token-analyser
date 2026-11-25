@@ -10,6 +10,8 @@ export type PriceSheetRow = {
   cached: number;
   output: number;
   note: string;
+  /** Set when this row is a declared alias priced as another model. */
+  aliasOf?: string;
 };
 
 export type PriceSheetGroup = {
@@ -90,6 +92,28 @@ function apiNote(rate: ApiModelPrice): string {
   return parts.join(" · ");
 }
 
+function aliasNote(canonicalId: string, rate: ApiModelPrice): string {
+  return [`别名 → ${canonicalId}`, apiNote(rate)].filter(Boolean).join(" · ");
+}
+
+/**
+ * Hand-declared relay model IDs that serve an official model. They bill at the
+ * canonical rates, so the sheet lists them beside it instead of hiding them.
+ */
+function aliasRows(
+  canonicalId: string,
+  rate: ApiModelPrice,
+  aliases: string[] | undefined,
+  taken: (id: string) => boolean,
+): PriceSheetRow[] {
+  return (aliases ?? [])
+    .filter((alias) => alias !== canonicalId && !taken(alias))
+    .map((alias) => ({
+      ...rateRow(alias, rate, aliasNote(canonicalId, rate)),
+      aliasOf: canonicalId,
+    }));
+}
+
 function codexNote(card: RateCard, rate: RateCard["models"][string]): string {
   if (rate.fast_multiplier && rate.fast_multiplier !== card.fast_multiplier) {
     return `Fast ×${rate.fast_multiplier}`;
@@ -125,14 +149,20 @@ export function buildPriceSheet(ignored: IgnoredPriceState = loadIgnoredPrices()
   const claude: PriceSheetRow[] = [];
   const openai: PriceSheetRow[] = [];
   const qwen: PriceSheetRow[] = [];
+  const pricedIds = new Set(Object.keys(prices.models));
   for (const [id, rate] of Object.entries(prices.models)) {
     if (catalogIds.has(id)) continue;
-    const group = prices.qwen?.models[id] || id.startsWith("qwen") ? "qwen" : id.startsWith("claude-") ? "claude" : "openai";
+    const spec = prices.qwen?.models[id];
+    const group = spec || id.startsWith("qwen") ? "qwen" : id.startsWith("claude-") ? "claude" : "openai";
     if (!visible(group, id)) continue;
     const row = rateRow(id, rate, apiNote(rate));
     if (group === "claude") claude.push(row);
-    else if (group === "qwen") qwen.push(row);
-    else openai.push(row);
+    else if (group === "qwen") {
+      qwen.push(row);
+      qwen.push(...aliasRows(id, rate, spec?.aliases, (alias) =>
+        pricedIds.has(alias) || catalogIds.has(alias) || !visible("qwen", alias),
+      ));
+    } else openai.push(row);
   }
 
   const apiAsOf = prices.as_of;

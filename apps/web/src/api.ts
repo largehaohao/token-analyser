@@ -589,6 +589,7 @@ export type PriceSheetRow = {
   cached: number;
   output: number;
   note: string;
+  aliasOf?: string;
 };
 
 export type PriceSheetGroup = {

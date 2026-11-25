@@ -150,7 +150,7 @@ export function PriceSheet({
               </thead>
               <tbody>
                 {group.rows.map((row) => (
-                  <tr key={row.id}>
+                  <tr key={row.id} className={row.aliasOf ? "price-sheet-row-alias" : undefined}>
                     <td className="price-sheet-action">
                       <button
                         type="button"

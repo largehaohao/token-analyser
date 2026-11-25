@@ -10,7 +10,7 @@ describe("buildPriceSheet", () => {
     return found!;
   }
 
-  it("lists Codex credits and the declared API rates without alias rows", () => {
+  it("lists Codex credits and the declared API rates without catalog alias rows", () => {
     const codex = group("codex");
     expect(codex.unit).toBe("credits");
     expect(codex.rows.find((row) => row.id === "gpt-5.6-sol")?.input).toBe(100);
@@ -26,5 +26,25 @@ describe("buildPriceSheet", () => {
     expect(group("gemini").rows.find((row) => row.id === "gemini-3.8-flash")?.input).toBe(0.75);
     expect(group("claude").rows.some((row) => row.id.startsWith("claude-"))).toBe(true);
     expect(group("qwen").rows.find((row) => row.id === "qwen3.8-flash-next")?.input).toBeGreaterThan(0);
+  });
+
+  it("prices each declared Qwen alias at the canonical rates", () => {
+    const qwen = group("qwen");
+    const canonical = qwen.rows.find((row) => row.id === "qwen3.8-flash-next")!;
+    for (const id of [
+      "swift-1.5-iq3_s",
+      "qwen3.8-flash-next-unsloth-ud-iq2_xs",
+      "qwen3.8-flash-next-unsloth-ud-iq3_xxs",
+    ]) {
+      const alias = qwen.rows.find((row) => row.id === id);
+      expect(alias, id).toBeDefined();
+      expect(alias).toMatchObject({
+        aliasOf: "qwen3.8-flash-next",
+        input: canonical.input,
+        cached: canonical.cached,
+        output: canonical.output,
+      });
+      expect(alias?.note).toContain("别名 → qwen3.8-flash-next");
+    }
   });
 });
