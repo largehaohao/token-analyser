@@ -963,6 +963,11 @@ export class SessionStore {
       .map((snap) => snap.id);
   }
 
+  /** Session ids currently indexed for a given source file path. */
+  idsForPath(filePath: string): string[] {
+    return [...(this.sourcesByPath.get(path.resolve(filePath)) ?? [])];
+  }
+
   private rootSnapshots(): SessionIndex[] {
     this.refreshLiveFlags();
     if (this.roots) return this.roots;

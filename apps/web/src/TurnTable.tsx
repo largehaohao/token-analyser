@@ -74,12 +74,67 @@ export function TurnTable({
   );
   const [limit, setLimit] = useState(TURN_PAGE_SIZE);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [newTurnIds, setNewTurnIds] = useState<Set<string>>(() => new Set());
+  const seenTurnIdsRef = useRef<Set<string>>(new Set());
+  const initializedResetKeyRef = useRef<string | null>(null);
+  const highlightTimersRef = useRef<Map<string, number>>(new Map());
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
 
   useEffect(() => {
     setLimit(TURN_PAGE_SIZE);
     setExpandedId(null);
+    seenTurnIdsRef.current.clear();
+    initializedResetKeyRef.current = null;
+    for (const timer of highlightTimersRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    highlightTimersRef.current.clear();
+    setNewTurnIds(new Set());
   }, [resetKey]);
+
+  useEffect(() => {
+    return () => {
+      for (const timer of highlightTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      highlightTimersRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (initializedResetKeyRef.current !== resetKey) {
+      for (const t of turns) seenTurnIdsRef.current.add(t.id);
+      initializedResetKeyRef.current = resetKey;
+      return;
+    }
+    const incoming: string[] = [];
+    for (const t of turns) {
+      if (!seenTurnIdsRef.current.has(t.id)) {
+        seenTurnIdsRef.current.add(t.id);
+        incoming.push(t.id);
+      }
+    }
+    if (incoming.length === 0) return;
+    setNewTurnIds((prev) => {
+      const next = new Set(prev);
+      for (const id of incoming) next.add(id);
+      return next;
+    });
+    for (const id of incoming) {
+      const existing = highlightTimersRef.current.get(id);
+      if (existing != null) window.clearTimeout(existing);
+      const timer = window.setTimeout(() => {
+        highlightTimersRef.current.delete(id);
+        setNewTurnIds((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 2400);
+      highlightTimersRef.current.set(id, timer);
+    }
+  }, [turns, resetKey]);
 
   const visible = visibleTurnWindow(filtered, limit, highlightTurnId);
 
@@ -183,6 +238,7 @@ export function TurnTable({
                         className={[
                           highlightTurnId === t.id ? "highlighted" : "",
                           expanded ? "expanded" : "",
+                          newTurnIds.has(t.id) ? "turn-row-new" : "",
                         ]
                           .filter(Boolean)
                           .join(" ")}

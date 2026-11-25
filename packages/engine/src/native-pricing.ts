@@ -183,7 +183,7 @@ export function nativeCost(
     output: rates.output * multiplier, cacheWrite: writeRate,
   };
   if (cost.usd == null) {
-    const ordinary = cost.uncached_input - usage.cache_write_input_tokens;
+    const ordinary = Math.max(0, cost.uncached_input - usage.cache_write_input_tokens);
     cost.usd = (ordinary * pricing.input + cost.cached_input * pricing.cached +
       cost.output * pricing.output + (usage.cache_write_input_tokens - write1h) * writeRate +
       write1h * rates.input * 2 * multiplier) / 1e6;

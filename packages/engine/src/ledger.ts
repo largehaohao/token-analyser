@@ -38,7 +38,14 @@ type PendingOwner = {
 };
 
 function usageEqual(a: TokenUsage, b: TokenUsage): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return (
+    a.input_tokens === b.input_tokens &&
+    a.cached_input_tokens === b.cached_input_tokens &&
+    a.cache_write_input_tokens === b.cache_write_input_tokens &&
+    a.output_tokens === b.output_tokens &&
+    a.reasoning_output_tokens === b.reasoning_output_tokens &&
+    a.total_tokens === b.total_tokens
+  );
 }
 
 function extractSubagentMeta(source: unknown): {

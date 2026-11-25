@@ -8014,7 +8014,7 @@ button.rail-rank:hover {
   white-space: normal;
   pointer-events: auto;
   display: grid;
-  z-index: 6;
+  z-index: 16;
 }
 .chart-tooltip .tooltip-action {
   display: inline-flex;
@@ -8347,3 +8347,225 @@ button.rail-rank:hover {
   .ledger-hero { padding: 13px 14px; gap: 6px; }
   .overview-metrics .ledger-item { min-height: 0; padding: 10px; }
 }
+
+/* ==========================================================================
+   Modern & Dynamic UI Polish
+   - Sticky translucent glassmorphic header on desktop
+   - Live breathing pulse on active stream indicators
+   - Indexing progress bar & skeleton shimmer loading states
+   - Rank badge alignment & smooth interactive hover elevation
+   - New live turn row entrance highlight
+   ========================================================================== */
+
+@media (min-width: 781px) {
+  .app-header[data-layout="workspace"] {
+    position: sticky;
+    top: 0;
+    z-index: 12;
+    background: color-mix(in srgb, var(--bg-inset) 82%, transparent);
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+  }
+  [data-theme="dark"] .app-header[data-layout="workspace"] {
+    background: color-mix(in srgb, var(--bg-raised) 84%, transparent);
+  }
+}
+
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+
+.dot.live {
+  animation: live-pulse 2.2s ease-out infinite;
+}
+
+.badge.live {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* Indexing progress banner */
+.indexing-notice {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-dim) 55%, var(--bg-raised));
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.indexing-notice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.indexing-notice-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.indexing-notice-pct {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.indexing-progress-track {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+.indexing-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--accent),
+    color-mix(in srgb, var(--chart-cyan) 70%, var(--accent))
+  );
+  transition: width 180ms var(--ease-out);
+}
+
+/* Skeleton shimmer for loading-reserve */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.loading-reserve .reserve-cell,
+.loading-reserve .reserve-line,
+.loading-reserve .reserve-block {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--text) 4%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+}
+
+/* Overview rail rank alignment & visual polish */
+.overview-insights button.rail-rank {
+  justify-content: stretch;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  transition:
+    background var(--motion),
+    border-color var(--motion),
+    transform var(--motion);
+}
+
+.overview-insights button.rail-rank:hover,
+.overview-insights button.rail-rank:focus-visible {
+  background: var(--accent-overlay);
+  border-color: var(--border);
+  transform: translateX(2px);
+  box-shadow: none;
+}
+
+.overview-insights .rail-rank-top {
+  align-items: center;
+  gap: 8px;
+}
+
+.rail-rank-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-insights button.rail-rank:first-child .rail-rank-index {
+  background: var(--accent-dim);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--accent);
+}
+
+.overview-insights .rail-rank-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.overview-insights .rail-rank-bar > i {
+  background: linear-gradient(
+    90deg,
+    var(--accent),
+    color-mix(in srgb, var(--chart-cyan) 70%, var(--accent))
+  );
+}
+
+/* Elevated interactive card & row transitions */
+.chart-card,
+.ledger-hero,
+.detail-section > summary {
+  transition:
+    border-color var(--motion),
+    box-shadow var(--motion),
+    background var(--motion);
+}
+
+.chart-card:hover,
+.ledger-hero:hover {
+  border-color: var(--border-hot);
+}
+
+button.ledger-item {
+  transition: background var(--motion);
+}
+
+.session-card {
+  transition:
+    border-color var(--motion),
+    background var(--motion),
+    box-shadow var(--motion);
+}
+
+/* Newly arrived live turn highlight */
+@keyframes turn-row-in {
+  0% {
+    background: color-mix(in srgb, var(--accent) 18%, var(--bg-raised));
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.turn-table tbody tr.turn-row-new {
+  animation: turn-row-in 2.2s var(--ease-out);
+}
+

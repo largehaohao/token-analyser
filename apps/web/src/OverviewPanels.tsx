@@ -256,8 +256,8 @@ export function CompositionPanel({
         <span className={identity.ok ? "identity-ok" : "identity-warn"}>
           构成合计 {formatExactTokens(identity.parts)}
           {identity.ok
-            ? " = raw"
-            : ` ≠ raw ${formatExactTokens(cost.raw)}`}
+            ? "（与已记录总量一致）"
+            : `（与已记录总量 ${formatExactTokens(cost.raw)} 不一致）`}
         </span>
       </div>
       {srTable(

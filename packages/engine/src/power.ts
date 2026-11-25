@@ -75,10 +75,12 @@ function seriesToMap(series: RangeSeries[] | undefined): Map<number, number> {
 
 function gpuTotals(series: RangeSeries[] = []): Map<number, number> {
   const devices = new Map<string, RangeSeries[]>();
-  series.forEach((entry, index) => {
+  series.forEach((entry) => {
     const labels = entry.metric ?? {};
     const device = labels.UUID ?? labels.uuid ?? labels.gpu ?? labels.card ?? labels.device;
-    const key = device == null ? `series:${index}` : JSON.stringify([labels.Hostname ?? labels.hostname, device]);
+    const key = device == null
+      ? `labels:${JSON.stringify(Object.entries(labels).sort(([a], [b]) => a.localeCompare(b)))}`
+      : JSON.stringify([labels.Hostname ?? labels.hostname, device]);
     const readings = devices.get(key) ?? [];
     readings.push(entry);
     devices.set(key, readings);

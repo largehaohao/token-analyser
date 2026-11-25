@@ -370,7 +370,7 @@ function AppShell() {
     if (!force && active?.scope === requestedScope) return active.promise;
     const requestId = ++overviewRequest.current;
     setOverviewError(null);
-    const requestedAt = Date.now();
+    const requestedAt = Math.ceil(Date.now() / 15_000) * 15_000;
     const promise = (async () => {
       try {
         const data = await getOverview(
@@ -653,21 +653,28 @@ function AppShell() {
     let disposed = false;
     let syncing = false;
     let queued = false;
+    const pendingIds = new Set<string>();
     let timer: number | undefined;
 
     async function sync() {
       if (disposed || syncing || !queued || environmentRef.current !== "local") return;
       syncing = true;
       queued = false;
+      const changedIds = new Set(pendingIds);
+      pendingIds.clear();
       // A connection event can race the initial read. Wait for that read, then
       // apply this event to the latest generation.
       await Promise.allSettled([listInFlight.current?.promise, overviewInFlight.current?.promise]);
       if (!disposed && environmentRef.current === "local") {
         const currentId = selectedIdRef.current;
+        const shouldRefreshDetail =
+          currentId != null &&
+          viewRef.current === "sessions" &&
+          (changedIds.has("*") || changedIds.has(currentId));
         await Promise.allSettled([
           refreshList(),
           viewRef.current === "overview" ? refreshOverview() : undefined,
-          currentId && viewRef.current === "sessions" ? refreshSession(currentId) : undefined,
+          shouldRefreshDetail ? refreshSession(currentId) : undefined,
         ]);
       }
       syncing = false;
@@ -679,13 +686,14 @@ function AppShell() {
       timer = window.setTimeout(() => {
         timer = undefined;
         void sync();
-      }, 80);
+      }, 60);
     }
 
     const close = openStream((event) => {
       if (environmentRef.current !== "local") return;
       const banner = streamErrorBanner(event);
       if (banner) setAppError(banner);
+      pendingIds.add(event.id || "*");
       queued = true;
       scheduleSync();
     }, setStreamStatus);
@@ -1174,11 +1182,27 @@ function AppShell() {
             </Notice>
           </div>
         )}
-        {showSessionData && environment === "local" && indexing && (
-          <div className="app-notice" role="status">
-            正在更新会话索引 · 已处理 {indexing.completed} / {indexing.total} 个变更文件。当前统计会随读取进度更新。
-          </div>
-        )}
+        {showSessionData && environment === "local" && indexing && (() => {
+          const pct = indexing.total > 0
+            ? Math.min(100, Math.round((indexing.completed / indexing.total) * 100))
+            : 0;
+          return (
+            <div className="app-notice" role="status">
+              <div className="indexing-notice">
+                <div className="indexing-notice-head">
+                  <span className="indexing-notice-label">
+                    <i className="dot live" aria-hidden="true" />
+                    正在更新会话索引 · 已处理 {indexing.completed} / {indexing.total} 个变更文件
+                  </span>
+                  <span className="indexing-notice-pct">{pct}%</span>
+                </div>
+                <div className="indexing-progress-track" aria-hidden="true">
+                  <span className="indexing-progress-fill" style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         {showSessionData && environment !== "local" && remoteSync?.failed && (
           <div className="app-notice">
             <Notice tone="warning">
@@ -1453,7 +1477,7 @@ function OverviewRail({
           <p className="empty-copy">该范围内没有可排行的用量。</p>
         ) : (
           <div className="rail-ranks">
-            {topSessions.map((session) => (
+            {topSessions.map((session, index) => (
               <BareButton
                 type="button"
                 className="rail-rank"
@@ -1463,6 +1487,7 @@ function OverviewRail({
               >
                 <span className="rail-rank-main">
                   <span className="rail-rank-top">
+                    <span className="rail-rank-index" aria-hidden="true">{index + 1}</span>
                     <span className="rail-rank-name">
                       {session.nickname ?? session.id}
                     </span>

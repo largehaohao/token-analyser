@@ -112,6 +112,20 @@ export function closeStoreDb(home?: string): void {
   }
 }
 
+export function checkpointStoreDb(
+  home?: string,
+  mode: "PASSIVE" | "TRUNCATE" = "PASSIVE",
+): void {
+  const dir = home ?? tokenAnalyserHome();
+  const db = connections.get(dir);
+  if (!db) return;
+  try {
+    db.exec(`PRAGMA wal_checkpoint(${mode})`);
+  } catch {
+    // Ignore transient busy/lock during shutdown or background maintenance.
+  }
+}
+
 function metaGet(db: DatabaseSync, key: string): string | undefined {
   const row = db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as
     | { value?: unknown }

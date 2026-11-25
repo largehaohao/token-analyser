@@ -536,14 +536,15 @@ export async function getOverview(
   model?: string,
   refresh = false,
 ): Promise<Overview> {
+  const bucketedMs = Math.ceil(nowMs / 15_000) * 15_000;
   const query = window
     ? {
         since: new Date(window.sinceMs).toISOString(),
         days: window.days,
         until: new Date(window.untilMs).toISOString(),
       }
-    : overviewQuery(range, nowMs);
-  const params = new URLSearchParams({ as_of: new Date(nowMs).toISOString() });
+    : overviewQuery(range, bucketedMs);
+  const params = new URLSearchParams({ as_of: new Date(bucketedMs).toISOString() });
   if (source !== "all") params.set("source", source);
   if (query.since) params.set("since", query.since);
   if ("until" in query && query.until) params.set("until", query.until);

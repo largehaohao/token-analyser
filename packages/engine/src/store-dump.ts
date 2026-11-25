@@ -214,7 +214,7 @@ export function sqliteCoreFingerprintsMatch(
 
 /** Skip a GB-scale SQLite reparse when only WAL/SHM moved and we just loaded a dump. */
 export const SQLITE_WAL_REPARSE_MIN_BYTES = 10 * 1024 * 1024;
-export const SQLITE_WAL_REPARSE_COOLDOWN_MS = 30_000;
+export const SQLITE_WAL_REPARSE_COOLDOWN_MS = 5_000;
 
 export function shouldDeferSqliteWalReparse(opts: {
   recorded: FileFingerprint | undefined;

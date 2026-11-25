@@ -66,13 +66,14 @@ export class BackgroundIngest {
       worker.off("exit", exit);
       worker.off("error", fail);
       worker.unref();
-      // Release parser buffers and any live JSONL state once the burst ends.
+      // Keep worker alive for 5 minutes across live session bursts so tsx
+      // compilation and incremental liveReadStates offsets are preserved.
       this.idle = setTimeout(() => {
         if (this.worker === worker) {
           this.worker = undefined;
           void worker.terminate();
         }
-      }, 15_000);
+      }, 5 * 60_000);
       this.idle.unref();
     }
   }

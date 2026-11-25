@@ -25,7 +25,7 @@ export function watchSessions(
 ): () => void {
   const watchPaths = (opts?.watchPaths ?? loadUserConfig().watch_paths)
     .map((file) => path.resolve(file));
-  const watchers: ReturnType<typeof watch>[] = [];
+  const watchers = new Map<string, ReturnType<typeof watch>>();
   const watchedDirs = new Set<string>();
   const directoryRoots = new Set<string>();
   const explicitFiles = new Set(watchPaths);
@@ -81,14 +81,13 @@ export function watchSessions(
   }
 
   function ingestDelayMs(fullPath: string): number {
-    // Cursor rewrites state.vscdb WAL continuously while the app is open. A
-    // 50ms debounce turns every keystroke into a multi-second SQLite reparse
-    // that blocks /sessions and freezes the UI.
+    // Cursor/OpenCode SQLite WALs rewrite frequently; 2s coalesces bursts without 5s lag.
     if (fullPath.endsWith(".vscdb") || path.basename(fullPath) === "opencode.db") {
-      return 5_000;
+      return 2_000;
     }
     try {
-      if (statSync(fullPath).size >= 1024 * 1024) return 5_000;
+      // Live JSONL files are parsed incrementally via allowAppend; keep debounce snappy.
+      if (statSync(fullPath).size >= 1024 * 1024) return 250;
     } catch {
       // Missing files still go through remove handling promptly.
     }
@@ -160,6 +159,7 @@ export function watchSessions(
       // unhandled 'error' event that kills the engine; fall back to scanning.
       w.on("error", () => {
         watchedDirs.delete(dir);
+        watchers.delete(dir);
         try {
           w.close();
         } catch {
@@ -167,7 +167,7 @@ export function watchSessions(
         }
         ensureDirectoryScan();
       });
-      watchers.push(w);
+      watchers.set(dir, w);
     } catch {
       watchedDirs.delete(dir);
       // An inaccessible directory should not prevent other roots from being watched.
@@ -240,6 +240,7 @@ export function watchSessions(
         if (filename) scheduleIngest(path.join(root, filename));
       });
       w.on("error", () => {
+        watchers.delete(root);
         try {
           w.close();
         } catch {
@@ -247,7 +248,7 @@ export function watchSessions(
         }
         ensureDirectoryScan();
       });
-      watchers.push(w);
+      watchers.set(root, w);
     } catch {
       needsDirectoryScan = true;
     }
@@ -267,6 +268,9 @@ export function watchSessions(
     if (directoryScan) clearInterval(directoryScan);
     for (const timer of pending.values()) clearTimeout(timer);
     pending.clear();
-    for (const w of watchers) w.close();
+    for (const w of watchers.values()) {
+      try { w.close(); } catch { /* Already closed. */ }
+    }
+    watchers.clear();
   };
 }

@@ -50,7 +50,7 @@ import { fetchPowerRange, type FetchLike } from "./power.ts";
 import { fetchTempSnapshot, fetchTempHistory, clampHistorySeconds } from "./temps.ts";
 import { watchSessions } from "./watch.ts";
 import { collectSessionFiles } from "./session-files.ts";
-import { readLinkedImports, registerLinkedImport } from "./store-db.ts";
+import { checkpointStoreDb, readLinkedImports, registerLinkedImport } from "./store-db.ts";
 import { resolveImportTarget } from "./import-path.ts";
 import { isLoopbackHost, isStateChangeAllowed } from "./request-guard.ts";
 import { powerPreviewEnabled } from "./runtime-config.ts";
@@ -303,17 +303,31 @@ function wireStoreChangeEvents(
     if (parentId) onChange(parentId, false);
   };
 
+  const emitForFile = (
+    filePath: string,
+    id: string | undefined,
+    idsBefore: Set<string>,
+    idsBeforeCount: number,
+  ) => {
+    const pathIds = store.idsForPath(filePath);
+    if (idsBeforeCount > 1 || pathIds.length > 1) {
+      onChange("*", false);
+      return;
+    }
+    const targetId = pathIds[0] ?? id;
+    if (targetId) notifyIngested(targetId, idsBefore);
+    else onChange("*", false);
+  };
+
   const origIngest = store.ingestPath.bind(store);
   store.ingestPath = (filePath: string, ingestOptions?: SessionIngestOptions) => {
     try {
       // Avoid store.list() here: it runs refreshLiveFlags and can re-enter ingest.
       const idsBefore = new Set(store.peekRootIds());
+      const idsBeforeCount = store.idsForPath(filePath).length;
       const revision = store.dataRevision;
       const id = origIngest(filePath, ingestOptions);
-      if (store.dataRevision !== revision) {
-        if (id) notifyIngested(id, idsBefore);
-        else onChange("*", false);
-      }
+      if (store.dataRevision !== revision) emitForFile(filePath, id, idsBefore, idsBeforeCount);
       return id;
     } catch (err) {
       onError(
@@ -327,9 +341,11 @@ function wireStoreChangeEvents(
   const origBatched = store.ingestPathBatched.bind(store);
   store.ingestPathBatched = async (filePath, ingestOptions) => {
     try {
+      const idsBefore = new Set(store.peekRootIds());
+      const idsBeforeCount = store.idsForPath(filePath).length;
       const revision = store.dataRevision;
       const id = await origBatched(filePath, ingestOptions);
-      if (store.dataRevision !== revision) onChange("*", false);
+      if (store.dataRevision !== revision) emitForFile(filePath, id, idsBefore, idsBeforeCount);
       return id;
     } catch (err) {
       onError(
@@ -828,28 +844,19 @@ export async function startServer(opts?: {
       parts[1] === "ignore" &&
       parts.length === 2
     ) {
-      const chunks: Buffer[] = [];
-      let bodyBytes = 0;
-      req.on("data", (chunk: Buffer) => {
-        bodyBytes += chunk.length;
-        if (bodyBytes <= 16_384) chunks.push(chunk);
-      });
-      req.on("end", () => {
-        let scope: { group: string; model: string };
-        try {
-          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Partial<{ group: string; model: string }>;
-          if (!parsed.group || !parsed.model) throw new Error("invalid_price_scope");
-          scope = { group: parsed.group, model: parsed.model };
-        } catch {
-          sendJson(res, 400, { error: "invalid_price_scope" });
-          return;
-        }
-        withPricingLock(() => Promise.resolve(ignorePrice(scope))).then(() => {
-          sendJson(res, 200, { ignored: true, group: scope.group, model: scope.model });
-        }, (err) => {
-          sendJson(res, 500, { error: err instanceof Error ? err.message : "price_ignore_failed" });
-        });
-      });
+      let scope: { group: string; model: string };
+      try {
+        const raw = await readBody(req, 16_384);
+        const parsed = JSON.parse(raw.toString("utf8")) as Partial<{ group: string; model: string }>;
+        if (!parsed.group || !parsed.model) throw new Error("invalid_price_scope");
+        scope = { group: parsed.group, model: parsed.model };
+      } catch (err) {
+        if ((err as { status?: number }).status === 413) throw err;
+        sendJson(res, 400, { error: "invalid_price_scope" });
+        return;
+      }
+      await withPricingLock(() => Promise.resolve(ignorePrice(scope)));
+      sendJson(res, 200, { ignored: true, group: scope.group, model: scope.model });
       return;
     }
 
@@ -859,28 +866,19 @@ export async function startServer(opts?: {
       parts[1] === "restore" &&
       parts.length === 2
     ) {
-      const chunks: Buffer[] = [];
-      let bodyBytes = 0;
-      req.on("data", (chunk: Buffer) => {
-        bodyBytes += chunk.length;
-        if (bodyBytes <= 16_384) chunks.push(chunk);
-      });
-      req.on("end", () => {
-        let scope: { group: string; model: string };
-        try {
-          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Partial<{ group: string; model: string }>;
-          if (!parsed.group || !parsed.model) throw new Error("invalid_price_scope");
-          scope = { group: parsed.group, model: parsed.model };
-        } catch {
-          sendJson(res, 400, { error: "invalid_price_scope" });
-          return;
-        }
-        withPricingLock(() => Promise.resolve(restorePrice(scope))).then(() => {
-          sendJson(res, 200, { restored: true, group: scope.group, model: scope.model });
-        }, (err) => {
-          sendJson(res, 500, { error: err instanceof Error ? err.message : "price_restore_failed" });
-        });
-      });
+      let scope: { group: string; model: string };
+      try {
+        const raw = await readBody(req, 16_384);
+        const parsed = JSON.parse(raw.toString("utf8")) as Partial<{ group: string; model: string }>;
+        if (!parsed.group || !parsed.model) throw new Error("invalid_price_scope");
+        scope = { group: parsed.group, model: parsed.model };
+      } catch (err) {
+        if ((err as { status?: number }).status === 413) throw err;
+        sendJson(res, 400, { error: "invalid_price_scope" });
+        return;
+      }
+      await withPricingLock(() => Promise.resolve(restorePrice(scope)));
+      sendJson(res, 200, { restored: true, group: scope.group, model: scope.model });
       return;
     }
 
@@ -1156,6 +1154,8 @@ export async function startServer(opts?: {
     }
 
     if (req.method === "GET" && parts[0] === "stream" && parts.length === 1) {
+      req.setTimeout(0);
+      res.setTimeout(0);
       res.writeHead(200, {
         ...corsHeaders(),
         "Content-Type": "text/event-stream",
@@ -1194,6 +1194,8 @@ export async function startServer(opts?: {
       }
     }
   });
+  server.requestTimeout = 300_000;
+  server.headersTimeout = 30_000;
 
   for (let attempt = 0; ; attempt++) {
     try {
@@ -1299,6 +1301,7 @@ export async function gracefulShutdown(opts: {
   }
   try {
     await opts.dump();
+    checkpointStoreDb(undefined, "TRUNCATE");
   } catch (err) {
     console.error(
       `store dump failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -1308,6 +1311,15 @@ export async function gracefulShutdown(opts: {
 }
 
 async function main(): Promise<void> {
+  let onFatal: ((err: unknown) => void) | undefined;
+  process.on("unhandledRejection", (reason) => {
+    console.error("unhandledRejection:", reason);
+  });
+  process.on("uncaughtException", (err) => {
+    console.error("uncaughtException:", err);
+    if (onFatal) onFatal(err);
+    else process.exit(1);
+  });
   const config = loadUserConfig();
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
   const fixtureDir = process.env.FIXTURE_DIR;
@@ -1343,6 +1355,7 @@ async function main(): Promise<void> {
     resolveReady();
     void gracefulShutdown({ close, dump: () => store.dump(), exit: (value) => process.exit(value), code });
   }
+  onFatal = () => stop(1);
   process.once("SIGINT", () => stop(0));
   process.once("SIGTERM", () => stop(0));
 
@@ -1381,20 +1394,27 @@ async function main(): Promise<void> {
     // order matches the synchronous scanner used by existing installations.
     sqlite.sort((a, b) => Number(a.endsWith(".vscdb")) - Number(b.endsWith(".vscdb")));
     const ordered = [
-      ...light.map((file) => ({ file, imported: false })),
-      ...imports.map((file) => ({ file, imported: true })),
-      ...[...sqlite, ...largeLogs].map((file) => ({ file, imported: false })),
+      ...light.map((file) => ({ file, imported: false, tier: 0 })),
+      ...imports.map((file) => ({ file, imported: true, tier: 1 })),
+      ...[...sqlite, ...largeLogs].map((file) => ({ file, imported: false, tier: 2 })),
     ];
     const precedence = new Map([...imports.slice().reverse(), ...light, ...sqlite, ...largeLogs]
       .map((file, index) => [file, index]));
     const jobs = ordered.filter((job) => store.needsStartupIngest(job.file, job.imported));
+    // Prioritize recently modified files within each tier so light logs still
+    // finish before GB-scale SQLite/large logs.
+    const mtimeByFile = new Map<string, number>();
+    for (const job of jobs) {
+      try { mtimeByFile.set(job.file, statSync(job.file).mtimeMs); } catch { mtimeByFile.set(job.file, 0); }
+    }
+    jobs.sort((a, b) => (a.tier - b.tier) || ((mtimeByFile.get(b.file) ?? 0) - (mtimeByFile.get(a.file) ?? 0)));
     if (jobs.length) progress = { completed: 0, total: jobs.length };
     resolveReady();
     console.log(`startup index ready in ${Math.round(performance.now() - started)}ms · ${restored} restored · ${jobs.length} source(s) to reconcile`);
 
     cleanup.push(watchSessions(store, () => {}, {
       watchPaths: roots, startupFiles: jobs.filter((job) => !job.imported).map((job) => job.file),
-      recursive: process.platform !== "darwin",
+      recursive: true,
       onError: onIngestError,
     }));
     let lastNotice = 0;
@@ -1403,7 +1423,7 @@ async function main(): Promise<void> {
         reparse: true, allowAppend: !imported, finalized: imported, skipExisting: imported, precedence,
       });
       if (progress) progress.completed++;
-      if (performance.now() - lastNotice >= 500) {
+      if (performance.now() - lastNotice >= 150) {
         onIndexChange();
         lastNotice = performance.now();
       }
