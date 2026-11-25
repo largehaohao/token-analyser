@@ -122,13 +122,6 @@ export function TrendPanel({
       <div className="chart-head">
         <div>
           <h3 className="chart-title">每日支出趋势</h3>
-          <ul className="trend-legend" aria-label="趋势图图例">
-            <li><i className="swatch uncached" /> 已记录用量</li>
-            <li><i className="swatch flag" /> 账本或解析异常</li>
-            <li><i className="swatch unpriced" /> 含未定价 Token</li>
-            <li><i className="swatch avg" /> 窗口均值</li>
-            <li><i className="swatch today" /> 今天</li>
-          </ul>
         </div>
         <div className="chart-head-controls">
           <ModelFilterSelect
@@ -342,20 +335,24 @@ export function TrendPanel({
               <i className="pt" style={{ background: "var(--chart-cyan)" }} />
               已记录用量
             </span>
-            <span>
-              <i className="pt" style={{ background: "var(--chart-orange)" }} />
-              账本 / 解析异常
-            </span>
-            <span>
-              <i
-                className="pt"
-                style={{
-                  background:
-                    "repeating-linear-gradient(90deg,var(--warn),var(--warn) 3px,var(--bg-raised) 3px,var(--bg-raised) 6px)",
-                }}
-              />
-              未定价 Token
-            </span>
+            {overview.days.some((day) => (flaggedValue(day, metric) ?? 0) > 0) && (
+              <span>
+                <i className="pt" style={{ background: "var(--chart-orange)" }} />
+                账本 / 解析异常
+              </span>
+            )}
+            {overview.days.some((day) => dayUnpricedRaw(day) > 0) && (
+              <span>
+                <i
+                  className="pt"
+                  style={{
+                    background:
+                      "repeating-linear-gradient(90deg,var(--warn),var(--warn) 3px,var(--bg-raised) 3px,var(--bg-raised) 6px)",
+                  }}
+                />
+                未定价 Token
+              </span>
+            )}
             {average != null && (
               <span>
                 <i
@@ -368,15 +365,15 @@ export function TrendPanel({
                     verticalAlign: "3px",
                   }}
                 />
-                窗口均值 {label(average)}
+                日均 {label(average)}
               </span>
             )}
             {mode !== "daily" && (
               <span>
                 <i style={{ display: "inline-block", width: 14, height: 0, borderTop: "2px solid var(--chart-violet)", marginRight: 4, verticalAlign: "3px" }} />
                 {mode === "cumulative"
-                  ? `累计用量（独立轴 0–${label(overlayMax)}）`
-                  : "7 日移动均值"}
+                  ? `累计（0–${label(overlayMax)}）`
+                  : "7 日均线"}
               </span>
             )}
           </div>

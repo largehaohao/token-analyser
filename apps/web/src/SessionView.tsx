@@ -287,12 +287,12 @@ export function SessionView({
             <span className="headline-value">
               {animatedHit == null ? "—" : formatPercent(animatedHit)}
             </span>
-            <small>按输入 token 计算</small>
+            <small>占输入</small>
           </div>
           <div className="headline-row stat">
             <span className="headline-label">定价覆盖</span>
             <span className="headline-value">{pricingCoverage}</span>
-            <small>{unpriced ?? "全部用量已有价格"}</small>
+            <small>{unpriced ?? "已全部计价"}</small>
           </div>
           <div className="headline-row stat">
             <span className="headline-label">子会话</span>
@@ -301,8 +301,8 @@ export function SessionView({
             </span>
             <small>
               {(snapshot.children ?? []).length > 0
-                ? "费用已汇总到本会话"
-                : "该会话没有子 Agent 记录"}
+                ? "已汇总至本会话"
+                : "无子 Agent"}
             </small>
           </div>
         </div>

@@ -54,7 +54,6 @@ export function SourceSwitcher({
             );
           })}
         </NativeSelect>
-        <span className="source-count-caption">全部时间的会话数</span>
       </label>
       {loaded && source !== "all" && counts[source] === 0 && (
         <p className="source-range-notice" role="status">

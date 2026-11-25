@@ -242,7 +242,6 @@ export function SessionList({
           {filtered.length !== totalCount ? ` / ${totalCount}` : ""}
         </span>
       </div>
-      <p className="session-list-guide">选择会话，追踪每一轮调用。</p>
       {dayFilter && (
         <div className="day-filter-chip" role="status">
           <Icon name="clock" />
@@ -269,11 +268,14 @@ export function SessionList({
       {totalCount > 0 && (
         <SearchField id="session-search" value={query} onChange={setQuery} />
       )}
-      <div className="import-actions" aria-busy={importing || undefined}>
+      <div
+        className="import-actions"
+        aria-busy={importing || undefined}
+        title="单文件 · 最大 256 MiB · 仅在本机处理"
+      >
         <Icon name="upload" />
         <p className={`drop-hint${dragging ? " active" : ""}`}>
-          {dragging ? "放开以导入 JSONL" : "拖入 JSONL / NDJSON"}
-          <span>单文件 · 最大 256 MiB · 仅在本机处理</span>
+          {dragging ? "放开以导入" : "拖入 JSONL 导入"}
         </p>
         <Button
           busy={importing}
@@ -439,16 +441,15 @@ export function SessionList({
                           <Badge variant="outline" className="badge warn">账本</Badge>
                         )}
                       </div>
-                      <div className="session-meta" title={s.cwd ?? undefined}>
-                        {s.cwd?.split(/[\\/]/).filter(Boolean).pop() ?? "—"}
-                      </div>
                       <div className="session-meta session-meta-row">
                         <span
-                          title={[s.model, s.effort]
+                          title={[s.cwd, s.model, s.effort]
                             .filter(Boolean)
                             .join(" · ")}
                         >
-                          {s.model ?? "—"}
+                          {[s.cwd?.split(/[\\/]/).filter(Boolean).pop(), s.model]
+                            .filter(Boolean)
+                            .join(" · ") || "—"}
                         </span>
                         <span title={formatAbsoluteTime(activity)}>
                           {formatRelativeTime(activity, now)}
@@ -512,26 +513,7 @@ export function SessionList({
                           {unpricedNote(s.unpricedRaw ?? 0)}
                         </div>
                       )}
-                      {(s.waste.raw > 0 || selectedId === s.id) && (
-                        <MixBar
-                          className="waste-bar"
-                          label={`疑似可优化 ${tokenWaste}（按 token）`}
-                          segments={[
-                            {
-                              key: "useful",
-                              label: "其余",
-                              value: Math.max(0, s.cost.raw - s.waste.raw),
-                              className: "useful",
-                            },
-                            {
-                              key: "waste",
-                              label: "疑似可优化",
-                              value: s.waste.raw,
-                              className: "waste",
-                            },
-                          ]}
-                        />
-                      )}
+
                       {s.parse_error && s.parse_error_message != null && (
                         <div
                           className="session-meta parse-error-detail"

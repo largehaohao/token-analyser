@@ -71,9 +71,7 @@ export function LedgerStrip({
             {formatAnimatedCost(overview.cost, moneyUnit, animatedMoney)}
             <span className="ledger-unit"> {formatUnitSuffix(moneyUnit)}</span>
           </span>
-          <span className="ledger-delta">
-            价格表推算，不代表厂商账单
-          </span>
+          <span className="ledger-delta">按价格表估算</span>
         </div>
       )}
       <BareButton
@@ -81,7 +79,7 @@ export function LedgerStrip({
         className="ledger-item ledger-action"
         onClick={onOpenSessions}
       >
-        <span className="ledger-label">已分析会话 / 请求轮次</span>
+        <span className="ledger-label">会话 / 轮次</span>
         <span className="ledger-value">
           {Math.round(animatedSessions ?? 0).toLocaleString()}
           <span className="ledger-unit">
@@ -90,8 +88,7 @@ export function LedgerStrip({
           </span>
         </span>
         <span className="ledger-delta">
-          {overview.live ? "有实时会话" : "静态账本"} ·{" "}
-          {overview.collecting ? "采集中" : "未开启采集"}
+          {overview.live ? "含 LIVE 会话" : overview.collecting ? "本地采集中" : "静态账本"}
         </span>
       </BareButton>
       <div className="ledger-item">
@@ -106,8 +103,7 @@ export function LedgerStrip({
           {formatCompactTokens(overview.cost.cached_input)} /{" "}
           {formatCompactTokens(
             overview.cost.uncached_input + overview.cost.cached_input,
-          )}{" "}
-          输入
+          )}
         </span>
       </div>
       <div className="ledger-item">
@@ -119,8 +115,8 @@ export function LedgerStrip({
         </span>
         <span className="ledger-delta">
           {overview.unpricedRaw > 0
-            ? "这些 Token 已用量，未计入费用"
-            : overview.cost.raw > 0 ? "已记录用量已计价" : "无可计算用量"}
+            ? "未计入费用"
+            : overview.cost.raw > 0 ? "已全部计价" : "无用量"}
         </span>
       </div>
       <div className="ledger-item">
@@ -130,8 +126,8 @@ export function LedgerStrip({
         </span>
         <span className="ledger-delta">
           {share(overview.waste.raw, overview.cost.raw) == null
-            ? "该范围没有用量"
-            : `占 token 用量 ${formatPercent(share(overview.waste.raw, overview.cost.raw)!)}`}
+            ? "无用量"
+            : `占比 ${formatPercent(share(overview.waste.raw, overview.cost.raw)!)}`}
         </span>
       </div>
     </Panel>

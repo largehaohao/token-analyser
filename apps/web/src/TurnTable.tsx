@@ -165,17 +165,11 @@ export function TurnTable({
             <span className="swatch output" /> 输出
           </div>
         )}
-        <p className="chart-desc">
-          展开时间旁的箭头，查看完整用量、单价与调用证据。最新轮次在前。
-        </p>
       </div>
       {filtered.length === 0 ? (
         <p className="empty-turns">该节点没有轮次。点选「本会话」查看全部。</p>
       ) : (
         <>
-          <p className="table-overflow-hint">
-            窄屏可左右滚动查看完整列
-          </p>
           <div
             className="turn-table-scroll"
             role="region"

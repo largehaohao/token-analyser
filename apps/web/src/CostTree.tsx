@@ -190,7 +190,6 @@ export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
   return (
     <Panel className="cost-tree chart-card">
       <h3>成本树</h3>
-      <p className="chart-desc">按 Token 占比分组，点选分类筛选轮次。</p>
       <TreeRow
         node={tree}
         prefix=""

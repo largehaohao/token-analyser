@@ -77,8 +77,8 @@ export function CompositionPanel({
       label: "输入 Token",
       value: input,
       fill: "var(--chart-blue)",
-      sub: `其中 ${formatExactTokens(cost.cached_input)} 已缓存${
-        hit == null ? "" : `（占输入 ${formatPercent(100 * hit)}）`
+      sub: `已缓存 ${formatCompactTokens(cost.cached_input)}${
+        hit == null ? "" : `（${formatPercent(100 * hit)}）`
       }`,
       subWidth: input > 0 ? (100 * cost.cached_input) / input : 0,
       subFill: "var(--chart-cyan)",
@@ -88,7 +88,7 @@ export function CompositionPanel({
       label: "输出 Token",
       value: cost.output,
       fill: "var(--accent)",
-      sub: "模型生成与思考输出，单价高于输入",
+      sub: "生成与思考输出",
       subWidth: 0,
       subFill: "transparent",
     },
@@ -115,9 +115,6 @@ export function CompositionPanel({
       <div className="chart-head">
         <div>
           <h2 className="chart-title">Token 构成</h2>
-          <p className="chart-desc">
-            输入含已缓存部分；输入与输出合计为已记录 Token 总量。
-          </p>
         </div>
         {hit != null && (
           <Badge variant="outline" className="cache-pill">缓存命中 {formatPercent(100 * hit)}</Badge>
@@ -249,17 +246,18 @@ export function CompositionPanel({
           </div>
         ))}
       </div>
-      <p className="chart-desc">
-        其中 {formatExactTokens(unpriced)} 未定价 Token 已包含在输入和输出中，未计入费用。
-      </p>
-      <div className="mix-legend">
-        <span className={identity.ok ? "identity-ok" : "identity-warn"}>
-          构成合计 {formatExactTokens(identity.parts)}
-          {identity.ok
-            ? "（与已记录总量一致）"
-            : `（与已记录总量 ${formatExactTokens(cost.raw)} 不一致）`}
-        </span>
-      </div>
+      {unpriced > 0 && (
+        <p className="chart-desc">
+          含 {formatCompactTokens(unpriced)} 未定价 Token（未计入费用）。
+        </p>
+      )}
+      {!identity.ok && (
+        <div className="mix-legend">
+          <span className="identity-warn">
+            构成合计 {formatExactTokens(identity.parts)}（与已记录总量 {formatExactTokens(cost.raw)} 不一致）
+          </span>
+        </div>
+      )}
       {srTable(
         "Token 构成",
         ["构成", "Token", "占比"],
@@ -300,9 +298,6 @@ export function BehaviorRankPanel({
       <div className="chart-head">
         <div>
           <h2 className="chart-title">行为排行</h2>
-          <p className="chart-desc">
-            按行为分类的 Token 排行，含未归因用量；点击查看该分类的会话。
-          </p>
         </div>
       </div>
       {rows.length === 0 ? (
@@ -537,9 +532,6 @@ export function PerformancePanel({
       <div className="chart-head">
         <div>
           <h2 className="chart-title">性能表现</h2>
-          <p className="chart-desc">
-            首 token 延迟与输出速度，来自来源记录的完整请求样本。
-          </p>
         </div>
         <div className="chart-head-controls">
           <ModelFilterSelect

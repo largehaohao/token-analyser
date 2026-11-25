@@ -203,10 +203,10 @@ export function PerformanceMetrics({ performance, turns, tasks, source }: Props)
           noun={taskBased ? "次任务" : "轮"}
         />
       )}
-      <p className="performance-note" data-testid="performance-basis">
-        {text.basisNote}
-        {text.note}
-      </p>
+      <details className="performance-footnote" data-testid="performance-basis">
+        <summary>{text.basisNote.replace(/。$/, "")} · 口径说明</summary>
+        <p className="performance-note">{text.note}</p>
+      </details>
     </section>
   );
 }
