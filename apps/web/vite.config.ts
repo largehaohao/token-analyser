@@ -20,16 +20,20 @@ function waitForManagedEngine(): Plugin {
     configureServer(server) {
       if (process.env.TOKEN_ANALYSER_MANAGED_DEV !== "1" || !process.send) return;
       let listening = false;
-      const ready = new Promise<void>((resolve) => {
-        function received(message: unknown) {
-          if ((message as { type?: string } | null)?.type !== "engine-listening") return;
+      let markReady!: () => void;
+      let ready = new Promise<void>((resolve) => { markReady = resolve; });
+      function received(message: unknown) {
+        const type = (message as { type?: string } | null)?.type;
+        if (type === "engine-listening") {
           listening = true;
-          process.off("message", received);
-          resolve();
+          markReady();
+        } else if (type === "engine-down" && listening) {
+          listening = false;
+          ready = new Promise<void>((resolve) => { markReady = resolve; });
         }
-        process.on("message", received);
-        server.httpServer?.once("close", () => process.off("message", received));
-      });
+      }
+      process.on("message", received);
+      server.httpServer?.once("close", () => process.off("message", received));
       server.middlewares.use((req, res, next) => {
         const route = "/" + req.url?.split(/[/?]/)[1];
         if (listening || !Object.hasOwn(proxy, route)) return next();

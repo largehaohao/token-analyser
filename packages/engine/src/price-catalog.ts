@@ -171,6 +171,18 @@ function rateSignature(catalog: PriceCatalog): string {
   return JSON.stringify({ models: catalog.models, aliases: catalog.aliases });
 }
 
+function addModelAliases(
+  aliases: Record<string, string>,
+  spec: PublisherSpec,
+  id: string,
+): void {
+  const declared = spec.models[id];
+  if (!declared) return;
+  if (declared.display) aliases[declared.display] = id;
+  for (const alias of declared.aliases ?? []) aliases[alias] = id;
+  for (const suffix of spec.suffixes ?? []) aliases[`${id}${suffix}`] = id;
+}
+
 export function isPriceCatalogStale(
   catalog: PriceCatalog,
   specs: PublisherSpec[],
@@ -211,15 +223,15 @@ function compileCatalog(
     for (const [id, rate] of Object.entries(rates)) {
       if (ignored.has(id)) {
         const previousModel = previous.models[id];
-        if (previousModel?.source === spec.id) models[id] = previousModel;
+        if (previousModel?.source === spec.id) {
+          models[id] = previousModel;
+          addModelAliases(aliases, spec, id);
+        }
         continue;
       }
       activeCount += 1;
       models[id] = { ...rate, source: spec.id };
-      const declared = spec.models[id];
-      if (declared?.display) aliases[declared.display] = id;
-      for (const alias of declared?.aliases ?? []) aliases[alias] = id;
-      for (const suffix of spec.suffixes ?? []) aliases[`${id}${suffix}`] = id;
+      addModelAliases(aliases, spec, id);
     }
     sources[spec.id] = {
       label: spec.label,

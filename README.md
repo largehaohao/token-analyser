@@ -19,7 +19,7 @@ pnpm dev
 
 Use Node.js 22.15+ on the 22.x line, or 23.8 and later. Cursor and OpenCode use `node:sqlite`; DeepSeek Harness uses the built-in Zstandard decoder. `.nvmrc` pins the minimum supported release.
 
-`pnpm dev` starts Vite and the engine together. The API proxy waits for the engine on `127.0.0.1:7789`. Open the UI at [http://127.0.0.1:7788](http://127.0.0.1:7788).
+`pnpm dev` starts Vite and the engine together. The API proxy waits for the engine on `127.0.0.1:7789`. If either child exits unexpectedly, the supervisor restarts it with backoff; engine downtime and exit reasons are written to `~/.token-analyser/dev-supervisor.log`. Open the UI at [http://127.0.0.1:7788](http://127.0.0.1:7788).
 
 Single-process production-style serve (engine hosts `apps/web/dist`):
 

@@ -166,6 +166,39 @@ describe("official model catalog", () => {
     expect(again.sources.every((source) => source.status.endsWith("_unavailable"))).toBe(true);
   });
 
+  it("freezes an ignored model's rate while keeping its pricing aliases", async () => {
+    const dir = tempDir();
+    const catalogPath = path.join(dir, "catalog.json");
+    const previous = {
+      as_of: "2026-11-24",
+      sources: {
+        gemini: { label: "Gemini", as_of: "2026-11-24", page: "https://ai.google.dev/gemini-api/docs/pricing", model_count: 1 },
+      },
+      models: {
+        "gemini-3.8-flash": { input: 0.5, cached: 0.05, output: 2.5, tier: "standard", source: "gemini" },
+      },
+      aliases: {},
+    };
+    writeFileSync(catalogPath, `${JSON.stringify(previous, null, 2)}\n`);
+    const update = await updateCatalogFromOfficial({
+      catalogPath,
+      publishersDir: publishers,
+      now: new Date("2026-11-25T00:00:00Z"),
+      ignoredModels: ["gemini-3.8-flash"],
+      fetcher: fetcher({
+        "deepseek.com": deepseek,
+        "docs.x.ai": grok,
+        "google.dev": gemini,
+      }),
+    });
+    const catalog = JSON.parse(readFileSync(catalogPath, "utf8")) as PriceCatalog;
+    expect(update.sources.find((source) => source.id === "gemini")?.modelCount).toBe(6);
+    expect(catalog.models["gemini-3.8-flash"]).toMatchObject({ input: 0.5, cached: 0.05, output: 2.5 });
+    expect(catalog.aliases["Gemini 3.8 Flash"]).toBe("gemini-3.8-flash");
+    expect(catalog.aliases["gemini-3.8-flash-high"]).toBe("gemini-3.8-flash");
+    expect(quoteCatalog("Gemini 3.8 Flash", catalog)?.rates.input).toBe(0.5);
+  });
+
   it("parses the saved full Gemini page the same way as the fixture", () => {
     const full = "/tmp/gemini-pricing.md";
     if (!existsSync(full)) return;
