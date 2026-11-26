@@ -3,6 +3,9 @@ import {
   TURN_PAGE_SIZE,
   highlightScrollBehavior,
   nextTurnLimit,
+  sortTurnsAscending,
+  sortTurnsDescending,
+  turnTimestamp,
   visibleTurnWindow,
   visibleTurns,
 } from "./turn-page";
@@ -48,5 +51,34 @@ describe("turn paging", () => {
     expect(next).toHaveLength(400);
     expect(next.some((turn) => turn.id === "t2499")).toBe(true);
     expect(next.length).toBeGreaterThan(first.length);
+  });
+
+  it("sorts turns within a shared prompt newest-first by endedAt", () => {
+    const sharedPrompt = "2026-11-26T09:38:30.501Z";
+    const sample = [
+      { id: "older-prompt", startedAt: "2026-11-26T09:37:00.000Z", endedAt: "2026-11-26T09:37:58.000Z" },
+      { id: "step-1", startedAt: sharedPrompt, endedAt: "2026-11-26T09:38:40.000Z" },
+      { id: "step-2", startedAt: sharedPrompt, endedAt: "2026-11-26T09:50:33.000Z" },
+      { id: "step-3", startedAt: sharedPrompt, endedAt: "2026-11-26T09:54:31.000Z" },
+      { id: "step-3-tie", startedAt: sharedPrompt, endedAt: "2026-11-26T09:54:31.000Z" },
+    ];
+    expect(sortTurnsDescending(sample).map((t) => t.id)).toEqual([
+      "step-3-tie",
+      "step-3",
+      "step-2",
+      "step-1",
+      "older-prompt",
+    ]);
+    expect(sortTurnsAscending(sample).map((t) => t.id)).toEqual([
+      "older-prompt",
+      "step-1",
+      "step-2",
+      "step-3",
+      "step-3-tie",
+    ]);
+    expect(turnTimestamp({ startedAt: sharedPrompt, endedAt: "" })).toBe(sharedPrompt);
+    expect(turnTimestamp({ startedAt: sharedPrompt, endedAt: "2026-11-26T09:54:31.000Z" })).toBe(
+      "2026-11-26T09:54:31.000Z",
+    );
   });
 });

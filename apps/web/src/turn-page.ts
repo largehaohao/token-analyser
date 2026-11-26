@@ -1,5 +1,54 @@
 export const TURN_PAGE_SIZE = 200;
 
+export type TurnTimingFields = {
+  startedAt: string;
+  endedAt: string;
+};
+
+/** Canonical turn timestamp: prefer when the LLM turn finished over prompt start. */
+export function turnTimestamp(turn: TurnTimingFields): string {
+  return turn.endedAt || turn.startedAt;
+}
+
+function compareTurnIso(a: string, b: string): number {
+  const aMs = Date.parse(a);
+  const bMs = Date.parse(b);
+  if (Number.isFinite(aMs) && Number.isFinite(bMs)) return aMs - bMs;
+  if (Number.isFinite(aMs)) return 1;
+  if (Number.isFinite(bMs)) return -1;
+  return a.localeCompare(b);
+}
+
+/** Order turns newest-first, breaking shared-prompt ties by endedAt then array order. */
+export function sortTurnsDescending<T extends TurnTimingFields>(
+  turns: readonly T[],
+): T[] {
+  return turns
+    .map((turn, index) => ({ turn, index }))
+    .sort(
+      (a, b) =>
+        compareTurnIso(turnTimestamp(b.turn), turnTimestamp(a.turn)) ||
+        compareTurnIso(b.turn.startedAt, a.turn.startedAt) ||
+        b.index - a.index,
+    )
+    .map((entry) => entry.turn);
+}
+
+/** Order turns oldest-first for chronological charts. */
+export function sortTurnsAscending<T extends TurnTimingFields>(
+  turns: readonly T[],
+): T[] {
+  return turns
+    .map((turn, index) => ({ turn, index }))
+    .sort(
+      (a, b) =>
+        compareTurnIso(turnTimestamp(a.turn), turnTimestamp(b.turn)) ||
+        compareTurnIso(a.turn.startedAt, b.turn.startedAt) ||
+        a.index - b.index,
+    )
+    .map((entry) => entry.turn);
+}
+
 export function highlightScrollBehavior(
   reduceMotion: boolean,
 ): ScrollBehavior {

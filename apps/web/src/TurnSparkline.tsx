@@ -3,6 +3,7 @@ import type { Turn } from "./api";
 import { ChartTooltip, useChartTooltip } from "./ChartTooltip";
 import { formatCompactTokens } from "./format";
 import { downsampleValues, sparklinePoints } from "./sparkline";
+import { sortTurnsAscending } from "./turn-page";
 
 type Props = {
   turns: Turn[];
@@ -14,7 +15,7 @@ const MAX_POINTS = 80;
 const PAD = 3;
 
 export function TurnSparkline({ turns }: Props) {
-  const ordered = [...turns].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  const ordered = sortTurnsAscending(turns);
   const values = downsampleValues(
     ordered.map((turn) => turn.cost.raw),
     MAX_POINTS,

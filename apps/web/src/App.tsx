@@ -664,7 +664,11 @@ function AppShell() {
       pendingIds.clear();
       // A connection event can race the initial read. Wait for that read, then
       // apply this event to the latest generation.
-      await Promise.allSettled([listInFlight.current?.promise, overviewInFlight.current?.promise]);
+      await Promise.allSettled([
+        listInFlight.current?.promise,
+        overviewInFlight.current?.promise,
+        sessionInFlight.current?.promise,
+      ]);
       if (!disposed && environmentRef.current === "local") {
         const currentId = selectedIdRef.current;
         const shouldRefreshDetail =

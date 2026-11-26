@@ -23,6 +23,8 @@ import {
   TURN_PAGE_SIZE,
   highlightScrollBehavior,
   nextTurnLimit,
+  sortTurnsDescending,
+  turnTimestamp,
   visibleTurnWindow,
 } from "./turn-page";
 
@@ -56,6 +58,18 @@ function formatTokenRate(value: number): string {
   return value.toLocaleString("en-US", { maximumFractionDigits: 6 });
 }
 
+function formatTurnDateTime(iso: string): string {
+  return Number.isFinite(Date.parse(iso))
+    ? new Date(iso).toLocaleString("zh-CN", { hour12: false })
+    : "—";
+}
+
+function formatTurnTime(iso: string): string {
+  return Number.isFinite(Date.parse(iso))
+    ? new Date(iso).toLocaleTimeString("zh-CN", { hour12: false })
+    : "—";
+}
+
 export function TurnTable({
   turns,
   turnIds,
@@ -66,10 +80,7 @@ export function TurnTable({
   source,
 }: Props) {
   const filtered = useMemo(
-    () =>
-      turns
-        .filter((t) => turnIds.has(t.id))
-        .sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
+    () => sortTurnsDescending(turns.filter((t) => turnIds.has(t.id))),
     [turns, turnIds],
   );
   const [limit, setLimit] = useState(TURN_PAGE_SIZE);
@@ -206,6 +217,8 @@ export function TurnTable({
                     ? treeAppearance(t.bucket, "bucket", t.bucket)
                     : null;
                   const expanded = expandedId === t.id;
+                  const displayTime = turnTimestamp(t);
+                  const displayDateTime = formatTurnDateTime(displayTime);
                   const performance = t.requestPerformance;
                   const inputTokens =
                     t.cost.uncached_input + t.cost.cached_input;
@@ -237,11 +250,7 @@ export function TurnTable({
                           .filter(Boolean)
                           .join(" ")}
                       >
-                        <TableCell
-                          title={new Date(t.startedAt).toLocaleString("zh-CN", {
-                            hour12: false,
-                          })}
-                        >
+                        <TableCell title={displayDateTime}>
                           <BareButton
                             type="button"
                             className="turn-expand"
@@ -249,7 +258,7 @@ export function TurnTable({
                             aria-controls={
                               expanded ? `turn-detail-${t.id}` : undefined
                             }
-                            aria-label={`${expanded ? "收起" : "展开"} ${new Date(t.startedAt).toLocaleString("zh-CN", { hour12: false })} 的轮次明细`}
+                            aria-label={`${expanded ? "收起" : "展开"} ${displayDateTime} 的轮次明细`}
                             onClick={() =>
                               setExpandedId((current) =>
                                 current === t.id ? null : t.id,
@@ -257,13 +266,8 @@ export function TurnTable({
                             }
                           >
                             <Icon name="chevron" />
-                            <time dateTime={t.startedAt}>
-                              {new Date(t.startedAt).toLocaleTimeString(
-                                "zh-CN",
-                                {
-                                  hour12: false,
-                                },
-                              )}
+                            <time dateTime={displayTime || undefined}>
+                              {formatTurnTime(displayTime)}
                             </time>
                           </BareButton>
                         </TableCell>
@@ -368,10 +372,7 @@ export function TurnTable({
                         <TableRow className="turn-detail" id={`turn-detail-${t.id}`}>
                           <TableCell colSpan={10}>
                             <p className="turn-evidence-meta">
-                              {new Date(t.startedAt).toLocaleString("zh-CN", {
-                                hour12: false,
-                              })}{" "}
-                              · {t.model ?? "未记录模型"}
+                              {displayDateTime} · {t.model ?? "未记录模型"}
                               {t.effort ? ` · ${t.effort}` : ""}
                             </p>
                             <dl className="turn-detail-metrics" aria-label="本次 LLM 请求性能">

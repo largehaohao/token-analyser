@@ -111,12 +111,12 @@ test("pi times model requests and Cursor shows the context meter it records", as
   await expect(page.getByTestId("task-duration-value")).not.toHaveText("— s");
   await expect(page.getByTestId("performance-basis")).toContainText("解码速率");
   const piRows = page.locator(".turn-table tbody tr");
-  // The request recorded while the extension was off keeps the full window.
-  await expect(piRows.last().locator("td.turn-performance")).toHaveText(["—", "5.00"]);
-  await expect(piRows.last().locator("td.turn-performance").first())
+  // The request recorded while the extension was off is the latest turn and keeps the full window.
+  await expect(piRows.first().locator("td.turn-performance")).toHaveText(["—", "5.00"]);
+  await expect(piRows.first().locator("td.turn-performance").first())
     .toHaveAttribute("title", /request-timing/);
-  // The joined request shows the extension's measurement and its decode basis.
-  await expect(piRows.first().locator("td.turn-performance")).toHaveText(["4.72", "101.29"]);
+  // The earliest joined request shows the extension's measurement and its decode basis.
+  await expect(piRows.last().locator("td.turn-performance")).toHaveText(["4.72", "101.29"]);
 
   await page.getByLabel("选择会话 JSONL 文件").setInputFiles({
     name: "cursor.jsonl", mimeType: "application/x-ndjson",
