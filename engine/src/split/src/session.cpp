@@ -293,11 +293,24 @@ void Session::read(const std::vector<int>& prompt, GenStats& st, const std::func
     // also leaves its first message (the system prompt, with the tools) parked as a conversation of its own
     std::vector<size_t> cps;
     if (caching) {
+        size_t turn_at = body;
         for (size_t i = body; i-- > at + 1;)
             if (prompt[i] == turn_) {
+                turn_at = i;
                 cps.push_back(i);
                 break;
             }
+        // Also checkpoint the preceding message boundary when a trailing turn is short (<= 16K tokens),
+        // matching generate.cpp's message_checkpoint_boundary (#6533).
+        if (turn_at < body) {
+            for (size_t j = turn_at; j-- > at + 4;) {
+                if (turn_at - j > 16384) break;
+                if (prompt[j] == turn_) {
+                    cps.push_back(j);
+                    break;
+                }
+            }
+        }
         if (hints.keep > (int) at && (size_t) hints.keep < body) cps.push_back((size_t) hints.keep);
     }
     size_t root = 0;
@@ -321,8 +334,10 @@ void Session::read(const std::vector<int>& prompt, GenStats& st, const std::func
             if (prompt[start] != turn_) { ++start; continue; }
             size_t end = start + 1;
             while (end < body && prompt[end] != turn_) ++end;
-            if (end > at && (prompt[start + 1] == ROLE_USER || prompt[start + 1] == ROLE_TOOL))
+            if (end > at && prompt[start + 1] != ROLE_SYSTEM && prompt[start + 1] != ROLE_DEVELOPER) {
+                (void) ROLE_USER; (void) ROLE_TOOL;
                 messages.emplace_back(start + 1, end);
+            }
             start = end;
         }
         if (messages.empty() && std::find(prompt.begin(), prompt.begin() + body, turn_) == prompt.begin() + body)
