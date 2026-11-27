@@ -133,7 +133,6 @@ export function TrendPanel({
       <div className="chart-head">
         <div>
           <h3 className="chart-title">每日用量趋势</h3>
-          <p className="chart-subtitle">点击任意日期柱可下钻查看当日活跃会话</p>
         </div>
         <div className="chart-head-controls">
           <ModelFilterSelect

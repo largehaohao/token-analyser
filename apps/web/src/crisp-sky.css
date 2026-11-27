@@ -14,10 +14,10 @@
   --border-focus: #0d9488;
 
   --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #526075;
-  --text-dim: #526075;
-  --text-faint: #64748b;
+  --text-secondary: #334155;
+  --text-muted: #475569;
+  --text-dim: #475569;
+  --text-faint: #475569;
   --text-inverse: #ffffff;
 
   --accent-primary: #0d9488;
@@ -72,7 +72,7 @@
   --heat-4: #0d9488;
 
   --chart-grid: #e6edf3;
-  --chart-axis: #64748b;
+  --chart-axis: #475569;
   --chart-tooltip-bg: #0f172a;
   --chart-tooltip-fg: #f8fafc;
 
@@ -111,11 +111,11 @@
   --border-strong: #2d4659;
   --border-focus: #2dd4bf;
 
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #94a3b8;
-  --text-dim: #94a3b8;
-  --text-faint: #64748b;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #cbd5e1;
+  --text-dim: #cbd5e1;
+  --text-faint: #94a3b8;
   --text-inverse: #07151c;
 
   --accent-primary: #2dd4bf;
@@ -170,7 +170,7 @@
   --heat-4: #2dd4bf;
 
   --chart-grid: #1e303e;
-  --chart-axis: #94a3b8;
+  --chart-axis: #cbd5e1;
   --chart-tooltip-bg: #0f172a;
   --chart-tooltip-fg: #f8fafc;
 
@@ -186,18 +186,21 @@ body {
   color: var(--text-primary);
   font-family: var(--font);
   font-size: 15px;
+  font-weight: 500;
   line-height: 1.55;
-  -webkit-font-smoothing: antialiased;
+  -webkit-font-smoothing: subpixel-antialiased;
   scroll-padding-top: 84px;
 }
 
 [data-theme="dark"] body {
   background: var(--bg-canvas);
+  -webkit-font-smoothing: antialiased;
 }
 
 .mono {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 
 .od-nowrap {
@@ -5372,4 +5375,83 @@ button.topbar-cta-btn,
 .session-context-item.is-danger:hover,
 .session-context-item.is-danger:focus-visible {
   background: color-mix(in srgb, var(--color-danger) 14%, var(--bg-surface));
+}
+
+/* ==========================================================================
+   Global Typography Clarity & Bolder Hierarchy
+   ========================================================================== */
+
+.app-shell button,
+.app-shell input,
+.app-shell select,
+.app-shell textarea {
+  font-weight: 500;
+}
+
+.page-title,
+.detail-title,
+.brand-title,
+.chart-title,
+.cost-tree-head h3,
+.turn-table-head h3,
+.detail-section-title,
+.rail-head h3,
+.hist-head .h,
+.power-ledger-title {
+  font-weight: 700;
+}
+
+.nav-item,
+.source-chip,
+.session-tab-trigger[data-slot="tabs-trigger"],
+.topbar .segmented-control button,
+.topbar .segmented-control a,
+.cs-segmented button,
+.cs-kpi-label,
+.overview .ledger-label,
+.perf-label,
+.performance-card h2,
+.performance-duration-row h3,
+.session-card-title,
+.cost-tree .tree-label,
+.rank-name,
+.turn-table th,
+.power-mt thead th,
+.mt thead th,
+.badge,
+.cs-tag,
+.temps-sensor-name,
+.temps-stats dt,
+.power-controls .chart-title,
+.mobile-nav-btn {
+  font-weight: 600;
+}
+
+.cs-kpi-value,
+.overview .ledger-value,
+.performance-value,
+.temps-sensor-value,
+.power-hero-value,
+.session-tab-trigger[data-slot="tabs-trigger"][data-state="active"],
+.nav-item.is-active,
+.source-chip.is-active {
+  font-weight: 700;
+}
+
+.cs-kpi-sub,
+.overview .ledger-delta,
+.chart-subtitle,
+.detail-section-description,
+.session-card-sub,
+.session-time,
+.cost-tree .tree-percent,
+.cost-tree .tree-cost,
+.turn-table td,
+.power-mt td,
+.mt td,
+.hist-tick,
+.chart-body.trend .tick,
+.temps-sensor-range,
+.temps-stats dd {
+  font-weight: 500;
 }

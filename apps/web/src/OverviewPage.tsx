@@ -204,22 +204,22 @@ export function OverviewPage({
       <div className="detail-stack">
         <DetailSection
           title="模型用量"
-          description={`${models.length} 个模型 · 各模型 Token、轮次与费用`}
+          description={`${models.length} 个模型`}
         >
           <ModelPanel overview={overview} unit={unit} />
         </DetailSection>
         {overview.rateLimits && (
           <DetailSection
             title="速率限制（来源记录）"
-            description="来源本地状态里最近一次配额快照，不从用量推算"
+            description="最近配额"
           >
             <RateLimitSummary rateLimits={overview.rateLimits} />
           </DetailSection>
         )}
         <DetailSection
           title="数据质量与统计口径"
-          description={`定价覆盖 ${pricedCoverage ?? "—"} · ${
-            issueCount > 0 ? `${issueCount} 项异常需核对` : "账本校验通过"
+          description={`覆盖 ${pricedCoverage ?? "—"} · ${
+            issueCount > 0 ? `${issueCount} 项异常` : "通过"
           }`}
         >
           {overview.fastMultiplier != null && (
@@ -272,8 +272,7 @@ export function OverviewPage({
             </div>
           </div>
           <p className="chart-desc">
-            跨日会话按每轮结束时间拆分；窗口外用量记在「更早 /
-            之后」。趋势不是逐 token 实时扣费。
+            按每轮结束归日，窗口外记入「更早 / 之后」。
           </p>
           <p className="source-path">
             价格快照 · Codex {overview.rateCardAsOf}

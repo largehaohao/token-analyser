@@ -299,7 +299,6 @@ export function BehaviorRankPanel({
       <div className="chart-head">
         <div>
           <h2 className="chart-title">行为排行</h2>
-          <p className="chart-subtitle">按窗口内轮次归类，点击右侧可直接下钻筛选对应会话</p>
         </div>
         <span className="rank-total-turns mono">共 {overview.turnCount.toLocaleString("en-US")} 轮</span>
       </div>

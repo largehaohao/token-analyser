@@ -816,7 +816,7 @@ export function HardwarePowerPage({
               )}
             </div>
             <p className="power-window" role="status">
-              当前统计范围 {rangeSub}（{formatWindowRange(activeWindow)}）· 采集粒度每 {formatDuration(stepMs)}（{samples.length} 点）· 曲线均值粒度每 {formatDuration(bucketMs)} · 默认 {formatPricePerKwh(DEFAULT_PRICE_CNY_PER_KWH)} 元/kWh
+              {rangeSub}（{formatWindowRange(activeWindow)}）· 采集 {formatDuration(stepMs)} · {formatDuration(bucketMs)} 均值 · {samples.length} 点
             </p>
           </div>
         </Panel>
@@ -840,7 +840,7 @@ export function HardwarePowerPage({
               </div>
             </div>
             <p className="cs-card-subtitle">
-              {formatWindowRange(activeWindow)} · {rangeSub} · 移动指针查看各时段均值与峰值 · 峰值见悬停
+              {formatWindowRange(activeWindow)} · {rangeSub}
             </p>
           </div>
           <SegmentedControl

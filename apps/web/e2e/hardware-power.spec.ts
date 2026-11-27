@@ -45,12 +45,11 @@ test("hardware energy follows its range and price without entering token costs",
     "true",
   );
   // 默认近1小时：采集 15 秒，曲线 30 秒均值；终点贴着当前时刻。
-  const grid = page.getByRole("status").filter({ hasText: "当前统计范围" });
-  await expect(grid).toContainText("采集粒度每 15 秒");
-  await expect(grid).toContainText("曲线均值粒度每 30 秒");
+  const grid = page.getByRole("status").filter({ hasText: "均值" });
+  await expect(grid).toContainText("采集 15 秒");
+  await expect(grid).toContainText("30 秒 均值");
   await expect(grid).toContainText("近1小时");
   await expect(page.getByTestId("power-trend")).toContainText("近1小时");
-  await expect(page.getByTestId("power-trend")).toContainText("峰值见悬停");
   expect(await page.locator(".power-col").count()).toBeLessThanOrEqual(150);
   const summary = page.getByTestId("power-summary");
   await expect(summary).toContainText("近1小时用电量");
@@ -59,12 +58,12 @@ test("hardware energy follows its range and price without entering token costs",
   const energy = async () => waitForSettledNumber(totals.locator(".ledger-value").first());
   const hourEnergy = await energy();
   await range.getByRole("button", { name: "近1天", exact: true }).click();
-  await expect(grid).toContainText("采集粒度每 1 分钟");
-  await expect(grid).toContainText("曲线均值粒度每 10 分钟");
+  await expect(grid).toContainText("采集 1 分钟");
+  await expect(grid).toContainText("10 分钟 均值");
   await expect(summary).toContainText("近1天用电量");
   expect(await energy()).toBeGreaterThan(hourEnergy);
   await range.getByRole("button", { name: "近1小时", exact: true }).click();
-  await expect(grid).toContainText("采集粒度每 15 秒");
+  await expect(grid).toContainText("采集 15 秒");
   const hourEnergyAgain = await energy();
   await page.getByRole("spinbutton", { name: "电价（元/kWh）" }).fill("1.10");
   await expect(totals).toContainText("电价 1.10 元/kWh");

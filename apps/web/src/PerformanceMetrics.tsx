@@ -218,36 +218,36 @@ export function PerformanceMetrics({
   return (
     <section className="performance-metrics" aria-label="响应性能">
       <div className="performance-grid">
-        <Panel role="article" className="performance-card">
+        <Panel role="article" className="performance-card" title={text.ttftNote}>
           <h2>平均 TTFT</h2>
           <div className="performance-value" data-testid="ttft-value">
             {formatPerformanceNumber(ttft == null ? null : ttft / 1000)} <small>s</small>
           </div>
-          <p>{text.ttftNote}</p>
+          <p>{ttft == null ? (source === "pi" ? "需 pi request-timing" : "日志未记录首 token 时间") : `${resolved.ttftSampleCount} 次采样`}</p>
         </Panel>
-        <Panel role="article" className="performance-card">
+        <Panel role="article" className="performance-card" title={text.speedNote}>
           <h2>{text.speedLabel}</h2>
           <div className="performance-value" data-testid="token-speed-value">
             {formatPerformanceNumber(speed)} <small>tok/s</small>
           </div>
-          <p>{text.speedNote}</p>
+          <p>{speed == null ? "暂无采样" : `${resolved.speedSampleCount} 次采样`}</p>
         </Panel>
         <Panel role="article" className="performance-card performance-card-duration">
           <h2>{text.durationLabel}</h2>
           <div className="performance-duration-list">
-            <div className="performance-duration-row">
+            <div className="performance-duration-row" title={text.requestDurationNote}>
               <h3>{text.requestDurationLabel}</h3>
               <div className="performance-value" data-testid="request-duration-value">
                 {requestDuration.value} <small>{requestDuration.unit}</small>
               </div>
-              <p>{text.requestDurationNote}</p>
+              <p>{resolved.requestDurationMs == null ? "—" : `${resolved.requestDurationCount} 次请求`}</p>
             </div>
-            <div className="performance-duration-row">
+            <div className="performance-duration-row" title={text.taskDurationNote}>
               <h3>{text.taskDurationLabel}</h3>
               <div className="performance-value" data-testid="task-duration-value">
                 {taskDuration.value} <small>{taskDuration.unit}</small>
               </div>
-              <p>{text.taskDurationNote}</p>
+              <p>{resolved.taskDurationMs == null ? "—" : `${resolved.taskDurationCount} 段`}</p>
             </div>
           </div>
         </Panel>
@@ -260,7 +260,10 @@ export function PerformanceMetrics({
         />
       )}
       <details className="performance-footnote" data-testid="performance-basis">
-        <summary>{text.basisNote.replace(/。$/, "")} · 口径说明</summary>
+        <summary>
+          <span className="visually-hidden">{text.basisNote} </span>
+          口径说明
+        </summary>
         <p className="performance-note">{text.note}</p>
       </details>
     </section>

@@ -1757,9 +1757,9 @@ function AppShell() {
         </div>
         <footer className="app-footer">
           <span>
-            <Icon name="shield" /> 数据仅在本机处理
+            <Icon name="shield" /> 本机只读解析
           </span>
-          <span>只读分析 · 不会修改原始会话记录</span>
+          <span>不上传外部网络</span>
         </footer>
         </div>
 
@@ -1871,7 +1871,7 @@ function OverviewRail({
       <div className="cs-card-header">
         <div>
           <h2 className="cs-card-title">高用量会话排行</h2>
-          <p className="cs-card-subtitle">{rangeLabel} · 按 {unit === "usd" ? "USD" : unit === "credits" ? "Credits" : "Tokens"} 排序</p>
+          <p className="cs-card-subtitle">{rangeLabel} · {unit === "usd" ? "USD" : unit === "credits" ? "Credits" : "Tokens"}</p>
         </div>
       </div>
       {topSessions.length === 0 ? (

@@ -629,7 +629,7 @@ export function SystemTemperaturePage({
         <div className="temps-section-head">
           <h2 className="temps-section-title">实时读数</h2>
           <p className="temps-section-meta" title={sourceUrl ?? undefined}>
-            <Icon name="clock" /> Prometheus · 每 2 秒自动更新
+            <Icon name="clock" /> Prometheus · 2s 轮询
           </p>
         </div>
         <div className="temps-gpu-grid">
@@ -649,7 +649,6 @@ export function SystemTemperaturePage({
         <div className="cs-card-header temps-history-head">
           <div>
             <h2 className="cs-card-title">多传感器温度历史曲线</h2>
-            <p className="cs-card-subtitle">移动指针或使用方向键查看各时刻温度读数，含停机线参考</p>
           </div>
           <div className="temps-period">
             <span className="filter-label">时间范围</span>

@@ -432,9 +432,6 @@ export function SessionView({
             <div className="chart-head">
               <div>
                 <h3 className="chart-title">响应性能与延迟分布</h3>
-                <p className="chart-subtitle">
-                  TTFT、输出速率与耗时统计，及 TTFT / 输出速率分布直方图
-                </p>
               </div>
             </div>
             <PerformanceMetrics
@@ -469,14 +466,14 @@ export function SessionView({
             />
             <div className="session-tree-actions">
               <span className="session-tree-hint">
-                当前节点「{selectedAppearance.label}」共 {turnIds ? turnIds.size : turns.length} 轮对话
+                {selectedAppearance.label} · {turnIds ? turnIds.size : turns.length} 轮
               </span>
               <button
                 type="button"
                 className="btn btn-sm session-tree-jump"
                 onClick={() => setActiveTab("turns")}
               >
-                在轮次详情中查看
+                查看轮次详情
                 <Icon name="arrow" />
               </button>
             </div>
@@ -490,7 +487,7 @@ export function SessionView({
           icon="sliders"
           iconTone="brand"
           title="优化建议与浪费规则"
-          description={`${suggestions.length} 条建议 · 按需调整哪些行为计为浪费`}
+          description={`${suggestions.length} 条建议`}
         >
           <WasteToggles snapshot={snapshot} onUpdate={onUpdate} />
           {suggestions.length > 0 && (
@@ -523,7 +520,7 @@ export function SessionView({
             icon="shield"
             iconTone="emerald"
             title="上下文与会话信息"
-            description={`${snapshot.context?.tools.items.length ?? 0} 个工具 · ${snapshot.context?.skills.items.length ?? 0} 项技能 · 定价覆盖 ${pricingCoverage} · 账本校验${snapshot.ledger_warning ? "需复核" : "通过"}`}
+            description={`${snapshot.context?.tools.items.length ?? 0} 工具 · ${snapshot.context?.skills.items.length ?? 0} 技能 · ${snapshot.ledger_warning ? "需复核" : "已校验"}`}
             open={contextExpanded || contextOpen != null}
             onToggle={(open) => {
               setContextExpanded(open);
