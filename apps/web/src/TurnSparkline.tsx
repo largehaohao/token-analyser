@@ -2,32 +2,39 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import type { Turn } from "./api";
 import { ChartTooltip, useChartTooltip } from "./ChartTooltip";
 import { formatCompactTokens } from "./format";
-import { downsampleValues, sparklinePoints } from "./sparkline";
+import { downsampleValues } from "./sparkline";
 import { sortTurnsAscending } from "./turn-page";
 
 type Props = {
   turns: Turn[];
 };
 
-const WIDTH = 220;
-const HEIGHT = 48;
-const MAX_POINTS = 80;
-const PAD = 3;
+const BAR_COUNT = 12;
+const BAR_W = 4;
+const BAR_GAP = 2;
+const WIDTH = BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP; // 70px
+const HEIGHT = 20;
 
 export function TurnSparkline({ turns }: Props) {
   const ordered = sortTurnsAscending(turns);
   const values = downsampleValues(
     ordered.map((turn) => turn.cost.raw),
-    MAX_POINTS,
+    BAR_COUNT,
   );
-  const points = sparklinePoints(values, WIDTH, HEIGHT, PAD);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const tip = useChartTooltip();
   const [scrub, setScrub] = useState<number | null>(null);
-  if (!points) return null;
+  if (values.length === 0) return null;
   const max = Math.max(...values, 1);
-  const baseline = HEIGHT - PAD;
-  const area = `${PAD},${baseline} ${points} ${WIDTH - PAD},${baseline}`;
+
+  // Flagged bars highlight buckets that contain any flagged/reread turn or peak.
+  const bucketHasFlag = values.map((_, idx) => {
+    const start = Math.floor((idx * ordered.length) / values.length);
+    const end = Math.max(start + 1, Math.floor(((idx + 1) * ordered.length) / values.length));
+    return ordered
+      .slice(start, end)
+      .some((t) => t.bucket === "reread" || (t.labels?.length ?? 0) > 0);
+  });
 
   function scrubTo(index: number | null) {
     if (index == null) {
@@ -46,8 +53,6 @@ export function TurnSparkline({ turns }: Props) {
     const ratio = (event.clientX - rect.left) / rect.width;
     scrubTo(Math.round(ratio * (values.length - 1)));
   }
-
-  const point = scrub == null ? null : points.split(" ")[scrub]?.split(",");
 
   return (
     <div
@@ -70,25 +75,35 @@ export function TurnSparkline({ turns }: Props) {
     >
       <svg
         className="turn-sparkline"
+        width={WIDTH}
+        height={HEIGHT}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         aria-hidden="true"
       >
-        <polygon className="turn-spark-area" points={area} />
-        <polyline
-          fill="none"
-          stroke="var(--accent)"
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          pathLength={1}
-          points={points}
-        />
-        {point && (
-          <g className="hero-spark-scrub">
-            <line x1={point[0]} y1={PAD} x2={point[0]} y2={baseline} />
-            <circle cx={point[0]} cy={point[1]} r={2.5} />
-          </g>
-        )}
+        {values.map((val, idx) => {
+          const barH = Math.max(3, Math.round((val / max) * (HEIGHT - 2)));
+          const x = idx * (BAR_W + BAR_GAP);
+          const y = HEIGHT - barH;
+          const flagged = bucketHasFlag[idx];
+          const active = scrub === idx;
+          return (
+            <rect
+              key={idx}
+              x={x}
+              y={y}
+              width={BAR_W}
+              height={barH}
+              rx={2}
+              className={
+                flagged
+                  ? "turn-spark-bar is-flagged"
+                  : active
+                    ? "turn-spark-bar is-active"
+                    : "turn-spark-bar"
+              }
+            />
+          );
+        })}
       </svg>
       {scrub != null && (
         <ChartTooltip

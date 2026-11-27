@@ -2,8 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 async function openSessionDetail(page: Page) {
   await page.getByRole("link", { name: "会话明细" }).click();
-  const mobile = (page.viewportSize()?.width ?? 1280) <= 780;
-  if (mobile) await page.getByRole("button", { name: "展开筛选", exact: true }).click();
+  const mobile = (page.viewportSize()?.width ?? 1280) <= 1023;
   await page.getByRole("button", { name: "全部", exact: true }).click();
   if (mobile) await page.locator(".session-main").first().click();
 }
@@ -15,10 +14,10 @@ test("overview keeps secondary analysis collapsed and accessible by keyboard", a
   await expect(page.getByTestId("overview-page")).toBeVisible({
     timeout: 10_000,
   });
-  const viewNavigation = page.getByRole("navigation", { name: "视图" });
-  await expect(viewNavigation).toHaveClass(/primary-nav/);
+  const viewNavigation = page.getByRole("navigation", { name: "视图" }).first();
+  await expect(viewNavigation).toHaveClass(/sidebar-nav/);
   await expect(viewNavigation).toBeVisible();
-  await expect(viewNavigation.getByRole("link")).toHaveCount(3);
+  await expect(viewNavigation.getByRole("link")).toHaveCount(4);
   await expect(page.getByRole("group", { name: "时间范围" })).toBeVisible();
   await expect(
     page.getByTestId("ledger-hero").locator(".ledger-hero-label", { hasText: "总用量" }),
@@ -96,7 +95,8 @@ test("tree percents sum to ~100 and waste moves when poll is unchecked", async (
     page.getByText("wait-poll").or(page.getByText("/repo")).first(),
   ).toBeVisible({ timeout: 10_000 });
   await page.getByRole("button", { name: /s-poll/ }).click();
-  await expect(page.getByText(/不代表 OpenAI 账单/)).toBeVisible();
+  await expect(page.locator(".session-view .disclaimer")).toHaveCount(0);
+  await page.getByRole("tab", { name: "成本树" }).click();
   const percents = page.locator("[data-percent]");
   await expect(percents.first()).toBeVisible();
   const values = await percents.allTextContents();
@@ -139,12 +139,17 @@ test("shows mix bars for headline, tree, sessions, and turns", async ({
   await expect(page.locator(".session-list li button").first()).toBeVisible({
     timeout: 10_000,
   });
-  await expect(page.getByText(/不代表 OpenAI 账单/)).toBeVisible();
+  await expect(page.locator(".session-view .disclaimer")).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "性能" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".session-perf-panel .hist-card.is-ttft")).toBeVisible();
+  await expect(page.locator(".session-perf-panel .hist-card.is-speed")).toBeVisible();
   await expect(page.getByTestId("headline-mix")).toBeVisible();
   await expect(page.getByTestId("context-card")).toBeHidden();
   await expect(page.locator(".session-list .waste-bar").first()).toBeVisible();
+  await page.getByRole("tab", { name: "成本树" }).click();
   await expect(page.locator(".tree-row .tree-bar").first()).toBeVisible();
   await page.locator(".tree-row").first().click();
+  await page.getByRole("tab", { name: /轮次详情/ }).click();
   await expect(page.locator(".turn-mix").first()).toBeVisible();
   await expect(page.locator(".turn-table th")).toHaveCount(10);
   await expect(page.getByRole("columnheader", { name: "TTFT (s)" })).toBeVisible();
@@ -225,7 +230,7 @@ test("renders rate limit gauges instead of raw JSON", async ({ page }) => {
   await page.goto("/");
   await openSessionDetail(page);
   await page.getByRole("button", { name: new RegExp(targetId!) }).click();
-  await expect(page.getByText(/不代表 OpenAI 账单/)).toBeVisible();
+  await expect(page.locator(".session-view")).toBeVisible();
   await page.locator("summary").filter({ hasText: "上下文与会话信息" }).click();
   await expect(
     page.locator("[data-testid^='rate-gauge-']").first(),
@@ -340,7 +345,7 @@ test("keeps the current session detail when a refresh fails temporarily", async 
   await page.goto("/");
   await openSessionDetail(page);
   await page.getByRole("button", { name: /s-poll/ }).click();
-  await expect(page.getByText(/不代表 OpenAI 账单/)).toBeVisible({
+  await expect(page.locator(".session-reference")).toContainText("s-poll", {
     timeout: 10_000,
   });
 
@@ -365,7 +370,7 @@ test("keeps the current session detail when a refresh fails temporarily", async 
   });
   await openSessionDetail(page);
   await expect.poll(() => failedRefresh).toBe(true);
-  await expect(page.getByText(/不代表 OpenAI 账单/)).toBeVisible();
+  await expect(page.locator(".session-reference")).toContainText("s-poll");
   await expect(page.getByText("选择一个会话查看费用。")).toHaveCount(0);
   await expect(page.getByRole("alert")).toContainText("会话更新失败");
 
@@ -384,7 +389,7 @@ test("restores the session detail after a document reload", async ({
   await page.goto("/");
   await openSessionDetail(page);
   await page.getByRole("button", { name: /s-poll/ }).click();
-  await expect(page.getByText(/不代表 OpenAI 账单/)).toBeVisible({
+  await expect(page.locator(".session-reference")).toContainText("s-poll", {
     timeout: 10_000,
   });
 
@@ -526,7 +531,7 @@ test("clears session detail when the visible range is empty", async ({
     timeout: 10_000,
   });
   await openSessionDetail(page);
-  await expect(page.getByText(/不代表 OpenAI 账单/)).toBeVisible({
+  await expect(page.getByTestId("headline-mix")).toBeVisible({
     timeout: 10_000,
   });
   await page.getByRole("button", { name: "5小时" }).click();
@@ -608,7 +613,7 @@ test("suggestion copy is Chinese and clicking it selects a tree node", async ({
   });
   await openSessionDetail(page);
   await page.getByRole("button", { name: /s-reread-same/ }).click();
-  await expect(page.getByText(/不代表 OpenAI 账单/)).toBeVisible();
+  await expect(page.locator(".session-view .disclaimer")).toHaveCount(0);
   await page
     .locator("summary")
     .filter({ hasText: "优化建议与浪费规则" })
@@ -616,8 +621,9 @@ test("suggestion copy is Chinese and clicking it selects a tree node", async ({
   const suggestion = page.getByRole("button", { name: /相同文件被重复读取/ });
   await expect(suggestion).toBeVisible();
   await suggestion.click();
-  await expect(page.locator(".tree-row.selected")).toContainText("重复读取");
   await expect(page.locator(".turn-table tr.highlighted")).toBeVisible();
+  await page.getByRole("tab", { name: "成本树" }).click();
+  await expect(page.locator(".tree-row.selected")).toContainText("重复读取");
 });
 
 test("trend columns expose a keyboard tooltip", async ({ page }) => {
@@ -676,6 +682,7 @@ for (const width of [1920, 1701, 1600, 1440, 390]) {
     await openSessionDetail(page);
     await expect(page.getByTestId("headline-mix")).toBeVisible();
     await expectContained();
+    await page.getByRole("tab", { name: /轮次详情/ }).click();
     if (width >= 1440) {
       expect(
         await page

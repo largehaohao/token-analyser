@@ -1,52 +1,40 @@
 import { lazy, Suspense } from "react";
-import { Icon, SegmentedControl, StatePanel } from "./ui";
-import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
+import { StatePanel } from "./ui";
 
 const HardwarePowerPage = lazy(() => import("./HardwarePowerPage").then((module) => ({ default: module.HardwarePowerPage })));
 const SystemTemperaturePage = lazy(() => import("./SystemTemperaturePage").then((module) => ({ default: module.SystemTemperaturePage })));
 
-type Tab = "temps" | "power";
+export type HardwareTab = "temps" | "power";
+
+export type HardwareTopMeta = {
+  devicePill?: string;
+  windowPill?: string;
+  hostPill?: string;
+  statusText?: string;
+};
 
 export function HardwarePage(props: {
-  tab: Tab;
-  onTabChange: (tab: Tab) => void;
+  tab: HardwareTab;
+  onTabChange: (tab: HardwareTab) => void;
   now: number;
   refreshKey: number;
+  onTopMeta?: (meta: HardwareTopMeta) => void;
 }) {
   return (
     <div className="hardware-page" data-testid="hardware-page">
-      <div className="hardware-toolbar">
-        <div className="hardware-context">
-          <p className="hardware-breadcrumb">
-            <span className="hardware-crumb-mark" aria-hidden="true">
-              <Icon name="gauge" />
-            </span>
-            <span className="hardware-crumb-brand">硬件监控</span>
-            <span className="hardware-crumb-sep" aria-hidden="true">
-              /
-            </span>
-            <Badge variant="outline" className="hardware-crumb-section">
-              {props.tab === "temps" ? "温度" : "用电"}
-            </Badge>
-          </p>
-        </div>
-        <nav className="hardware-tabs" aria-label="硬件子页">
-          <SegmentedControl
-            label="硬件子页"
-            value={props.tab}
-            onChange={(id) => props.onTabChange(id as Tab)}
-            options={[
-              { id: "temps", label: "温度" },
-              { id: "power", label: "用电" },
-            ]}
-          />
-        </nav>
-      </div>
       <Suspense fallback={<StatePanel kind="loading" title="正在加载硬件监控" />}>
         {props.tab === "temps" ? (
-          <SystemTemperaturePage now={props.now} refreshKey={props.refreshKey} />
+          <SystemTemperaturePage
+            now={props.now}
+            refreshKey={props.refreshKey}
+            onTopMeta={props.onTopMeta}
+          />
         ) : (
-          <HardwarePowerPage now={props.now} refreshKey={props.refreshKey} />
+          <HardwarePowerPage
+            now={props.now}
+            refreshKey={props.refreshKey}
+            onTopMeta={props.onTopMeta}
+          />
         )}
       </Suspense>
     </div>

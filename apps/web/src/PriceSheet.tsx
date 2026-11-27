@@ -89,20 +89,21 @@ export function PriceSheet({
   return (
     <section className="price-sheet" id="price-sheet">
       <div className="price-sheet-toolbar">
+        <h2 className="price-sheet-title">模型价格表 (PriceSheet)</h2>
         <input
           className="price-sheet-search"
           type="search"
           value={query}
-          placeholder="筛选模型"
+          placeholder="筛选模型…"
           aria-label="筛选模型"
           onChange={(event) => setQuery(event.target.value)}
         />
-        <p>
+        <p className="price-sheet-count">
           {state === "ready"
-            ? `${rowCount} 个模型 · 单价为每百万 token，说明里的第二档不改变默认报价`
+            ? `${rowCount} 个模型 · 单价为每百万 token (USD)`
             : "正在读取本地价格表"}
         </p>
-        <Button onClick={onUpdate} busy={updating}>
+        <Button emphasis="solid" intent="brand" className="price-sheet-update-btn" onClick={onUpdate} busy={updating}>
           <Icon name="refresh" /> 更新模型价格
         </Button>
       </div>

@@ -1,8 +1,4 @@
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@/components/ui/native-select";
-import {
   SESSION_SOURCES,
   sourceEmptyCopy,
   type SessionSourceFilter,
@@ -30,31 +26,36 @@ export function SourceSwitcher({
 }: Props) {
   const label = SESSION_SOURCES.find((item) => item.id === source)!.label;
   return (
-    <section className="source-toolbar" aria-label="会话来源筛选">
-      <label className="filter-field source-filter-field">
-        <span className="filter-label">来源</span>
-        <NativeSelect
-          className="source-select"
-          aria-label="会话来源"
-          value={source}
-          onChange={(event) =>
-            onChange(event.target.value as SessionSourceFilter)
-          }
-        >
-          {SESSION_SOURCES.map((item) => {
-            const count = loaded ? counts[item.id] : "—";
-            return (
-              <NativeSelectOption
-                key={item.id}
-                value={item.id}
-                title={`${item.label} · 全部时间已发现 ${count} 个会话`}
-              >
-                {item.label} {count}
-              </NativeSelectOption>
-            );
-          })}
-        </NativeSelect>
-      </label>
+    <section className="source-filter-bar" aria-label="会话来源筛选">
+      <div className="source-rail" role="group" aria-label="代理来源筛选">
+        {SESSION_SOURCES.map((item) => {
+          const active = source === item.id;
+          const count = loaded ? counts[item.id] : null;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              data-source={item.id}
+              className={`source-chip${active ? " is-active" : ""}`}
+              aria-pressed={active}
+              title={`${item.label} · 全部时间已发现 ${count ?? "—"} 个会话`}
+              onClick={() => onChange(item.id)}
+            >
+              {item.color && (
+                <span
+                  className="source-dot"
+                  style={{ background: item.color }}
+                  aria-hidden="true"
+                />
+              )}
+              <span>{item.label}</span>
+              {count != null && (
+                <span className="source-chip-count">{count}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
       {loaded && source !== "all" && counts[source] === 0 && (
         <p className="source-range-notice" role="status">
           {sourceEmptyCopy(source)}

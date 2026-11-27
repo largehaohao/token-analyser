@@ -165,7 +165,9 @@ export function LedgerHero({
   return (
     <section className="ledger-hero" data-testid="ledger-hero" aria-label="当前范围总用量">
       <div className="ledger-hero-copy">
-        <span className="ledger-hero-label">{unit === "tokens" ? "总用量" : "预估费用"}</span>
+        <span className="ledger-hero-label">
+          {unit === "tokens" ? "当前统计范围总用量" : "当前统计范围预估费用"}
+        </span>
         <span
           className={`ledger-hero-value${flash ? " value-flash" : ""}`}
           title={formatCostTitle(overview.cost, unit)}
@@ -175,47 +177,55 @@ export function LedgerHero({
         </span>
         <span className="ledger-hero-meta">
           {previousLabel && <span className={`ledger-delta ${comparison.direction}`}>{comparison.text}</span>}
-          <span>{dated.length} 天趋势</span>
+          <span>{dated.length} 天趋势 · 悬停或点击趋势可下钻至当日会话</span>
         </span>
       </div>
       {shape ? (
-        <div
-          ref={wrapRef}
-          className="ledger-hero-spark-wrap"
-          tabIndex={0}
-          role="group"
-          aria-label="统计窗口内每日用量趋势。方向键逐日查看，回车打开当天会话，Escape 关闭读数"
-          onPointerMove={handlePointerMove}
-          onPointerDown={handlePointerMove}
-          onPointerLeave={() => {
-            if (!wrapRef.current?.contains(document.activeElement)) tip.scheduleHide();
-          }}
-          onFocus={(event) => {
-            if (event.currentTarget === event.target) scrubTo(values.length - 1);
-            else tip.cancelHide();
-          }}
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget)) scrubTo(null);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.currentTarget.focus();
-              scrubTo(null);
-              return;
-            }
-            if (event.target !== event.currentTarget) return;
-            if (event.key === "Enter" && onDrillDay) {
-              event.preventDefault();
-              drill();
-            } else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
-              event.preventDefault();
-              if (event.key === "ArrowLeft") scrubTo((scrub ?? values.length - 1) - 1);
-              else if (event.key === "ArrowRight") scrubTo((scrub ?? 0) + 1);
-              else scrubTo(event.key === "Home" ? 0 : values.length - 1);
-            }
-          }}
-        >
+        <div className="ledger-hero-spark-card">
+          <div className="ledger-hero-spark-head">
+            <span>周期对比曲线</span>
+            <span className="ledger-hero-spark-legend">
+              <span><i className="spark-line-key is-current" /> 本周期</span>
+              {ghost && <span><i className="spark-line-key is-prev" /> 上一周期</span>}
+            </span>
+          </div>
+          <div
+            ref={wrapRef}
+            className="ledger-hero-spark-wrap"
+            tabIndex={0}
+            role="group"
+            aria-label="统计窗口内每日用量趋势。方向键逐日查看，回车打开当天会话，Escape 关闭读数"
+            onPointerMove={handlePointerMove}
+            onPointerDown={handlePointerMove}
+            onPointerLeave={() => {
+              if (!wrapRef.current?.contains(document.activeElement)) tip.scheduleHide();
+            }}
+            onFocus={(event) => {
+              if (event.currentTarget === event.target) scrubTo(values.length - 1);
+              else tip.cancelHide();
+            }}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) scrubTo(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.currentTarget.focus();
+                scrubTo(null);
+                return;
+              }
+              if (event.target !== event.currentTarget) return;
+              if (event.key === "Enter" && onDrillDay) {
+                event.preventDefault();
+                drill();
+              } else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                event.preventDefault();
+                if (event.key === "ArrowLeft") scrubTo((scrub ?? values.length - 1) - 1);
+                else if (event.key === "ArrowRight") scrubTo((scrub ?? 0) + 1);
+                else scrubTo(event.key === "Home" ? 0 : values.length - 1);
+              }
+            }}
+          >
           <svg
             className="ledger-hero-spark"
             viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
@@ -264,9 +274,15 @@ export function LedgerHero({
               )}
             </ChartTooltip>
           )}
+          </div>
         </div>
       ) : (
-        <span className="ledger-hero-empty">窗口内无已记录用量</span>
+        <div className="ledger-hero-spark-card is-empty">
+          <div className="ledger-hero-spark-head">
+            <span>周期对比曲线</span>
+            <span className="ledger-hero-empty">窗口内无已记录用量</span>
+          </div>
+        </div>
       )}
     </section>
   );

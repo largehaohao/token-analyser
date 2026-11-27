@@ -1,5 +1,6 @@
 import path from "node:path";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, unlinkSync } from "node:fs";
+import { tokenAnalyserHome } from "./config.ts";
 import { buildTree } from "./tree.ts";
 import { prepareSource, type PreparedSource, type SessionIndex } from "./session-index.ts";
 import { computeWaste } from "./waste.ts";
@@ -37,8 +38,12 @@ import {
   type FileFingerprint,
 } from "./store-dump.ts";
 import {
+  clearExcludedSessionId,
   deleteStoredToggles,
+  excludeSessionId,
+  readExcludedSessionIds,
   readStoredToggles,
+  removeLinkedImport,
   writeStoredToggle,
   readSourceDetail,
   needsIndexBackfill,
@@ -129,6 +134,8 @@ export type SessionIngestOptions = Pick<IngestOptions, "allowAppend" | "finalize
   precedence?: ReadonlyMap<string, number>;
   /** Keep an already-loaded canonical session when an import has the same id. */
   skipExisting?: boolean;
+  /** Clear a previous manual removal if explicitly re-imported. */
+  allowExcludedReimport?: boolean;
 };
 
 class MissingDetail extends Error {
@@ -168,6 +175,7 @@ export class SessionStore {
   private lastLiveFlagScanAt = 0;
   private revision = 0;
   private overviewCache = new Map<string, Overview>();
+  private excludedIds = new Set<string>();
 
   get restoredIndex(): boolean {
     return this.hasPersistedBase;
@@ -181,6 +189,7 @@ export class SessionStore {
     if (opts?.cacheDir) {
       this.cacheHome = path.dirname(opts.cacheDir);
     }
+    this.excludedIds = readExcludedSessionIds(this.cacheHome);
   }
 
   async restoreForStartup(): Promise<number> {
@@ -352,8 +361,9 @@ export class SessionStore {
     this.fingerprints.clear();
     this.pendingSources.clear();
     this.persistedRevisions.clear();
+    this.excludedIds = readExcludedSessionIds(this.cacheHome);
     for (const snap of dump.sources) {
-      if (!snap?.id || typeof snap.path !== "string") continue;
+      if (!snap?.id || typeof snap.path !== "string" || this.excludedIds.has(snap.id)) continue;
       this.sources.set(snap.id, snap);
       this.persistedRevisions.set(snap.id, snap.revision);
     }
@@ -412,6 +422,7 @@ export class SessionStore {
     nextToggles: Map<string, Record<WasteToggleId, boolean>>,
     live?: boolean,
   ): void {
+    if (this.excludedIds.has(snap.id)) return;
     // Prefer Cursor's state.vscdb over agent-transcript JSONL, including when
     // the vscdb row only exists in the dump and this refresh never opens it
     // (heavy .vscdb paths are deferred until after listen).
@@ -777,6 +788,41 @@ export class SessionStore {
     return removed;
   }
 
+  /**
+   * Remove a session from the workbench index and remember its ID so local
+   * auto-discovery does not immediately restore it. Never deletes external agent logs.
+   */
+  removeSession(id: string): boolean {
+    const existing = this.sources.get(id);
+    if (!existing) return false;
+    this.excludedIds.add(id);
+    excludeSessionId(this.cacheHome, id);
+    this.sources.delete(id);
+    this.pendingSources.delete(id);
+    this.toggles.delete(id);
+    this.detailViews.delete(existing);
+    deleteStoredToggles(this.cacheHome, [id]);
+
+    const resolved = path.resolve(existing.path);
+    this.reindexPaths();
+    if (!(this.sourcesByPath.get(resolved)?.length)) {
+      const importsRoot = path.resolve(path.join(this.cacheHome ?? tokenAnalyserHome(), "imports"));
+      if (resolved.startsWith(`${importsRoot}${path.sep}`)) {
+        try {
+          unlinkSync(resolved);
+        } catch {
+          // Already removed or read-only.
+        }
+        this.fingerprints.delete(resolved);
+      }
+      removeLinkedImport(resolved, this.cacheHome);
+    }
+    this.rebuildAll();
+    this.dumpDirty = true;
+    this.dump({ force: true });
+    return true;
+  }
+
   private installFile(
     file: string,
     update: FileUpdate,
@@ -794,6 +840,10 @@ export class SessionStore {
     let changed = removedIds.length > 0;
     for (const prepared of update.updated) {
       const snap = prepared.index;
+      if (opts?.allowExcludedReimport && this.excludedIds.delete(snap.id)) {
+        clearExcludedSessionId(this.cacheHome, snap.id);
+      }
+      if (this.excludedIds.has(snap.id)) continue;
       const existing = this.sources.get(snap.id);
       if (opts?.skipExisting && existing) continue;
       if (existing?.revision === snap.revision &&
@@ -817,7 +867,7 @@ export class SessionStore {
       this.rebuildAll();
     }
     if (changed || fingerprintChanged) this.scheduleDump();
-    return update.ids[0];
+    return update.ids.find((id) => !this.excludedIds.has(id));
   }
 
   ingestPath(

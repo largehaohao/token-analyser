@@ -4,9 +4,6 @@ import { waitForSettled } from "./helpers";
 
 async function openSessions(page: Page) {
   await page.goto("/#sessions");
-  if ((page.viewportSize()?.width ?? 1280) <= 780) {
-    await page.getByRole("button", { name: "展开筛选", exact: true }).click();
-  }
   await page.getByRole("button", { name: "全部", exact: true }).click();
   await page.locator(".session-main").filter({ hasText: "s-poll" }).click();
   await expect(page.locator(".session-reference")).toHaveText("s-poll");
@@ -40,6 +37,7 @@ test("per-request TTFT and tok/s show recorded, calculated, and missing measurem
   await page.getByRole("button", { name: "全部", exact: true }).click();
   await page.getByRole("searchbox", { name: "筛选会话" }).fill(id);
   await page.locator(".session-main").first().click();
+  await page.getByRole("tab", { name: /轮次详情/ }).click();
   await expect(page.getByRole("columnheader", { name: "TTFT (s)" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "tok/s", exact: true })).toBeVisible();
   const requests = page.locator(".turn-table tbody tr:not(.turn-detail-row)").filter({ has: page.locator(".turn-expand") });
@@ -90,6 +88,7 @@ test("Fast pricing follows desktop tier changes and shows effective token rates"
   await page.getByRole("button", { name: "全部", exact: true }).click();
   await page.getByRole("searchbox", { name: "筛选会话" }).fill(id);
   await page.locator(".session-main").first().click();
+  await page.getByRole("tab", { name: /轮次详情/ }).click();
   await expect(page.locator(".turn-fast")).toHaveText("Fast ×2");
   await page.locator(".turn-expand").first().click();
   await expect(page.getByLabel("Token 与费用明细")).toContainText("Fast ×2");
@@ -640,6 +639,7 @@ test("turn evidence and chart tooltips work with keyboard and Escape", async ({
   await expect(day.locator(".chart-tooltip")).toBeHidden();
   await page.getByRole("link", { name: "会话明细" }).click();
   await page.getByRole("button", { name: "全部", exact: true }).click();
+  await page.getByRole("tab", { name: /轮次详情/ }).click();
   const expand = page.locator(".turn-expand").first();
   await expand.press("Enter");
   await expect(expand).toHaveAttribute("aria-expanded", "true");
@@ -680,10 +680,12 @@ for (const width of [1280, 390]) {
       fullPage: true,
     });
     await page.getByRole("link", { name: "会话明细" }).click();
-    if (width <= 780) await page.getByRole("button", { name: "展开筛选", exact: true }).click();
     await page.getByRole("button", { name: "全部", exact: true }).click();
-    if (width <= 780) await page.locator(".session-main").first().click();
+    if (width <= 1023) await page.locator(".session-main").first().click();
     await expect(page.locator(".session-view")).toBeVisible();
+    await expect(page.getByRole("tab", { name: "性能" })).toHaveAttribute("aria-selected", "true");
+    expect((await audit()).violations).toEqual([]);
+    await page.getByRole("tab", { name: /轮次详情/ }).click();
     await page.locator(".turn-expand").first().click();
     await expect(page.getByLabel("Token 与费用明细")).toBeVisible();
     expect((await audit()).violations).toEqual([]);

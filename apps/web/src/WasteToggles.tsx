@@ -149,20 +149,32 @@ export function WasteToggles({ snapshot, onUpdate }: Props) {
           </Button>
         </div>
       )}
-      <div className="toggle-grid" role="group" aria-label="浪费计算规则">
-        {TOGGLE_LABELS.map(({ id, label, onByDefault }) => (
-          <label key={id}>
-            <input
-              type="checkbox"
-              aria-label={label}
-              checked={snapshot.toggles[id]}
-              disabled={pending > 0}
-              onChange={(e) => handleChange(id, e.target.checked)}
-            />
-            <span>{label}</span>
-            {onByDefault && <span className="toggle-default">默认开</span>}
-          </label>
-        ))}
+      <div className="waste-rules-list" role="group" aria-label="浪费计算规则">
+        {TOGGLE_LABELS.map(({ id, label, onByDefault }) => {
+          const checked = snapshot.toggles[id];
+          return (
+            <label
+              key={id}
+              className={`waste-rule-row${checked ? " is-active" : ""}`}
+              style={{ cursor: pending > 0 ? "not-allowed" : "pointer" }}
+            >
+              <div className="od-field od-fill">
+                <span className="waste-rule-name">{label}</span>
+                {onByDefault && <span className="waste-rule-desc">默认启用</span>}
+              </div>
+              <div className="waste-rule-right">
+                <input
+                  type="checkbox"
+                  className="cs-switch-input"
+                  aria-label={label}
+                  checked={checked}
+                  disabled={pending > 0}
+                  onChange={(e) => handleChange(id, e.target.checked)}
+                />
+              </div>
+            </label>
+          );
+        })}
       </div>
     </Panel>
   );

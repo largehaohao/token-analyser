@@ -13,6 +13,10 @@ type Props = {
   tasks?: TaskTiming[];
   /** Sharpens the copy where one source can record more than another. */
   source?: SessionSource;
+  /** Compact 4-card strip inside hero panels. */
+  compact?: boolean;
+  /** Always show TTFT / speed distribution histograms in full view even without samples. */
+  alwaysShowDistributions?: boolean;
 };
 
 function positiveMs(value: number | null | undefined): number | null {
@@ -145,7 +149,14 @@ export function resolvePerformance(
   };
 }
 
-export function PerformanceMetrics({ performance, turns, tasks, source }: Props) {
+export function PerformanceMetrics({
+  performance,
+  turns,
+  tasks,
+  source,
+  compact = false,
+  alwaysShowDistributions = false,
+}: Props) {
   const resolved = resolvePerformance(performance, turns, tasks);
   const ttft = resolved.avgTtftMs;
   const speed = resolved.outputTokensPerSecond;
@@ -159,6 +170,51 @@ export function PerformanceMetrics({ performance, turns, tasks, source }: Props)
     : turnDistributions(turns ?? []);
   const hasSamples =
     distributions.ttft.known > 0 || distributions.speed.known > 0;
+  if (compact) {
+    return (
+      <section className="performance-metrics" aria-label="响应性能">
+        <div className="perf-strip">
+          <div className="perf-item" title={text.ttftNote}>
+            <span className="perf-label">平均 TTFT</span>
+            <span className="perf-value" data-testid="ttft-value">
+              {formatPerformanceNumber(ttft == null ? null : ttft / 1000)} <small>s</small>
+            </span>
+          </div>
+          <div className="perf-item" title={text.speedNote}>
+            <span className="perf-label">{text.speedLabel}</span>
+            <span className="perf-value" data-testid="token-speed-value">
+              {formatPerformanceNumber(speed)} <small>tok/s</small>
+            </span>
+          </div>
+          <div className="perf-item" title={text.requestDurationNote}>
+            <span className="perf-label">{text.requestDurationLabel}</span>
+            <span className="perf-value" data-testid="request-duration-value">
+              {requestDuration.value} <small>{requestDuration.unit}</small>
+            </span>
+          </div>
+          <div className="perf-item" title={text.taskDurationNote}>
+            <span className="perf-label">{text.taskDurationLabel}</span>
+            <span className="perf-value" data-testid="task-duration-value">
+              {taskDuration.value} <small>{taskDuration.unit}</small>
+            </span>
+          </div>
+        </div>
+        {hasSamples && (
+          <div style={{ marginTop: "12px" }}>
+            <HistogramPair
+              ttft={distributions.ttft}
+              speed={distributions.speed}
+              noun={taskBased ? "次任务" : "轮"}
+            />
+          </div>
+        )}
+        <details className="performance-footnote" data-testid="performance-basis">
+          <summary>{text.basisNote.replace(/。$/, "")} · 口径说明</summary>
+          <p className="performance-note">{text.note}</p>
+        </details>
+      </section>
+    );
+  }
   return (
     <section className="performance-metrics" aria-label="响应性能">
       <div className="performance-grid">
@@ -196,7 +252,7 @@ export function PerformanceMetrics({ performance, turns, tasks, source }: Props)
           </div>
         </Panel>
       </div>
-      {hasSamples && (
+      {(hasSamples || alwaysShowDistributions) && (
         <HistogramPair
           ttft={distributions.ttft}
           speed={distributions.speed}

@@ -3,15 +3,19 @@ import type { SessionListItem, SessionSource } from "./api";
 export type SessionSourceFilter = "all" | SessionSource;
 
 export const SESSION_SOURCES = [
-  { id: "all", label: "所有来源" },
-  { id: "codex", label: "Codex" },
-  { id: "claude", label: "Claude Code" },
-  { id: "cursor", label: "Cursor" },
-  { id: "pi", label: "pi" },
-  { id: "dsh", label: "DeepSeek Harness" },
-  { id: "opencode", label: "OpenCode" },
-  { id: "antigravity", label: "Antigravity" },
+  { id: "all", label: "所有来源", color: "" },
+  { id: "codex", label: "Codex", color: "var(--src-codex)" },
+  { id: "claude", label: "Claude Code", color: "var(--src-claude)" },
+  { id: "cursor", label: "Cursor", color: "var(--src-cursor)" },
+  { id: "pi", label: "pi", color: "var(--src-pi)" },
+  { id: "dsh", label: "DeepSeek Harness", color: "var(--src-dsh)" },
+  { id: "opencode", label: "OpenCode", color: "var(--src-opencode)" },
+  { id: "antigravity", label: "Antigravity", color: "var(--src-antigravity)" },
 ] as const;
+
+export function sourceColor(source: SessionSourceFilter): string {
+  return SESSION_SOURCES.find((item) => item.id === source)?.color || "var(--accent-primary)";
+}
 
 export function normalizeSourceFilter(value: unknown): SessionSourceFilter {
   return SESSION_SOURCES.find((item) => item.id === value)?.id ?? "all";

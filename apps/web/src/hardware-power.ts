@@ -39,12 +39,12 @@ export const POWER_SERIES: {
   /** 颜色之外再用线型区分三条序列。 */
   dash: string;
 }[] = [
-  { key: "cpu", label: "CPU", color: "var(--chart-blue)", dash: "none" },
-  { key: "gpu", label: "GPU", color: "var(--chart-violet)", dash: "6 4" },
+  { key: "cpu", label: "CPU", color: "var(--color-input)", dash: "none" },
+  { key: "gpu", label: "GPU", color: "var(--color-output)", dash: "6 4" },
   {
     key: "machine",
     label: "整机",
-    color: "var(--chart-cyan)",
+    color: "var(--accent-primary)",
     dash: "14 4 2 4",
   },
 ];

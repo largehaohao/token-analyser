@@ -76,9 +76,27 @@ export function ContextProfileCard({ profile, open, onOpen }: Props) {
     onOpen(open === id ? null : id);
   }
 
+  const totalChars = (profile.tools.chars ?? 0) + (profile.skills.chars ?? 0);
+  const topPills = [
+    ...profile.tools.items.slice(0, 6),
+    ...profile.skills.items.slice(0, 4),
+  ];
+
   return (
     <Panel role="region" className="chart-card context-card" data-testid="context-card">
-      <h3>上下文组成</h3>
+      <div className="context-card-head">
+        <h3>工具与技能上下文</h3>
+        <span className="context-card-total mono">{formatCompactTokens(totalChars)} chars</span>
+      </div>
+      {topPills.length > 0 && (
+        <div className="context-pill-cloud" aria-hidden="true">
+          {topPills.map((item) => (
+            <span key={`${item.name}-${item.source ?? ""}`} className="context-mini-pill mono">
+              {item.name} · {formatCompactTokens(item.chars)}
+            </span>
+          ))}
+        </div>
+      )}
       <p className="chart-desc">
         点击工具或技能，查看注入上下文由哪些条目组成。长度为字符数，不是账单
         token。

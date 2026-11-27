@@ -158,7 +158,9 @@ function ancestorIds(root: TreeNode, id: string): string[] {
 
 export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
   const [showEmpty, setShowEmpty] = useState(false);
-  const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [openIds, setOpenIds] = useState<ReadonlySet<string>>(
+    () => new Set([tree.id]),
+  );
 
   useEffect(() => {
     if (!selectedNodeId) return;
@@ -181,37 +183,53 @@ export function CostTree({ tree, selectedNodeId, onSelect }: Props) {
     });
   }
 
-  function hasEmptyBranches(node: TreeNode): boolean {
-    return node.children.some(
-      (child) => child.cost.raw === 0 || hasEmptyBranches(child),
-    );
+  function countEmptyBranches(node: TreeNode): number {
+    let count = 0;
+    for (const child of node.children) {
+      if (child.cost.raw === 0 && !child.cost.unmeasured) count += 1;
+      count += countEmptyBranches(child);
+    }
+    return count;
   }
+
+  const emptyBranchCount = countEmptyBranches(tree);
 
   return (
     <Panel className="cost-tree chart-card">
-      <h3>成本树</h3>
-      <TreeRow
-        node={tree}
-        prefix=""
-        isLast
-        depth={0}
-        selectedNodeId={selectedNodeId}
-        displayPercent={100}
-        showEmpty={showEmpty}
-        open={openIds.has(tree.id)}
-        isOpen={(id) => openIds.has(id)}
-        onToggle={toggle}
-        onSelect={onSelect}
-      />
-      {hasEmptyBranches(tree) && (
-        <BareButton
-          type="button"
-          className="secondary-action tree-empty-toggle"
-          aria-pressed={showEmpty}
-          onClick={() => setShowEmpty((current) => !current)}
-        >
-          {showEmpty ? "隐藏零用量分类" : "显示零用量分类"}
-        </BareButton>
+      <div className="cost-tree-head">
+        <h3>费用树</h3>
+        <span className="cost-tree-pill">按行为归类</span>
+      </div>
+      <div className="cost-tree-rows">
+        <TreeRow
+          node={tree}
+          prefix=""
+          isLast
+          depth={0}
+          selectedNodeId={selectedNodeId}
+          displayPercent={100}
+          showEmpty={showEmpty}
+          open={openIds.has(tree.id)}
+          isOpen={(id) => openIds.has(id)}
+          onToggle={toggle}
+          onSelect={onSelect}
+        />
+      </div>
+      {emptyBranchCount > 0 && (
+        <div className="cost-tree-foot">
+          <span className="cost-tree-empty-note">
+            {showEmpty ? `已展开全部 ${emptyBranchCount} 项零用量分类` : `已隐藏 ${emptyBranchCount} 项零用量分类`}
+          </span>
+          <BareButton
+            type="button"
+            className="secondary-action tree-empty-toggle"
+            aria-pressed={showEmpty}
+            aria-label={showEmpty ? "隐藏零用量分类" : "显示零用量分类"}
+            onClick={() => setShowEmpty((current) => !current)}
+          >
+            {showEmpty ? "隐藏空项" : "显示空项"}
+          </BareButton>
+        </div>
       )}
     </Panel>
   );

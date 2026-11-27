@@ -8,24 +8,40 @@ import {
   type ReactNode,
 } from "react";
 import {
+  ActivityIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
+  ArrowUpRightIcon,
+  BarChart3Icon,
+  CheckCircle2Icon,
   CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   ClockIcon,
+  CopyIcon,
+  CpuIcon,
   FilterIcon,
+  FolderIcon,
   GaugeIcon,
   InfoIcon,
   LayersIcon,
   LayoutGridIcon,
   MoonIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
   PanelsTopLeftIcon,
   RefreshCwIcon,
   SearchIcon,
+  ServerIcon,
   ShieldCheckIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
   SunIcon,
+  ThermometerIcon,
+  Trash2Icon,
   TriangleAlertIcon,
   UploadIcon,
+  WrenchIcon,
   XIcon,
   ZapIcon,
   type LucideIcon,
@@ -45,10 +61,12 @@ type IconName =
   | "close"
   | "upload"
   | "arrow"
+  | "arrowUpRight"
   | "clock"
   | "shield"
   | "warning"
   | "check"
+  | "checkCircle"
   | "refresh"
   | "chevron"
   | "info"
@@ -57,31 +75,59 @@ type IconName =
   | "layers"
   | "gauge"
   | "power"
+  | "temps"
   | "sun"
-  | "moon";
+  | "moon"
+  | "copy"
+  | "chevronDown"
+  | "sidebarCollapse"
+  | "sidebarExpand"
+  | "trash"
+  | "folder"
+  | "server"
+  | "activity"
+  | "sliders"
+  | "wrench"
+  | "sparkles"
+  | "cpu";
 
-/** shadcn ships lucide-react; the STRATA icon vocabulary maps onto it. */
+/** shadcn ships lucide-react; the Figma icon vocabulary maps onto it. */
 const ICONS: Record<IconName, LucideIcon> = {
-  overview: LayoutGridIcon,
-  sessions: PanelsTopLeftIcon,
+  overview: BarChart3Icon,
+  sessions: LayersIcon,
   search: SearchIcon,
   close: XIcon,
   upload: UploadIcon,
   arrow: ArrowRightIcon,
+  arrowUpRight: ArrowUpRightIcon,
   clock: ClockIcon,
   shield: ShieldCheckIcon,
   warning: TriangleAlertIcon,
   check: CheckIcon,
+  checkCircle: CheckCircle2Icon,
   refresh: RefreshCwIcon,
   chevron: ChevronRightIcon,
   info: InfoIcon,
   filter: FilterIcon,
   back: ArrowLeftIcon,
-  layers: LayersIcon,
+  layers: PanelsTopLeftIcon,
   gauge: GaugeIcon,
   power: ZapIcon,
+  temps: ThermometerIcon,
   sun: SunIcon,
   moon: MoonIcon,
+  copy: CopyIcon,
+  chevronDown: ChevronDownIcon,
+  sidebarCollapse: PanelLeftCloseIcon,
+  sidebarExpand: PanelLeftOpenIcon,
+  trash: Trash2Icon,
+  folder: FolderIcon,
+  server: ServerIcon,
+  activity: ActivityIcon,
+  sliders: SlidersHorizontalIcon,
+  wrench: WrenchIcon,
+  sparkles: SparklesIcon,
+  cpu: CpuIcon,
 };
 
 export function Icon({
@@ -106,17 +152,16 @@ export function LedgerMark() {
   return (
     <svg
       className="ledger-mark"
-      width="36"
-      height="36"
-      viewBox="0 0 36 36"
+      viewBox="0 0 18 18"
+      fill="none"
       aria-hidden="true"
     >
       <path
-        d="M9 10v16M15 16v10M21 7v19M27 13v13"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3"
+        d="M3 12.2 6.8 5.2l3.8 7.6L15 5.8"
+        stroke="#ffffff"
+        strokeWidth="2.1"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
@@ -354,9 +399,9 @@ export function StatePanel({
         {compact ? (
           <h3 className="state-title">{title}</h3>
         ) : (
-          <h1 className="state-title" tabIndex={-1}>
+          <h2 className="state-title" tabIndex={-1}>
             {title}
-          </h1>
+          </h2>
         )}
         {description && <p className="state-description">{description}</p>}
       </div>
@@ -466,7 +511,7 @@ export function SearchField({
           }
         }}
       />
-      {draft && (
+      {draft ? (
         <Button
           emphasis="ghost"
           className="search-clear"
@@ -475,6 +520,8 @@ export function SearchField({
         >
           <Icon name="close" />
         </Button>
+      ) : (
+        <kbd className="search-kbd" aria-hidden="true">⌘K</kbd>
       )}
     </form>
   );

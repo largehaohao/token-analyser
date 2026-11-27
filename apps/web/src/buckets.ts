@@ -11,14 +11,14 @@ export type SliceKey =
   | "other";
 
 export const SLICE_META: Record<SliceKey, { label: string; color: string }> = {
-  planning: { label: "规划与思考", color: "var(--chart-blue)" },
-  reading: { label: "读取与搜索", color: "var(--chart-cyan)" },
-  verification: { label: "测试与验证", color: "var(--warn)" },
+  planning: { label: "规划与思考", color: "var(--chart-indigo)" },
+  reading: { label: "读取与搜索", color: "var(--chart-blue)" },
+  verification: { label: "测试与验证", color: "var(--chart-cyan)" },
   code: { label: "代码与执行", color: "var(--accent)" },
   reread: { label: "重复读取", color: "var(--chart-orange)" },
   tooling: { label: "工具与环境", color: "var(--chart-neutral)" },
   communication: { label: "消息沟通", color: "var(--chart-pink)" },
-  subagents: { label: "子 Agent", color: "var(--chart-violet)" },
+  subagents: { label: "子 Agent", color: "var(--chart-pink)" },
   waiting: { label: "等待 / 轮询", color: "var(--chart-wait)" },
   other: { label: "其他 / 未知", color: "var(--chart-rose)" },
 };

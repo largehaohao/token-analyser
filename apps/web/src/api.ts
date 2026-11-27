@@ -719,6 +719,19 @@ export async function patchToggles(
   }
 }
 
+export async function deleteSession(id: string): Promise<void> {
+  const query = environmentQuery(new URLSearchParams()).toString();
+  try {
+    await requestJson<{ deleted: boolean; id: string }>(
+      `/sessions/${encodeURIComponent(id)}${query ? `?${query}` : ""}`,
+      { method: "DELETE" },
+      environmentTimeout(20_000),
+    );
+  } catch (error) {
+    rethrowEnvironment(error);
+  }
+}
+
 export async function importNdjson(
   filename: string,
   text: string,

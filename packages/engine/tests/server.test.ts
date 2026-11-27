@@ -1,5 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
 import {
+  existsSync,
   readFileSync,
   readdirSync,
   mkdirSync,
@@ -863,6 +864,39 @@ describe("startServer", () => {
     } finally {
       if (previousPreview === undefined) delete process.env.ENABLE_POWER_PREVIEW;
       else process.env.ENABLE_POWER_PREVIEW = previousPreview;
+      await server.close();
+    }
+  });
+
+  it("deletes sessions via DELETE /sessions/:id, persists exclusion across restart, and preserves external logs", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "server-delete-"));
+    process.env.TOKEN_ANALYSER_HOME = dir;
+    homes.push(dir);
+    const store = new SessionStore({ cacheDir: path.join(dir, "cache") });
+    const logPath = seedStore(store, dir);
+    const server = await startServer({ port: 0, store });
+    try {
+      const missing = await fetch(`${server.url}/sessions/does-not-exist`, {
+        method: "DELETE",
+      });
+      expect(missing.status).toBe(404);
+
+      const del = await fetch(`${server.url}/sessions/s1`, {
+        method: "DELETE",
+      });
+      expect(del.status).toBe(200);
+      expect(await del.json()).toEqual({ deleted: true, id: "s1" });
+      expect(store.list()).toEqual([]);
+      expect(existsSync(logPath)).toBe(true);
+
+      store.refresh([logPath]);
+      expect(store.list()).toEqual([]);
+
+      const reopened = new SessionStore({ cacheDir: path.join(dir, "cache") });
+      reopened.loadDump();
+      reopened.refresh([logPath]);
+      expect(reopened.list()).toEqual([]);
+    } finally {
       await server.close();
     }
   });

@@ -31,8 +31,8 @@
   --color-popover: var(--bg-raised);
   --color-popover-foreground: var(--text);
 
-  --color-primary: var(--accent);
-  --color-primary-foreground: var(--accent-ink);
+  --color-primary: var(--btn-primary-bg, var(--accent));
+  --color-primary-foreground: var(--btn-primary-fg, var(--accent-ink));
 
   --color-secondary: var(--bg-inset);
   --color-secondary-foreground: var(--text);

@@ -162,7 +162,7 @@ function windowBounds(params: URLSearchParams): { sinceMs?: number; untilMs?: nu
 function corsHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": CORS_ORIGIN,
-    "Access-Control-Allow-Methods": "GET,PATCH,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,PATCH,POST,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Filename",
     ...extra,
   };
@@ -412,7 +412,7 @@ async function handleImport(
     const dest = uniqueImportPath(importsDir, filename);
     writeFileSync(dest, body, { mode: 0o600 });
 
-    const id = await withPricingLock(() => Promise.resolve(store.ingestPath(dest, { skipExisting: true, finalized: true })));
+    const id = await withPricingLock(() => Promise.resolve(store.ingestPath(dest, { skipExisting: true, finalized: true, allowExcludedReimport: true })));
     if (!id) {
       removeFailedImport(dest);
       sendJson(res, 500, { error: "ingest_failed" });
@@ -446,7 +446,7 @@ async function handleImport(
       return;
     }
 
-    const id = await withPricingLock(() => Promise.resolve(store.ingestPath(resolved.path)));
+    const id = await withPricingLock(() => Promise.resolve(store.ingestPath(resolved.path, { allowExcludedReimport: true })));
     if (!id) {
       sendJson(res, 500, { error: "ingest_failed" });
       return;
@@ -504,7 +504,7 @@ async function handleImport(
     const dest = uniqueImportPath(importsDir, filename);
     writeFileSync(dest, fileData, { encoding: "binary", mode: 0o600 });
 
-    const id = await withPricingLock(() => Promise.resolve(store.ingestPath(dest, { skipExisting: true, finalized: true })));
+    const id = await withPricingLock(() => Promise.resolve(store.ingestPath(dest, { skipExisting: true, finalized: true, allowExcludedReimport: true })));
     if (!id) {
       removeFailedImport(dest);
       sendJson(res, 500, { error: "ingest_failed" });
@@ -1116,6 +1116,18 @@ export async function startServer(opts?: {
         return;
       }
       sendJson(res, 200, snap);
+      return;
+    }
+
+    if (req.method === "DELETE" && parts[0] === "sessions" && parts.length === 2) {
+      const id = parts[1]!;
+      const active = await resolveSessionStore(req.url);
+      if (!active.removeSession(id)) {
+        sendJson(res, 404, { error: "not_found" });
+        return;
+      }
+      broadcast("session_updated", { id: "*" });
+      sendJson(res, 200, { deleted: true, id });
       return;
     }
 

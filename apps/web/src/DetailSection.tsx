@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Icon } from "./ui";
 
 type Props = {
   title: string;
@@ -6,6 +7,8 @@ type Props = {
   children: ReactNode;
   open?: boolean;
   onToggle?: (open: boolean) => void;
+  icon?: "sliders" | "shield";
+  iconTone?: "brand" | "emerald";
 };
 
 export function DetailSection({
@@ -14,6 +17,8 @@ export function DetailSection({
   children,
   open,
   onToggle,
+  icon,
+  iconTone = "brand",
 }: Props) {
   return (
     <details
@@ -25,13 +30,18 @@ export function DetailSection({
     >
       <summary>
         <span className="detail-section-heading">
+          {icon && (
+            <span className={`detail-section-icon is-${iconTone}`} aria-hidden="true">
+              <Icon name={icon} />
+            </span>
+          )}
           <span className="detail-section-title">{title}</span>
           <span className="detail-section-description">{description}</span>
         </span>
         <span className="detail-section-action" aria-hidden="true">
-          <span className="detail-section-expand">展开</span>
-          <span className="detail-section-collapse">收起</span>
-          <span className="detail-section-chevron">⌄</span>
+          <span className="detail-section-chevron">
+            <Icon name="chevron" />
+          </span>
         </span>
       </summary>
       <div className="detail-section-body">{children}</div>

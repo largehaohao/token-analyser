@@ -3,29 +3,29 @@ version: alpha
 name: Token Analyser
 description: A local ledger for tracing Codex usage from totals to individual model calls.
 colors:
-  primary: "#1c7564"
-  background: "#f6f7f9"
+  primary: "#0d9488"
+  background: "#f8fafc"
   surface: "#ffffff"
-  inset: "#eef1f5"
-  border: "#e5e9ef"
-  text: "#19212d"
-  muted: "#545f6d"
-  warning: "#955d00"
-  danger: "#bd3744"
+  inset: "#f1f5f9"
+  border: "#e6edf3"
+  text: "#0f172a"
+  muted: "#64748b"
+  warning: "#b45309"
+  danger: "#dc2626"
 typography:
   body:
-    fontFamily: '"Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif'
-    fontSize: "14px"
-    lineHeight: "1.6"
+    fontFamily: '"Inter", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif'
+    fontSize: "15px"
+    lineHeight: "1.55"
   display:
-    fontFamily: '"Avenir Next", "Segoe UI", "PingFang SC", system-ui, sans-serif'
+    fontFamily: '"Inter", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif'
   mono:
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
+    fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace'
 rounded:
   DEFAULT: "14px"
   control: "8px"
 spacing:
-  panel: "24px"
+  panel: "20px"
   gap: "20px"
 components:
   button-outline:

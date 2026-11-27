@@ -296,7 +296,15 @@ function colorFor(palette: ChartPalette, swatch: Swatch): string {
   return palette.violet;
 }
 
-export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; refreshKey?: number }) {
+export function SystemTemperaturePage({
+  now,
+  refreshKey = 0,
+  onTopMeta,
+}: {
+  now: number;
+  refreshKey?: number;
+  onTopMeta?: (meta: { devicePill?: string; windowPill?: string; hostPill?: string; statusText?: string }) => void;
+}) {
   const [samples, setSamples] = useState<TempSampleDto[]>([]);
   const [latest, setLatest] = useState<TempSampleDto | null>(null);
   const [link, setLink] = useState<LinkState>("unknown");
@@ -508,38 +516,36 @@ export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; re
     },
   ], [windowed, palette.blue, palette.violet]);
 
+  const hostLabel = useMemo(() => {
+    if (!sourceUrl) return undefined;
+    try {
+      return new URL(sourceUrl).hostname;
+    } catch {
+      return undefined;
+    }
+  }, [sourceUrl]);
+
+  const gpuCount = latest ? latest.gpus.length : null;
+  const devicePillText =
+    gpuCount == null ? "2 × GPU + CPU" : gpuCount === 0 ? "仅 CPU" : `${gpuCount} × GPU + CPU`;
+  const statusPillText = `${live ? "实时采样" : retained ? "已过期" : offline ? "未连接" : "读取中"} · ${
+    latest ? formatClock(latest.timestamp) : "尚未采样"
+  } · ${ageSec != null ? `${ageSec} 秒前` : "每 2 秒刷新"}`;
+
+  useEffect(() => {
+    onTopMeta?.({
+      devicePill: devicePillText,
+      hostPill: hostLabel,
+      statusText: statusPillText,
+    });
+  }, [onTopMeta, devicePillText, hostLabel, statusPillText]);
+
   return (
     <main
       className="overview temps-page"
       data-testid="temps-page"
       aria-busy={loading || undefined}
     >
-      <header className="page-heading temps-header">
-        <div className="page-heading-copy">
-          <h1 tabIndex={-1}>
-            {pageTitle(latest ? latest.gpus.length : null)}
-          </h1>
-          <p>{headline(latest)}</p>
-        </div>
-        <div className="temps-live">
-          <Badge variant="outline"
-            className={`temps-pill ${live ? "temps-pill-live" : retained ? "temps-pill-stale" : offline ? "temps-pill-offline" : "temps-pill-missing"}`}
-            data-testid="temps-pill"
-          >
-            {live ? "实时采样" : retained ? "已过期" : offline ? "未连接" : "读取中"}
-          </Badge>
-          {latest ? (
-            <time dateTime={new Date(latest.timestamp * 1000).toISOString()}>
-              {formatClock(latest.timestamp)}
-            </time>
-          ) : (
-            <span>尚未采样</span>
-          )}
-          <span className="temps-live-meta" title={sourceUrl ?? undefined}>
-            {ageSec != null ? `${ageSec} 秒前` : "每 2 秒刷新"}
-          </span>
-        </div>
-      </header>
 
       {loading && <Notice tone="info">正在读取温度…</Notice>}
       {offline && (
@@ -585,14 +591,22 @@ export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; re
               }
             />
           </span>
-          <p className="temps-guard-copy">
-            {guardMessage(guardTone, latest)}
-          </p>
+          <div className="temps-guard-text">
+            <p className="temps-guard-copy">
+              {guardMessage(guardTone, latest)}
+            </p>
+            {latest && latest.gpus.length > 0 && (
+              <p className="temps-guard-limits">
+                GPU 停机保护线：
+                {(["edge", "junction", "memory"] as const)
+                  .map((key, index) => `${GPU_SENSORS[index]!.label.split(" ")[0]} ${sensorLimit(guardGpu, key)}°C`)
+                  .join(" · ")}
+              </p>
+            )}
+          </div>
         </div>
         <div className="temps-guard-side">
-          {latest && latest.gpus.length === 0 ? null : (
-            <>
-          {tightest && (
+          {latest && latest.gpus.length === 0 ? null : tightest ? (
             <Badge variant="outline"
               className={`temps-margin-chip ${
                 tightest.margin <= 0
@@ -607,18 +621,7 @@ export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; re
                 GPU {tightest.gpuId} · {tightest.sensor} {formatTemp(tightest.value, 0)}°C
               </span>
             </Badge>
-          )}
-          <p className="temps-guard-limits">
-            <span className="temps-guard-limits-label">GPU 停机线</span>
-            {(["edge", "junction", "memory"] as const).map((key, index) => (
-              <span className="temps-guard-limit" key={key}>
-                {GPU_SENSORS[index]!.label}{" "}
-                <b>{sensorLimit(guardGpu, key)}°C</b>
-              </span>
-            ))}
-          </p>
-            </>
-          )}
+          ) : null}
         </div>
       </section>
 
@@ -626,7 +629,7 @@ export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; re
         <div className="temps-section-head">
           <h2 className="temps-section-title">实时读数</h2>
           <p className="temps-section-meta" title={sourceUrl ?? undefined}>
-            <Icon name="clock" /> Prometheus · 2s 轮询
+            <Icon name="clock" /> Prometheus · 每 2 秒自动更新
           </p>
         </div>
         <div className="temps-gpu-grid">
@@ -642,10 +645,11 @@ export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; re
         <CpuCard cpu={latest?.cpu ?? null} live={live} stale={retained} />
       </section>
 
-      <section className="temps-history" aria-label="温度历史">
-        <div className="chart-head temps-history-head">
+      <section className="cs-card temps-history" aria-label="温度历史">
+        <div className="cs-card-header temps-history-head">
           <div>
-            <h2 className="chart-title">温度历史</h2>
+            <h2 className="cs-card-title">多传感器温度历史曲线</h2>
+            <p className="cs-card-subtitle">移动指针或使用方向键查看各时刻温度读数，含停机线参考</p>
           </div>
           <div className="temps-period">
             <span className="filter-label">时间范围</span>
@@ -864,38 +868,54 @@ function CpuCard({
       aria-label="CPU 温度"
     >
       <div className="temps-cpu-id">
-        <h2>{cpu?.name ?? "CPU"}</h2>
-        <Badge variant="outline"
-          className={`temps-pill ${
-            stale
-              ? "temps-pill-stale"
-              : monitoring
-                ? "temps-pill-ok"
-                : pillClass(status)
-          }`}
-        >
-          {stale ? "数据已过期" : monitoring ? "实时监测" : statusLabel(status)}
-        </Badge>
+        <span className="temps-cpu-id-icon" aria-hidden="true">
+          <Icon name="cpu" />
+        </span>
+        <div className="temps-cpu-id-copy">
+          <div className="temps-cpu-id-title">
+            <h2>{cpu?.name ?? "CPU"}</h2>
+            <Badge variant="outline"
+              className={`temps-pill ${
+                stale
+                  ? "temps-pill-stale"
+                  : monitoring
+                    ? "temps-pill-ok"
+                    : pillClass(status)
+              }`}
+            >
+              {stale ? "数据已过期" : monitoring ? "实时监测" : statusLabel(status)}
+            </Badge>
+          </div>
+          <p className="temps-cpu-id-sub">k10temp 传感器 · 控温基准 Tctl 与 CCD 芯粒实时读数</p>
+        </div>
       </div>
       <div className="temps-cpu-grid">
         {rows.map((row) => (
-          <div key={row.key} className="temps-sensor">
-            <span className="temps-sensor-label">
-              <i
-                className={`temps-dot temps-dot-${row.swatch}`}
-                aria-hidden="true"
+          <div key={row.key} className="temps-sensor temps-cpu-sensor">
+            <div className="temps-cpu-sensor-top">
+              <span className="temps-sensor-label">
+                <i
+                  className={`temps-dot temps-dot-${row.swatch}`}
+                  aria-hidden="true"
+                />
+                {row.label}
+              </span>
+              <p
+                className="temps-sensor-value temps-sensor-value-cpu"
+                data-testid={`temps-cpu-${row.key}`}
+              >
+                {formatTemp(row.value, 1)}
+                {row.value != null && (
+                  <span className="temps-sensor-unit">°C</span>
+                )}
+              </p>
+            </div>
+            <div className="temps-cpu-sensor-track" aria-hidden="true">
+              <span
+                className={`temps-cpu-sensor-fill is-${row.swatch}`}
+                style={{ width: `${row.value != null ? Math.min(100, Math.max(0, (row.value / 95) * 100)) : 0}%` }}
               />
-              {row.label}
-            </span>
-            <p
-              className="temps-sensor-value temps-sensor-value-cpu"
-              data-testid={`temps-cpu-${row.key}`}
-            >
-              {formatTemp(row.value, 1)}
-              {row.value != null && (
-                <span className="temps-sensor-unit">°C</span>
-              )}
-            </p>
+            </div>
           </div>
         ))}
       </div>
@@ -1115,23 +1135,14 @@ function TempChart({
     <Panel role="article" className="temps-chart" aria-label={`${title} 温度曲线`}>
       <header className="temps-chart-head">
         <h3>{title}</h3>
-        <ul className="temps-legend">
-          {series.map((line) => (
-            <li key={line.label}>
-              <span className="temps-swatch" style={{ background: line.color }} />
-              {line.label}
-            </li>
-          ))}
-          {hasLimits && (
-            <li className="temps-legend-limit">
-              <span className="temps-swatch-dashed" aria-hidden="true" />
-              停机线
-            </li>
-          )}
-        </ul>
+        <span className="temps-chart-stats">
+          {hasPoint
+            ? `当前 ${valueWithUnit(primary.last)} · 峰值 ${valueWithUnit(primary.max)}`
+            : "暂无可用采样"}
+        </span>
       </header>
       <div
-        className="temps-chart-body"
+        className="temps-chart-body temps-chart-canvas-wrap"
         role="group"
         tabIndex={0}
         aria-label={`${title} 温度曲线。用左右方向键查看采样，Home 与 End 跳到两端，Escape 关闭读数。`}
@@ -1170,19 +1181,23 @@ function TempChart({
         {!hasPoint && <p className="temps-chart-empty">此范围没有采样</p>}
       </div>
       <footer className="temps-chart-foot">
-        {hasPoint ? (
-          <>
-            <span>
-              当前 <b>{valueWithUnit(primary.last)}</b>
-            </span>
-            <span>
-              峰值 <b>{valueWithUnit(primary.max)}</b>
-            </span>
-            <span>{primary.count} 个采样</span>
-          </>
-        ) : (
-          <span>暂无可用采样</span>
-        )}
+        <ul className="temps-legend">
+          {series.map((line) => (
+            <li key={line.label}>
+              <span className="temps-swatch" style={{ background: line.color }} />
+              {line.label}
+            </li>
+          ))}
+          {hasLimits && (
+            <li className="temps-legend-limit">
+              <span className="temps-swatch-dashed" aria-hidden="true" />
+              停机线
+            </li>
+          )}
+        </ul>
+        <span className="temps-chart-range">
+          {formatClock(startSec).slice(0, 5)} — {formatClock(endSec).slice(0, 5)}
+        </span>
       </footer>
       <p className="visually-hidden" role="status" aria-live="polite">
         {announcement}
@@ -1291,7 +1306,8 @@ function drawTempChart(
   ctx.textBaseline = "bottom";
   let lastLabelY = -Infinity;
   for (const label of limitLabels.sort((a, b) => a.y - b.y)) {
-    const y = Math.max(label.y - 2, lastLabelY + 11);
+    if (label.y - lastLabelY < 14) continue;
+    const y = Math.max(label.y - 2, lastLabelY + 13);
     ctx.fillStyle = label.color;
     ctx.globalAlpha = 0.9;
     ctx.fillText(label.text, cssW - CHART_PAD.r - 2, y);

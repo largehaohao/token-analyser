@@ -79,7 +79,7 @@ export function LedgerStrip({
         className="ledger-item ledger-action"
         onClick={onOpenSessions}
       >
-        <span className="ledger-label">会话 / 轮次</span>
+        <span className="ledger-label">已分析会话 / 轮次</span>
         <span className="ledger-value">
           {Math.round(animatedSessions ?? 0).toLocaleString()}
           <span className="ledger-unit">
@@ -93,7 +93,7 @@ export function LedgerStrip({
       </BareButton>
       <div className="ledger-item">
         <span className="ledger-label">缓存命中</span>
-        <span className={`ledger-value${cacheFlash ? " value-flash" : ""}`}>
+        <span className={`ledger-value is-emerald${cacheFlash ? " value-flash" : ""}`}>
           {animatedCache == null ? "—" : formatPercent(animatedCache)}
         </span>
         <span
@@ -113,7 +113,7 @@ export function LedgerStrip({
         >
           {overview.cost.raw === 0 && overview.cost.unmeasured ? "—" : formatCompactTokens(Math.round(animatedUnpriced ?? 0))}
         </span>
-        <span className="ledger-delta">
+        <span className={`ledger-delta${overview.unpricedRaw === 0 && overview.cost.raw > 0 ? " is-emerald" : ""}`}>
           {overview.unpricedRaw > 0
             ? "未计入费用"
             : overview.cost.raw > 0 ? "已全部计价" : "无用量"}
@@ -121,10 +121,13 @@ export function LedgerStrip({
       </div>
       <div className="ledger-item">
         <span className="ledger-label">疑似可优化</span>
-        <span className={`ledger-value${wasteFlash ? " value-flash" : ""}`} title={formatCostTitle(overview.waste, unit)}>
+        <span
+          className={`ledger-value${overview.waste.raw > 0 ? " is-amber" : ""}${wasteFlash ? " value-flash" : ""}`}
+          title={formatCostTitle(overview.waste, unit)}
+        >
           {formatAnimatedCost(overview.waste, unit, animatedWaste)}
         </span>
-        <span className="ledger-delta">
+        <span className={`ledger-delta${overview.waste.raw > 0 ? " is-amber" : ""}`}>
           {share(overview.waste.raw, overview.cost.raw) == null
             ? "无用量"
             : `占比 ${formatPercent(share(overview.waste.raw, overview.cost.raw)!)}`}

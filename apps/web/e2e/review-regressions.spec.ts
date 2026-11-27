@@ -35,19 +35,18 @@ async function mockOverview(page: Page, data: Overview) {
   await expect(page.getByTestId("overview-page")).toBeVisible();
 }
 
-for (const width of [1920, 1440, 1180, 960, 781, 780, 390, 320]) {
+for (const width of [1920, 1440, 1180, 1024, 1023, 780, 390, 320]) {
   test(`session list and detail remain separate before and after scrolling at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/#sessions");
-    if (width <= 780) await page.getByRole("button", { name: "展开筛选", exact: true }).click();
     await page.getByRole("button", { name: "全部", exact: true }).click();
     const sidebar = page.getByRole("complementary", { name: "会话列表", exact: true });
     const detail = page.getByRole("main", { name: "会话详情", exact: true });
     await expect(page.locator(".session-main").first()).toBeVisible();
-    if (width <= 780) await page.locator(".session-main").first().click();
+    if (width <= 1023) await page.locator(".session-main").first().click();
     await expect(page.locator(".session-view")).toBeVisible();
 
-    if (width > 780) {
+    if (width > 1023) {
       const expectSeparateColumns = async () => {
         const listBox = await sidebar.boundingBox();
         const detailBox = await detail.boundingBox();
@@ -118,7 +117,7 @@ for (const scope of ["source", "range"] as const) {
     await expect(comparison).toContainText(/持平|0\.0%/);
     try {
       if (scope === "source") {
-        await page.getByRole("combobox", { name: "会话来源", exact: true }).selectOption("pi");
+        await page.locator('.source-chip[data-source="pi"]').click();
       } else {
         await page.getByRole("button", { name: "5小时", exact: true }).click();
       }
@@ -148,6 +147,7 @@ test("sidebar sessions navigate and every turn value matches its header", async 
   } }));
   await page.reload();
   await page.getByRole("group", { name: "显示单位" }).getByRole("button", { name: "USD", exact: true }).click();
+  await page.getByRole("tab", { name: /轮次详情/ }).click();
   const table = page.locator(".turn-table");
   await expect(table.locator(".prompt-col")).toHaveText("Unique turn purpose");
   const headers = await table.locator("thead th").allTextContents();
@@ -288,7 +288,7 @@ test("session detail keeps total, input and output inside one card", async ({ pa
   );
   await page.reload();
   // 总用量、输入、输出同卡；输入含已缓存部分：600K + 150K，输出 250K，合计 1M raw。
-  await expect(page.locator(".headline-row")).toHaveCount(5);
+  await expect(page.locator(".headline-row")).toHaveCount(4);
   const totalCard = page.locator(".headline-row").first();
   await expect(totalCard).toContainText("总用量");
   await expect(totalCard.getByTestId("usage-breakdown")).toBeVisible();

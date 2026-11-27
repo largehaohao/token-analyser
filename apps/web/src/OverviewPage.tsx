@@ -53,6 +53,8 @@ type Props = {
   /** Changes when range/source/now window changes so panel model filters re-query. */
   filterScope: string;
   fetchOverviewForModel: (model: string) => Promise<Overview>;
+  priceSheetOpen?: boolean;
+  onTogglePriceSheet?: (open: boolean) => void;
 };
 
 export function OverviewPage({
@@ -71,10 +73,13 @@ export function OverviewPage({
   onDrillDay,
   filterScope,
   fetchOverviewForModel,
+  priceSheetOpen: controlledPriceSheetOpen,
+  onTogglePriceSheet: _onTogglePriceSheet,
 }: Props) {
   const { unit, setUnit } = useUnit();
   const [focusedSlice, setFocusedSlice] = useState<string | null>(null);
-  const [priceSheetOpen, setPriceSheetOpen] = useState(false);
+  const [internalPriceSheetOpen] = useState(false);
+  const priceSheetOpen = controlledPriceSheetOpen ?? internalPriceSheetOpen;
   const [priceSheetReload, setPriceSheetReload] = useState(0);
   const wasUpdatingPrices = useRef(false);
   useEffect(() => {
@@ -109,31 +114,6 @@ export function OverviewPage({
       data-testid="overview-page"
       data-focused-slice={focusedSlice ?? undefined}
     >
-      <header className="page-heading">
-        <div className="page-heading-copy">
-          <div className="heading-title-row">
-            <h1 tabIndex={-1}>成本总览</h1>
-            <Badge variant="outline" className="page-range">
-              <Icon name="clock" />
-              {rangeLabel}
-            </Badge>
-          </div>
-        </div>
-        <div className="page-heading-actions">
-          <Button
-            aria-expanded={priceSheetOpen}
-            aria-controls="price-sheet"
-            onClick={() => setPriceSheetOpen((open) => !open)}
-          >
-            <Icon name="layers" />
-            模型价格
-          </Button>
-          <Button emphasis="solid" intent="brand" onClick={onOpenSessions}>
-            查看会话 <Icon name="arrow" />
-          </Button>
-        </div>
-      </header>
-
       <PriceSheet
         open={priceSheetOpen}
         reloadKey={priceSheetReload}

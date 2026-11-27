@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const fixtureDir = fileURLToPath(new URL("../../../fixtures/native/", import.meta.url));
 
-const sources = (page: Page) => page.getByRole("combobox", { name: "会话来源", exact: true });
+const sourceRail = (page: Page) => page.getByRole("group", { name: "代理来源筛选", exact: true });
+const sourceChip = (page: Page, id: string) => page.locator(`.source-chip[data-source="${id}"]`);
 async function seedNative(page: Page) {
   for (const source of ["claude", "cursor", "pi", "dsh"]) {
     const response = await page.request.post("/import", {
@@ -19,10 +20,10 @@ async function seedNative(page: Page) {
 
 test("source selection is visible for all providers", async ({ page }) => {
   await page.goto("/#sessions");
-  const select = sources(page);
-  await expect(select).toBeVisible();
+  const rail = sourceRail(page);
+  await expect(rail).toBeVisible();
   for (const label of ["所有来源", "Codex", "Claude Code", "Cursor", "pi", "DeepSeek Harness", "OpenCode"]) {
-    await expect(select.locator("option", { hasText: label })).toHaveCount(1);
+    await expect(rail.locator(".source-chip", { hasText: label })).toHaveCount(1);
   }
 });
 
@@ -46,16 +47,17 @@ test("Claude, pi and Cursor imports show source, response, pricing basis and mis
     } else {
       await expect(page.locator(".headline-main .headline-value").first()).toHaveText("360");
     }
+    await page.getByRole("tab", { name: /轮次详情/ }).click();
     await page.locator(".turn-expand").first().click();
     await expect(page.locator(".turn-detail")).toContainText("README reviewed.");
     if (source === "claude") await expect(page.getByLabel("Token 单价")).toContainText("USD");
     if (source === "pi") await expect(page.locator(".turn-detail")).toContainText("日志费用");
     if (source === "cursor") await expect(page.locator(".turn-detail")).toContainText("用量未记录");
   }
-  await sources(page).selectOption("all");
+  await sourceChip(page, "all").click();
   await page.locator("#session-search").fill("Claude Code");
   await expect(page.locator(".session-main")).toHaveCount(1);
-  await sources(page).selectOption("cursor");
+  await sourceChip(page, "cursor").click();
   await page.reload();
   await expect(page.locator(".sess-title .badge", { hasText: "Cursor" })).toBeVisible();
 });
@@ -72,6 +74,7 @@ test("a relay model ID prices as its canonical Qwen model", async ({ page }) => 
   });
   await expect(page.locator("#import-feedback")).toContainText("已导入 qwen-relay.jsonl");
   await expect(page.locator(".session-main").first()).toContainText("swift-1.5-iq3_xxs");
+  await page.getByRole("tab", { name: /轮次详情/ }).click();
   await page.locator(".turn-expand").first().click();
   await expect(page.locator(".turn-detail").first()).toContainText("swift-1.5-iq3_xxs");
   await expect(page.getByLabel("Token 单价").first()).toContainText("USD");
@@ -110,6 +113,7 @@ test("pi times model requests and Cursor shows the context meter it records", as
   await expect(page.getByTestId("request-duration-value")).toHaveText("13.46 s");
   await expect(page.getByTestId("task-duration-value")).not.toHaveText("— s");
   await expect(page.getByTestId("performance-basis")).toContainText("解码速率");
+  await page.getByRole("tab", { name: /轮次详情/ }).click();
   const piRows = page.locator(".turn-table tbody tr");
   // The request recorded while the extension was off is the latest turn and keeps the full window.
   await expect(piRows.first().locator("td.turn-performance")).toHaveText(["—", "5.00"]);
@@ -136,9 +140,9 @@ test("every source filters the list and overview, and survives reload and browse
   await page.goto("/#sessions");
   await page.getByRole("button", { name: "全部", exact: true }).click();
   for (const [id, label] of [["codex", "Codex"], ["claude", "Claude Code"], ["cursor", "Cursor"], ["pi", "pi"], ["dsh", "DeepSeek Harness"]]) {
-    await sources(page).selectOption(id);
+    await sourceChip(page, id).click();
     await expect(page.locator(".session-main").first()).toBeVisible();
-    const badges = page.locator(".session-main .row-top .badge").filter({ hasText: new RegExp(`^${label}$`) });
+    const badges = page.locator(".session-main .session-card-top .source-pill").filter({ hasText: new RegExp(`^${label}$`) });
     await expect.poll(async () => await badges.count() === await page.locator(".session-main").count()).toBe(true);
     await expect(page.locator(".sess-title .badge", { hasText: new RegExp(`^${label}$`) })).toBeVisible();
     await page.getByRole("link", { name: "成本总览", exact: true }).click();
@@ -147,15 +151,15 @@ test("every source filters the list and overview, and survives reload and browse
     await page.getByRole("link", { name: "会话明细", exact: true }).click();
   }
   await page.getByRole("searchbox", { name: "筛选会话" }).fill("unmatched query");
-  await sources(page).selectOption("claude");
+  await sourceChip(page, "claude").click();
   await expect(page.getByRole("searchbox", { name: "筛选会话" })).toHaveValue("");
   await page.reload();
-  await expect(sources(page)).toHaveValue("claude");
+  await expect(sourceChip(page, "claude")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".sess-title .badge", { hasText: "Claude Code" })).toBeVisible();
-  await sources(page).selectOption("cursor");
+  await sourceChip(page, "cursor").click();
   await expect(page.locator(".sess-title .badge", { hasText: "Cursor" })).toBeVisible();
   await page.goBack();
-  await expect(sources(page)).toHaveValue("claude");
+  await expect(sourceChip(page, "claude")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".sess-title .badge", { hasText: "Claude Code" })).toBeVisible();
 });
 
@@ -166,12 +170,12 @@ test("historical sessions stay discoverable and missing sources explain how to i
     .map((s: object) => ({ ...s, startedAt: "2020-01-01T00:00:00Z", lastEventAt: "2020-01-01T00:00:00Z" }));
   await page.route("**/sessions", (route) => route.fulfill({ json: { sessions: historical } }));
   await page.goto("/#sessions");
-  await sources(page).selectOption("pi");
+  await sourceChip(page, "pi").click();
   await expect(page.locator(".source-range-notice")).toContainText("pi 已发现");
   await expect(page.locator(".session-main")).toHaveCount(0);
   await page.getByRole("button", { name: "查看全部时间", exact: true }).click();
   await expect(page.locator(".session-main").first()).toBeVisible();
-  await sources(page).selectOption("claude");
+  await sourceChip(page, "claude").click();
   await expect(page.locator(".session-list")).toContainText("未发现 Claude Code 会话记录");
   await expect(page.getByRole("button", { name: "选择文件", exact: true })).toBeEnabled();
 });
@@ -192,7 +196,7 @@ test("changing sources rejects late overview data for the previous source", asyn
   });
   await page.goto("/");
   await request;
-  await sources(page).selectOption("pi");
+  await sourceChip(page, "pi").click();
   await expect(page.getByRole("button", { name: /已分析会话/ })).toContainText("1");
   release();
   await expect.poll(() => fulfilled).toBe(true);
@@ -203,13 +207,12 @@ test("source controls expand and remain accessible on mobile", async ({ page }, 
   await seedNative(page);
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/#sessions");
-  await page.getByRole("button", { name: "展开筛选", exact: true }).click();
   await page.getByRole("button", { name: "全部", exact: true }).click();
-  await expect(sources(page)).toBeInViewport();
+  await expect(sourceRail(page)).toBeInViewport();
   for (const label of ["所有来源", "Codex", "Claude Code", "Cursor", "pi", "DeepSeek Harness", "OpenCode"]) {
-    await expect(sources(page).locator("option", { hasText: label })).toHaveCount(1);
+    await expect(sourceRail(page).locator(".source-chip", { hasText: label })).toHaveCount(1);
   }
-  await sources(page).selectOption("cursor");
+  await sourceChip(page, "cursor").click();
   await page.locator(".session-main").first().click();
   await expect(page.locator(".session-view")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

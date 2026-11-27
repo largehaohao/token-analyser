@@ -27,7 +27,7 @@ async function chartShowsLatest(page: Page) {
 
 test("hardware energy follows its range and price without entering token costs", async ({ page }) => {
   await page.goto("/#power");
-  await expect(page.getByRole("heading", { name: "硬件用电", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "硬件监控 · 用电", exact: true })).toBeVisible();
   const totals = page.getByRole("region", { name: "所选范围累计用电与电费", exact: true });
   // 默认电价为 0.6629 元/kWh，用电量与电费以大字号摘要展示。
   await expect(page.getByRole("spinbutton", { name: "电价（元/kWh）" })).toHaveValue("0.6629");
@@ -77,7 +77,7 @@ test("hardware energy follows its range and price without entering token costs",
   await page.getByRole("link", { name: "成本总览", exact: true }).click();
   await expect(page.getByTestId("power-page")).toHaveCount(0);
   await page.goBack();
-  await expect(page.getByRole("heading", { name: "硬件用电", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "硬件监控 · 用电", exact: true })).toBeVisible();
 });
 
 test("power trend presets share the summary window and show the latest samples", async ({ page }) => {

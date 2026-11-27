@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { Overview } from "./api";
 import { ChartTooltip, useChartTooltip } from "./ChartTooltip";
 import {
@@ -77,6 +77,17 @@ export function TrendPanel({
     retry,
   } = useModelFilteredOverview(baseOverview, filterScope, fetchOverviewForModel);
   const [mode, setMode] = useState<TrendMode>("daily");
+  const [isNarrow, setIsNarrow] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 780px)").matches,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 780px)");
+    const update = () => setIsNarrow(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
   const barTip = useChartTooltip();
   const heatTip = useChartTooltip();
   const hovered = barTip.active;
@@ -121,7 +132,8 @@ export function TrendPanel({
     <Panel role="region" className="chart-card trend-panel" data-testid="trend-chart" aria-label="每日支出趋势">
       <div className="chart-head">
         <div>
-          <h3 className="chart-title">每日支出趋势</h3>
+          <h3 className="chart-title">每日用量趋势</h3>
+          <p className="chart-subtitle">点击任意日期柱可下钻查看当日活跃会话</p>
         </div>
         <div className="chart-head-controls">
           <ModelFilterSelect
@@ -267,6 +279,19 @@ export function TrendPanel({
                         className="fill"
                         style={{ height: `${Math.max(bar.height, bar.unpriced || (value ?? 0) > 0 ? 2 : 0)}%` }}
                       >
+                        {day.cost.raw > 0 && (() => {
+                          const total = Math.max(1, day.cost.raw);
+                          const pOut = (100 * day.cost.output) / total;
+                          const pIn = (100 * day.cost.uncached_input) / total;
+                          const pCache = Math.max(0, 100 - pOut - pIn);
+                          return (
+                            <span className="trend-stack" aria-hidden="true">
+                              <span className="seg seg-output" style={{ height: `${pOut}%` }} />
+                              <span className="seg seg-input" style={{ height: `${pIn}%` }} />
+                              <span className="seg seg-cache" style={{ height: `${pCache}%` }} />
+                            </span>
+                          );
+                        })()}
                         {bar.unpriced && <span className="unp" />}
                         <span
                           className="flag"
@@ -314,30 +339,50 @@ export function TrendPanel({
                 })}
               </div>
               <div className="labels">
-                {overview.days.map((day) => (
-                  <span
-                    key={day.date}
-                    className={`tick ${
-                      shouldLabelChartDay(day.date, overview.days.map((d) => d.date))
-                        ? ""
-                        : "muted-tick"
-                    } ${day.date === today ? "today-tick" : ""}`}
-                    title={formatChartDay(day.date)}
-                  >
-                    {formatChartDay(day.date)}
-                  </span>
-                ))}
+                {overview.days.map((day, index) => {
+                  const dates = overview.days.map((d) => d.date);
+                  const count = dates.length;
+                  const mobileLabeled =
+                    count <= 6 ||
+                    index === 0 ||
+                    index === count - 1 ||
+                    (index >= 4 &&
+                      index <= count - 5 &&
+                      index % Math.max(4, Math.ceil(count / 4)) === 0);
+                  const labeled = isNarrow
+                    ? mobileLabeled
+                    : shouldLabelChartDay(day.date, dates);
+                  return (
+                    <span
+                      key={day.date}
+                      className={`tick ${labeled ? "" : "muted-tick"} ${
+                        day.date === today ? "today-tick" : ""
+                      }`}
+                      title={formatChartDay(day.date)}
+                    >
+                      {formatChartDay(day.date)}
+                    </span>
+                  );
+                })}
               </div>
             </div>
           </div>
           <div className="chart-legend">
             <span>
-              <i className="pt" style={{ background: "var(--chart-cyan)" }} />
-              已记录用量
+              <i className="pt" style={{ background: "var(--color-cache)" }} />
+              已缓存
+            </span>
+            <span>
+              <i className="pt" style={{ background: "var(--color-input)" }} />
+              未缓存
+            </span>
+            <span>
+              <i className="pt" style={{ background: "var(--color-output)" }} />
+              输出
             </span>
             {overview.days.some((day) => (flaggedValue(day, metric) ?? 0) > 0) && (
               <span>
-                <i className="pt" style={{ background: "var(--chart-orange)" }} />
+                <i className="pt" style={{ background: "var(--color-warn-bar)" }} />
                 账本 / 解析异常
               </span>
             )}

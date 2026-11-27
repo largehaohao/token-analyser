@@ -76,18 +76,18 @@ export function CompositionPanel({
       key: "input",
       label: "输入 Token",
       value: input,
-      fill: "var(--chart-blue)",
+      fill: "var(--color-input)",
       sub: `已缓存 ${formatCompactTokens(cost.cached_input)}${
         hit == null ? "" : `（${formatPercent(100 * hit)}）`
       }`,
       subWidth: input > 0 ? (100 * cost.cached_input) / input : 0,
-      subFill: "var(--chart-cyan)",
+      subFill: "var(--color-cache)",
     },
     {
       key: "output",
       label: "输出 Token",
       value: cost.output,
-      fill: "var(--accent)",
+      fill: "var(--color-output)",
       sub: "生成与思考输出",
       subWidth: 0,
       subFill: "transparent",
@@ -95,9 +95,9 @@ export function CompositionPanel({
   ];
 
   const parts = [
-    { key: "cached", label: "已缓存输入", value: cost.cached_input, color: "var(--chart-cyan)" },
-    { key: "input", label: "未缓存输入", value: cost.uncached_input, color: "var(--chart-blue)" },
-    { key: "output", label: "输出", value: cost.output, color: "var(--accent)" },
+    { key: "cached", label: "已缓存输入", value: cost.cached_input, color: "var(--color-cache)" },
+    { key: "input", label: "未缓存输入", value: cost.uncached_input, color: "var(--color-input)" },
+    { key: "output", label: "生成与思考输出", value: cost.output, color: "var(--color-output)" },
   ];
   const segments = donutSegments(parts);
   const donutTotal = Math.max(0, cost.raw);
@@ -186,8 +186,9 @@ export function CompositionPanel({
                 onClick={() => togglePick(part.key)}
               >
                 <i style={{ background: part.color }} />
-                <span>{part.label}</span>
+                <span className="donut-legend-label">{part.label}</span>
                 <b>{formatCompactTokens(part.value)}</b>
+                <span className="donut-legend-pct num">{total > 0 ? formatPercent(pct(part.value)) : "—"}</span>
               </button>
             ))}
           </div>
@@ -248,7 +249,7 @@ export function CompositionPanel({
       </div>
       {unpriced > 0 && (
         <p className="chart-desc">
-          含 {formatCompactTokens(unpriced)} 未定价 Token（未计入费用）。
+          其中 {formatCompactTokens(unpriced)} 未定价 Token，已包含在输入和输出中（未计入费用）。
         </p>
       )}
       {!identity.ok && (
@@ -298,7 +299,9 @@ export function BehaviorRankPanel({
       <div className="chart-head">
         <div>
           <h2 className="chart-title">行为排行</h2>
+          <p className="chart-subtitle">按窗口内轮次归类，点击右侧可直接下钻筛选对应会话</p>
         </div>
+        <span className="rank-total-turns mono">共 {overview.turnCount.toLocaleString("en-US")} 轮</span>
       </div>
       {rows.length === 0 ? (
         <p className="empty-copy">该时间范围内没有可分类的用量。</p>
@@ -307,7 +310,7 @@ export function BehaviorRankPanel({
           <div className="rank-list">
             {rows.map((row, index) => (
               <div
-                className={`rank-row${focusedSlice === row.key ? " focused" : ""}`}
+                className={`rank-row${row.key === "reread" ? " is-reread" : ""}${focusedSlice === row.key ? " focused" : ""}`}
                 key={row.key}
                 onMouseEnter={() => onFocusSlice(row.key)}
                 onMouseLeave={() => onFocusSlice(null)}
@@ -316,7 +319,9 @@ export function BehaviorRankPanel({
                 <span className="sw" style={{ background: row.color }} />
                 <div className="rank-main">
                   <div className="rank-top">
-                    <span className="rank-name">{row.label}</span>
+                    <span className="rank-name">
+                      {row.key === "reread" ? "重复读取（可优化）" : row.label}
+                    </span>
                     <span
                       className="rank-val num"
                       title={`${row.label}：${formatExactTokens(row.raw)} tokens · ${formatCost(

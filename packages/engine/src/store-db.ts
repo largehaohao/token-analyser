@@ -89,6 +89,10 @@ function openDb(home?: string): DatabaseSync {
     CREATE TABLE IF NOT EXISTS linked_imports (
       path TEXT PRIMARY KEY
     );
+    CREATE TABLE IF NOT EXISTS excluded_sessions (
+      session_id TEXT PRIMARY KEY,
+      excluded_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS file_cache (
       cache_key TEXT PRIMARY KEY,
       version INTEGER NOT NULL,
@@ -388,6 +392,37 @@ export function readLinkedImports(home?: string): string[] {
 
 export function registerLinkedImport(filePath: string, home?: string): void {
   openDb(home).prepare("INSERT OR IGNORE INTO linked_imports (path) VALUES (?)").run(filePath);
+}
+
+export function removeLinkedImport(filePath: string, home?: string): void {
+  if (!existsSync(storeDbPath(home))) return;
+  openDb(home).prepare("DELETE FROM linked_imports WHERE path = ?").run(filePath);
+}
+
+export function readExcludedSessionIds(home?: string): Set<string> {
+  if (!existsSync(storeDbPath(home))) return new Set();
+  try {
+    const rows = openDb(home)
+      .prepare("SELECT session_id FROM excluded_sessions")
+      .all() as { session_id: string }[];
+    return new Set(rows.map((row) => row.session_id));
+  } catch {
+    return new Set();
+  }
+}
+
+export function excludeSessionId(home: string | undefined, id: string): void {
+  openDb(home)
+    .prepare(
+      `INSERT INTO excluded_sessions(session_id, excluded_at) VALUES(?, ?)
+       ON CONFLICT(session_id) DO UPDATE SET excluded_at = excluded.excluded_at`,
+    )
+    .run(id, new Date().toISOString());
+}
+
+export function clearExcludedSessionId(home: string | undefined, id: string): void {
+  if (!existsSync(storeDbPath(home))) return;
+  openDb(home).prepare("DELETE FROM excluded_sessions WHERE session_id = ?").run(id);
 }
 
 export function readStoredToggles(

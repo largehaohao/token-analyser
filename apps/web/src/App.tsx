@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   bindSessionEnvironment,
+  deleteSession,
   getBehaviorSessions,
   getOverview,
   getSession,
@@ -31,12 +32,13 @@ import {
   type CostUnit,
 } from "./format";
 import { OverviewPage } from "./OverviewPage";
-import { HardwarePage } from "./HardwarePage";
+import { HardwarePage, type HardwareTopMeta } from "./HardwarePage";
 import { RangeSwitcher } from "./RangeSwitcher";
 import { SessionList } from "./SessionList";
 import { SourceSwitcher } from "./SourceSwitcher";
 import {
   filterSessionsBySource,
+  sourceColor,
   sourceCounts,
   sourceEmptyCopy,
   SESSION_SOURCES,
@@ -98,6 +100,16 @@ const STREAM_LABEL: Record<StreamStatus, string> = {
   error: "实时未连接",
 };
 
+const SIDEBAR_COLLAPSED_KEY = "token-analyser:sidebar-collapsed";
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function AppShell() {
   const now = useNow();
   const [initialNavigation] = useState(readSessionNavigation);
@@ -107,6 +119,7 @@ function AppShell() {
   );
   const [unit, setUnit] = useState<CostUnit>(readUnitPref);
   const [theme, setTheme] = useState<ThemePref>(readThemePref);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readSidebarCollapsed);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [previousOverview, setPreviousOverview] = useState<Overview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -150,7 +163,13 @@ function AppShell() {
   const [pricingUpdateNotice, setPricingUpdateNotice] =
     useState<PricingUpdateNotice | null>(null);
   const [updatingModelPrices, setUpdatingModelPrices] = useState(false);
+  const [priceSheetOpen, setPriceSheetOpen] = useState(false);
+  const [hardwareTopMeta, setHardwareTopMeta] = useState<HardwareTopMeta>({});
   const [refreshing, setRefreshing] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | undefined>(undefined);
+  const readonlyDialogRef = useRef<HTMLDialogElement>(null);
+  const lastDialogTriggerRef = useRef<HTMLElement | null>(null);
   const importInFlight = useRef(false);
   const importedSnapshot = useRef<SessionSnapshot | null>(null);
   const listRequest = useRef(0);
@@ -216,7 +235,7 @@ function AppShell() {
       // Context shortcuts have their own scroll/focus target in SessionView.
       if (mobileContextTarget.current) return;
       detailRef.current?.focus({ preventScroll: true });
-      detailRef.current?.scrollIntoView({ block: "start" });
+      window.scrollTo({ top: 0, behavior: "auto" });
     });
     return () => cancelAnimationFrame(frame);
   }, [view, mobileSessionPane]);
@@ -242,7 +261,8 @@ function AppShell() {
       const selector = view === "sessions" && mobileSessionPane === "list" &&
         window.matchMedia("(max-width: 780px)").matches
         ? ".session-list h2" : "h1";
-      const heading = contentRef.current?.querySelector<HTMLElement>(selector);
+      const heading = contentRef.current?.querySelector<HTMLElement>(selector)
+        ?? document.querySelector<HTMLElement>(selector);
       (heading ?? contentRef.current)?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
@@ -297,23 +317,33 @@ function AppShell() {
     return () => window.removeEventListener("popstate", restoreNavigation);
   }, [changeEnvironment]);
 
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message);
+    if (toastTimerRef.current != null) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = undefined;
+      setToastMessage(null);
+    }, 2400);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current != null) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (
-        e.isComposing ||
-        e.key.toLowerCase() !== "k" ||
-        !(e.metaKey || e.ctrlKey) ||
-        e.altKey
-      )
-        return;
+      if (e.isComposing) return;
       const target = e.target;
-      if (
+      const inEditable =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return;
-      }
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+      const isSlash = e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !inEditable;
+      const isCmdK = e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey) && !e.altKey && !inEditable;
+      if (!isSlash && !isCmdK) return;
       if (viewRef.current !== "sessions") return;
       e.preventDefault();
       setContextOpen(null);
@@ -867,6 +897,32 @@ function AppShell() {
     setMobileSessionPane("detail");
   }
 
+  async function handleDeleteSession(target: SessionListItem) {
+    try {
+      await deleteSession(target.id);
+      const remainingVisible = visibleSessions.filter((item) => item.id !== target.id);
+      setSessions((current) => current.filter((item) => item.id !== target.id));
+      if (selectedIdRef.current === target.id) {
+        const nextId = remainingVisible[0]?.id ?? null;
+        selectedIdRef.current = nextId;
+        preferredSessionIdRef.current = nextId;
+        setSelectedId(nextId);
+        setSnapshot(null);
+        setSelectedNodeId(null);
+        setContextOpen(null);
+        setSessionLoad(nextId ? { id: nextId, status: "loading" } : null);
+        if (!nextId) setMobileSessionPane("list");
+      }
+      showToast(`已移除会话：${target.nickname ?? target.id}`);
+      void Promise.allSettled([
+        refreshList(),
+        view === "overview" ? refreshOverview() : undefined,
+      ]);
+    } catch (err) {
+      showToast(errorMessage(err, "删除会话失败"));
+    }
+  }
+
   const overviewState = overviewDisplayState({
     requestedRange: `${environment}:${source}:${range}`,
     appliedRange: appliedScope,
@@ -950,7 +1006,11 @@ function AppShell() {
     });
   }
 
-  function navigate(event: React.MouseEvent<HTMLAnchorElement>, next: View) {
+  function navigate(
+    event: React.MouseEvent<HTMLAnchorElement>,
+    next: View,
+    nextHardwareTab?: HardwareTab,
+  ) {
     if (
       event.button !== 0 ||
       event.metaKey ||
@@ -960,10 +1020,10 @@ function AppShell() {
     )
       return;
     event.preventDefault();
-    if (next === view) return;
+    if (next === view && (next !== "hardware" || !nextHardwareTab || nextHardwareTab === hardwareTab)) return;
     if (next === "sessions") openSessions();
     else {
-      const tab = next === "hardware" ? hardwareTab : undefined;
+      const tab = next === "hardware" ? (nextHardwareTab ?? hardwareTab) : undefined;
       withViewTransition(() => {
         pushSessionNavigation({
           view: next,
@@ -975,9 +1035,42 @@ function AppShell() {
         });
         setDayFilter(null);
         setBehavior(null);
+        if (tab) setHardwareTab(tab);
         setView(next);
       });
     }
+  }
+
+  function openReadonlyDialog(trigger: HTMLElement) {
+    lastDialogTriggerRef.current = trigger;
+    const dialog = readonlyDialogRef.current;
+    if (dialog && typeof dialog.showModal === "function" && !dialog.open) {
+      dialog.showModal();
+    }
+  }
+
+  function closeReadonlyDialog() {
+    readonlyDialogRef.current?.close();
+  }
+
+  function toggleTheme() {
+    const next = theme === "dark" ? "light" : "dark";
+    withViewTransition(() => {
+      applyTheme(next);
+      setTheme(next);
+    });
+  }
+
+  function toggleSidebar() {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // Ignore storage errors in private browsing.
+      }
+      return next;
+    });
   }
 
   function handleHardwareTabChange(tab: HardwareTab) {
@@ -1007,9 +1100,32 @@ function AppShell() {
     document.title = `${page}${view === "overview" && overviewState === "error" ? " · 加载失败" : ""} · Token Analyser`;
   }, [view, hardwareTab, overviewState]);
 
+  const pageTitleText =
+    view === "overview"
+      ? "成本总览"
+      : view === "sessions"
+        ? "会话明细"
+        : hardwareTab === "power"
+          ? "硬件监控 · 用电"
+          : "硬件监控 · 温度";
+  const statusDotClass = (environment === "local" ? streamStatus === "error" : remoteSync?.failed)
+    ? "is-err"
+    : (environment === "local" ? streamStatus === "open" : remoteSync?.syncedAt != null)
+      ? ""
+      : "is-idle";
+  const statusText = environment === "local"
+    ? `${STREAM_LABEL[streamStatus]} · 本机只读`
+    : remoteSync?.failed
+      ? "同步中断 · 缓存数据"
+      : remoteSync?.refreshing
+        ? "正在同步镜像"
+        : remoteSync?.syncedAt != null
+          ? "远端已同步 · 只读"
+          : "正在同步远端";
+
   return (
     <UnitProvider unit={unit} setUnit={setUnit}>
-      <div className="app">
+      <div className={sidebarCollapsed ? "app-shell is-sidebar-collapsed" : "app-shell"}>
         <a
           className="skip-link"
           href="#main-content"
@@ -1021,144 +1137,293 @@ function AppShell() {
         >
           跳到主要内容
         </a>
-        <header className="app-header" data-layout="workspace">
-          <div className="header-primary">
-            <div className="brand">
+
+        <aside className="sidebar" aria-label="主导航" aria-hidden={sidebarCollapsed || undefined}>
+          <div className="brand-header">
+            <div className="brand-mark" aria-hidden="true">
               <LedgerMark />
-              <div>
-                <p className="brand-name">Token Analyser</p>
-                <p className="crumb">AI 用量工作台</p>
+            </div>
+            <div className="od-field od-fill">
+              <span className="brand-title">Token Analyser</span>
+              <span className="brand-subtitle">用量与硬件工作台</span>
+            </div>
+            <button
+              type="button"
+              className="sidebar-collapse-btn"
+              aria-label="收起侧边栏"
+              title="收起侧边栏"
+              aria-expanded={!sidebarCollapsed}
+              onClick={toggleSidebar}
+            >
+              <Icon name="sidebarCollapse" />
+            </button>
+          </div>
+
+          <nav className="sidebar-nav" aria-label="视图">
+            <div className="nav-group-label">用量分析</div>
+            <a
+              href="#sessions"
+              aria-label="会话明细"
+              className={`nav-item${view === "sessions" ? " is-active" : ""}`}
+              aria-current={view === "sessions" ? "page" : undefined}
+              onClick={(event) => navigate(event, "sessions")}
+            >
+              <Icon name="sessions" />
+              <span>会话明细</span>
+              <span className="nav-badge" aria-hidden="true">{sessions.length}</span>
+            </a>
+            <a
+              href="#overview"
+              className={`nav-item${view === "overview" ? " is-active" : ""}`}
+              aria-current={view === "overview" ? "page" : undefined}
+              onClick={(event) => navigate(event, "overview")}
+            >
+              <Icon name="overview" />
+              <span>成本总览</span>
+            </a>
+
+            <div className="nav-group-label">硬件监控</div>
+            <a
+              href="#hardware/temps"
+              className={`nav-item${view === "hardware" && hardwareTab === "temps" ? " is-active" : ""}`}
+              aria-current={view === "hardware" && hardwareTab === "temps" ? "page" : undefined}
+              onClick={(event) => navigate(event, "hardware", "temps")}
+            >
+              <Icon name="temps" />
+              <span>温度监控</span>
+            </a>
+            <a
+              href="#hardware/power"
+              className={`nav-item${view === "hardware" && hardwareTab === "power" ? " is-active" : ""}`}
+              aria-current={view === "hardware" && hardwareTab === "power" ? "page" : undefined}
+              onClick={(event) => navigate(event, "hardware", "power")}
+            >
+              <Icon name="power" />
+              <span>用电监控</span>
+            </a>
+          </nav>
+
+          <div className="sidebar-dock">
+            <EnvironmentSwitcher
+              environment={environment}
+              onChange={handleEnvironmentChange}
+            />
+            <div className="dock-actions">
+              <button
+                type="button"
+                className="theme-toggle theme-toggle-btn"
+                aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+                title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+                onClick={toggleTheme}
+              >
+                <Icon name={theme === "dark" ? "sun" : "moon"} className={theme === "dark" ? "is-sun" : ""} />
+                <span>{theme === "dark" ? "浅色" : "深色"}</span>
+              </button>
+              <button
+                type="button"
+                className="theme-toggle-btn dock-refresh-btn"
+                aria-label="刷新"
+                title="刷新数据"
+                disabled={refreshing}
+                onClick={refreshAll}
+              >
+                <Icon name="refresh" className={refreshing ? "spinner" : ""} />
+                <span>刷新</span>
+              </button>
+            </div>
+            <button
+              type="button"
+              className="readonly-status-btn"
+              onClick={(event) => openReadonlyDialog(event.currentTarget)}
+            >
+              <span className={`status-dot ${statusDotClass}`} aria-hidden="true" />
+              <span className="od-truncate">
+                {view === "hardware"
+                  ? hardwareTab === "temps"
+                    ? "Prometheus · 2s 轮询"
+                    : "Prometheus · 实时功率"
+                  : statusText}
+              </span>
+              <span className="readonly-status-trailing" aria-hidden="true">
+                <Icon name={view === "hardware" ? (hardwareTab === "temps" ? "activity" : "power") : "info"} />
+              </span>
+            </button>
+          </div>
+        </aside>
+
+        <div className="main-column">
+          <header className="topbar app-header">
+            <div className="topbar-row">
+              <div className="topbar-title-wrap">
+                {sidebarCollapsed && (
+                  <button
+                    type="button"
+                    className="btn btn-sm sidebar-expand-btn"
+                    aria-label="展开侧边栏"
+                    title="展开侧边栏"
+                    aria-expanded={!sidebarCollapsed}
+                    onClick={toggleSidebar}
+                  >
+                    <Icon name="sidebarExpand" />
+                  </button>
+                )}
+                <span className="mobile-brand-dot" aria-hidden="true">
+                  <LedgerMark />
+                </span>
+                <h1 className="page-title" tabIndex={-1}>{pageTitleText}</h1>
+                {view === "overview" && (
+                  <span className="page-meta-pill">
+                    <Icon name="clock" />
+                    <span>{range === "all" ? "全部时间" : `近 ${rangeLabel}`}</span>
+                  </span>
+                )}
+                {view === "hardware" && hardwareTab === "temps" && (
+                  <span className="page-meta-pill">
+                    {hardwareTopMeta.devicePill ?? "2 × GPU + CPU"}
+                  </span>
+                )}
+                {view === "hardware" && hardwareTab === "power" && (
+                  <span className="page-meta-pill mono">
+                    {hardwareTopMeta.windowPill ?? "近 24 小时"}
+                  </span>
+                )}
+                <span className={`page-meta-pill mono${view === "overview" || view === "hardware" ? " is-brand" : ""}`}>
+                  <span className="meta-pill-dot" aria-hidden="true" />
+                  {view === "hardware"
+                    ? (hardwareTopMeta.hostPill ?? (environment === "local" ? "本机节点" : environmentLabel(environment)))
+                    : view === "sessions" && theme === "dark"
+                      ? `深色主题 · ${environment === "local" ? "本机节点" : environmentLabel(environment)}`
+                      : environment === "local"
+                        ? "本机节点"
+                        : environmentLabel(environment)}
+                </span>
+              </div>
+
+              <div className="mobile-utility-controls">
+                <EnvironmentSwitcher
+                  id="mobile-env-select"
+                  compact
+                  environment={environment}
+                  onChange={handleEnvironmentChange}
+                />
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+                  onClick={toggleTheme}
+                >
+                  <Icon name={theme === "dark" ? "sun" : "moon"} />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  aria-label="刷新"
+                  disabled={refreshing}
+                  onClick={refreshAll}
+                >
+                  <Icon name="refresh" />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  aria-label="本机只读与数据说明"
+                  onClick={(event) => openReadonlyDialog(event.currentTarget)}
+                >
+                  <Icon name="info" />
+                </button>
+              </div>
+
+              <div className="topbar-controls">
+                {view !== "hardware" ? (
+                  <div className="od-cluster topbar-actions-group" style={{ "--od-gap": "10px" } as React.CSSProperties}>
+                    <RangeSwitcher
+                      range={range}
+                      onChange={(next) => {
+                        setDayFilter(null);
+                        setBehavior(null);
+                        setRange(next);
+                      }}
+                    />
+                    <UnitSwitcher />
+                    {view === "overview" && (
+                      <>
+                        <Button
+                          className="topbar-outline-btn"
+                          aria-expanded={priceSheetOpen}
+                          aria-controls="price-sheet"
+                          onClick={() => setPriceSheetOpen((open) => !open)}
+                        >
+                          <Icon name="layers" />
+                          模型价格
+                        </Button>
+                        <Button
+                          emphasis="solid"
+                          intent="brand"
+                          className="topbar-cta-btn"
+                          onClick={() => openSessions()}
+                        >
+                          <span>查看会话</span>
+                          <Icon name="arrowUpRight" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="od-cluster topbar-actions-group" style={{ "--od-gap": "12px" } as React.CSSProperties}>
+                    <div className="hardware-live-pill" role="status">
+                      <span className="status-dot" aria-hidden="true" />
+                      <span>
+                        {hardwareTab === "temps"
+                          ? (hardwareTopMeta.statusText ?? "实时采样 · 2s 轮询")
+                          : (hardwareTopMeta.statusText ?? "Prometheus 已接入 · 电费不计入 Token 成本")}
+                      </span>
+                    </div>
+                    <nav className="segmented-control hardware-tab-switch" role="tablist" aria-label="硬件监控视图">
+                      <a
+                        role="tab"
+                        href="#hardware/temps"
+                        aria-selected={hardwareTab === "temps"}
+                        className={hardwareTab === "temps" ? "active" : ""}
+                        onClick={(event) => navigate(event, "hardware", "temps")}
+                      >
+                        <Icon name="temps" />
+                        <span>温度</span>
+                      </a>
+                      <a
+                        role="tab"
+                        href="#hardware/power"
+                        aria-selected={hardwareTab === "power"}
+                        className={hardwareTab === "power" ? "active" : ""}
+                        onClick={(event) => navigate(event, "hardware", "power")}
+                      >
+                        <Icon name="power" />
+                        <span>用电</span>
+                      </a>
+                    </nav>
+                  </div>
+                )}
               </div>
             </div>
-            <nav className="nav-pills primary-nav" aria-label="视图">
-              <BareButton asChild>
-                <a
-                  href="#overview"
-                  className={view === "overview" ? "active" : ""}
-                  aria-current={view === "overview" ? "page" : undefined}
-                  onClick={(event) => navigate(event, "overview")}
-                >
-                  <Icon name="overview" />
-                  成本总览
-                </a>
-              </BareButton>
-              <BareButton asChild>
-                <a
-                  href="#sessions"
-                  className={view === "sessions" ? "active" : ""}
-                  aria-current={view === "sessions" ? "page" : undefined}
-                  onClick={(event) => navigate(event, "sessions")}
-                >
-                  <Icon name="sessions" />
-                  会话明细
-                </a>
-              </BareButton>
-              <BareButton asChild>
-                <a
-                  href={`#hardware/${hardwareTab}`}
-                  className={view === "hardware" ? "active" : ""}
-                  aria-current={view === "hardware" ? "page" : undefined}
-                  onClick={(event) => navigate(event, "hardware")}
-                >
-                  <Icon name="power" />
-                  硬件
-                </a>
-              </BareButton>
-            </nav>
-          </div>
-          <div className="header-right app-tools">
-            {showSessionData && <div className="status-pills" role="status" aria-live="polite">
-              <Badge asChild variant="outline">
-                <span>
-                  <i className={`dot ${(environment === "local" ? streamStatus === "error" : remoteSync?.failed)
-                    ? "err"
-                    : (environment === "local" ? streamStatus === "open" : remoteSync?.syncedAt != null)
-                      ? "live" : "idle"}`} />
-                  {environment === "local" ? STREAM_LABEL[streamStatus]
-                    : remoteSync?.failed ? "同步中断" : remoteSync?.refreshing ? "正在同步镜像" : remoteSync?.syncedAt != null ? "已同步" : "正在同步"}
-                </span>
-              </Badge>
-            </div>}
-            <Button
-              className="theme-toggle"
-              emphasis="ghost"
-              aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
-              title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
-              onClick={() => {
-                const next = theme === "dark" ? "light" : "dark";
-                // Apply the palette inside the transition callback so the new
-                // snapshot captures it; the effect below remains idempotent.
-                withViewTransition(() => {
-                  applyTheme(next);
-                  setTheme(next);
-                });
-              }}
-            >
-              <Icon
-                key={theme}
-                name={theme === "dark" ? "sun" : "moon"}
-                className="theme-glyph"
+
+            {view !== "hardware" && (
+              <SourceSwitcher
+                source={source}
+                counts={counts}
+                loaded={sessionsLoaded}
+                visibleCount={visibleSessions.length}
+                rangeLabel={rangeLabel}
+                onChange={handleSourceChange}
+                onShowAllTime={() => { setBehavior(null); setDayFilter(null); setRange("all"); }}
               />
-            </Button>
-            <Button
-              className="refresh-button"
-              busy={refreshing}
-              onClick={refreshAll}
-            >
-              <Icon name="refresh" /> 刷新
-            </Button>
-            <span className="local-label"><Icon name="shield" /> {environment === "local" ? "本地运行" : environmentLabel(environment)}</span>
-          </div>
-        </header>
-        {view !== "hardware" && (
-        <Button
-          className="mobile-filter-toggle"
-          emphasis="ghost"
-          aria-label={filtersOpen ? "收起筛选" : "展开筛选"}
-          aria-expanded={filtersOpen}
-          aria-controls="workspace-filters"
-          onClick={() => setFiltersOpen((open) => !open)}
+            )}
+          </header>
+
+        <div
+          ref={contentRef}
+          id="main-content"
+          className="workspace-content"
+          tabIndex={-1}
         >
-          <span className="mobile-filter-summary">
-            {environmentLabel(environment)} · {SESSION_SOURCES.find((item) => item.id === source)?.label} · {rangeLabel} · {unit === "tokens" ? "Tokens" : unit === "credits" ? "Credits" : "USD"}
-          </span>
-          <span className="mobile-filter-action">筛选 <Icon name="chevron" /></span>
-        </Button>
-        )}
-        {view !== "hardware" && (
-        <div id="workspace-filters" className="workspace-filters" data-expanded={filtersOpen}>
-        <EnvironmentSwitcher
-          environment={environment}
-          onChange={handleEnvironmentChange}
-        />
-        <SourceSwitcher
-          source={source}
-          counts={counts}
-          loaded={sessionsLoaded}
-          visibleCount={visibleSessions.length}
-          rangeLabel={rangeLabel}
-          onChange={handleSourceChange}
-          onShowAllTime={() => { setBehavior(null); setDayFilter(null); setRange("all"); }}
-        />
-          <div className="scope-controls">
-            <div className="filter-field">
-              <span className="filter-label"><Icon name="clock" /> 时间范围</span>
-              <RangeSwitcher
-                range={range}
-                onChange={(next) => {
-                  setDayFilter(null);
-                  setBehavior(null);
-                  setRange(next);
-                }}
-              />
-            </div>
-            <div className="filter-field">
-              <span className="filter-label">显示单位</span>
-              <UnitSwitcher />
-            </div>
-          </div>
-        </div>
-        )}
         {view === "overview" && importStatus && (
           <div className="app-notice">
             <Notice
@@ -1229,18 +1494,54 @@ function AppShell() {
             </Notice>
           </div>
         )}
-        <div
-          ref={contentRef}
-          id="main-content"
-          className="app-content"
-          tabIndex={-1}
-        >
+        {view === "sessions" && (dayFilter || behavior) && (
+          <div className="drill-banner" role="region" aria-label="当前下钻筛选条件">
+            <div className="drill-chips">
+              <span>已应用下钻筛选：</span>
+              {dayFilter && (
+                <span className="drill-chip">
+                  <span>日期 {dayFilter}</span>
+                  <button
+                    type="button"
+                    className="drill-chip-remove"
+                    aria-label="移除日期筛选"
+                    onClick={() => setDayFilter(null)}
+                  >
+                    <Icon name="close" />
+                  </button>
+                </span>
+              )}
+              {behavior && (
+                <span className="drill-chip">
+                  <span>行为 · {SLICE_META[behavior.key].label}</span>
+                  <button
+                    type="button"
+                    className="drill-chip-remove"
+                    aria-label="移除行为筛选"
+                    onClick={() => setBehavior(null)}
+                  >
+                    <Icon name="close" />
+                  </button>
+                </span>
+              )}
+            </div>
+            <Button
+              onClick={() => {
+                setDayFilter(null);
+                setBehavior(null);
+              }}
+            >
+              清除筛选
+            </Button>
+          </div>
+        )}
           {view === "hardware" ? (
             <HardwarePage
               tab={hardwareTab}
               onTabChange={handleHardwareTabChange}
               now={now}
               refreshKey={hardwareRefreshKey}
+              onTopMeta={setHardwareTopMeta}
             />
           ) : view === "overview" ? (
             overviewState === "ready" && overview && !(overview.indexing && overview.sessionCount === 0) ? (
@@ -1264,6 +1565,7 @@ function AppShell() {
                     <OverviewRail
                       topSessions={overview.topSessions?.[unit] ?? []}
                       rangeLabel={rangeLabel}
+                      sourceById={new Map(sessions.map((item) => [item.id, item.source]))}
                       onSelectSession={handleSelectSession}
                       onOpenSessions={openSessions}
                     />
@@ -1276,6 +1578,8 @@ function AppShell() {
                   }
                   filterScope={`${environment}:${source}:${range}:${appliedAt}`}
                   fetchOverviewForModel={fetchOverviewForModel}
+                  priceSheetOpen={priceSheetOpen}
+                  onTogglePriceSheet={setPriceSheetOpen}
                 />
 
               </div>
@@ -1337,6 +1641,8 @@ function AppShell() {
                 contextOpen={contextOpen}
                 onSelect={handleSelectSession}
                 onInspectContext={handleInspectContext}
+                onDeleteSession={(target) => void handleDeleteSession(target)}
+                onNotify={showToast}
                 onImport={handleImport}
                 importStatus={importStatus}
                 loaded={sessionsLoaded && (!behaviorScope || !!behaviorIds)}
@@ -1378,6 +1684,7 @@ function AppShell() {
                           sessionMutationRev.current += 1;
                           setSnapshot((current) => current?.id === next.id ? next : current);
                         }}
+                        onNotify={showToast}
                         contextOpen={contextOpen}
                         onContextOpen={setContextOpen}
                       />
@@ -1454,6 +1761,91 @@ function AppShell() {
           </span>
           <span>只读分析 · 不会修改原始会话记录</span>
         </footer>
+        </div>
+
+        <nav className="mobile-nav" aria-label="移动主导航">
+          <a
+            href="#sessions"
+            aria-label="会话明细"
+            className={`mobile-nav-btn${view === "sessions" ? " is-active" : ""}`}
+            aria-current={view === "sessions" ? "page" : undefined}
+            onClick={(event) => navigate(event, "sessions")}
+          >
+            <Icon name="sessions" />
+            <span>会话</span>
+          </a>
+          <a
+            href="#overview"
+            aria-label="成本总览"
+            className={`mobile-nav-btn${view === "overview" ? " is-active" : ""}`}
+            aria-current={view === "overview" ? "page" : undefined}
+            onClick={(event) => navigate(event, "overview")}
+          >
+            <Icon name="overview" />
+            <span>总览</span>
+          </a>
+          <a
+            href="#hardware/temps"
+            className={`mobile-nav-btn${view === "hardware" && hardwareTab === "temps" ? " is-active" : ""}`}
+            aria-current={view === "hardware" && hardwareTab === "temps" ? "page" : undefined}
+            onClick={(event) => navigate(event, "hardware", "temps")}
+          >
+            <Icon name="temps" />
+            <span>温度</span>
+          </a>
+          <a
+            href="#hardware/power"
+            className={`mobile-nav-btn${view === "hardware" && hardwareTab === "power" ? " is-active" : ""}`}
+            aria-current={view === "hardware" && hardwareTab === "power" ? "page" : undefined}
+            onClick={(event) => navigate(event, "hardware", "power")}
+          >
+            <Icon name="power" />
+            <span>用电</span>
+          </a>
+        </nav>
+
+        <dialog
+          ref={readonlyDialogRef}
+          className="od-dialog"
+          aria-labelledby="readonly-dialog-title"
+          onClose={() => {
+            lastDialogTriggerRef.current?.focus();
+          }}
+        >
+          <div className="dialog-head">
+            <div className="dialog-title-wrap">
+              <span className="dialog-title-icon" aria-hidden="true">
+                <Icon name="shield" />
+              </span>
+              <h2 className="cs-card-title" id="readonly-dialog-title">本机只读模式与数据说明</h2>
+            </div>
+            <button
+              type="button"
+              className="dialog-close-btn"
+              aria-label="关闭弹窗"
+              onClick={closeReadonlyDialog}
+            >
+              <Icon name="close" />
+            </button>
+          </div>
+          <div className="dialog-body">
+            <p style={{ margin: 0 }}>
+              Token Analyser 采用<strong>本机只读采集</strong>架构，仅解析各 AI 编码代理（Codex、Claude Code、Cursor、pi、DeepSeek Harness、OpenCode、Antigravity）的本地会话日志与硬件遥测快照，不向外部上传提示词或源代码。
+            </p>
+            <p style={{ margin: 0 }}>
+              当前状态：{statusText}。可在「会话明细」页直接拖入或选择本地 <code className="mono">.jsonl</code> 文件进行即时解析。
+            </p>
+          </div>
+          <div className="dialog-foot">
+            <button type="button" className="btn btn-primary dialog-confirm-btn" onClick={closeReadonlyDialog}>
+              知道了
+            </button>
+          </div>
+        </dialog>
+
+        <div className="toast-region" aria-live="polite" aria-atomic="true">
+          {toastMessage && <div className="toast">{toastMessage}</div>}
+        </div>
       </div>
     </UnitProvider>
   );
@@ -1462,61 +1854,75 @@ function AppShell() {
 function OverviewRail({
   topSessions,
   rangeLabel,
+  sourceById,
   onSelectSession,
   onOpenSessions,
 }: {
   topSessions: NonNullable<Overview["topSessions"]>["tokens"];
   rangeLabel: string;
+  sourceById?: Map<string, SessionListItem["source"]>;
   onSelectSession: (id: string) => void;
   onOpenSessions: () => void;
 }) {
   const { unit } = useUnit();
   const max = Math.max(...topSessions.map((session) => costValue(session.cost, unit) ?? 0), 0);
   return (
-    <aside className="rail overview-rail" aria-label="总览侧栏" tabIndex={-1}>
-      <Panel className="rail-panel">
-        <h2 className="rail-title">用量最高的会话</h2>
-        <p className="rail-meta">{rangeLabel} · 按 {unit === "usd" ? "USD" : unit === "credits" ? "Credits" : "Tokens"}</p>
-        {topSessions.length === 0 ? (
-          <p className="empty-copy">该范围内没有可排行的用量。</p>
-        ) : (
-          <div className="rail-ranks">
-            {topSessions.map((session, index) => (
-              <BareButton
+    <aside className="cs-card rail overview-rail" aria-label="总览侧栏" tabIndex={-1}>
+      <div className="cs-card-header">
+        <div>
+          <h2 className="cs-card-title">高用量会话排行</h2>
+          <p className="cs-card-subtitle">{rangeLabel} · 按 {unit === "usd" ? "USD" : unit === "credits" ? "Credits" : "Tokens"} 排序</p>
+        </div>
+      </div>
+      {topSessions.length === 0 ? (
+        <p className="empty-copy">该范围内没有可排行的用量。</p>
+      ) : (
+        <div className="top-sessions-list">
+          {topSessions.map((session, index) => {
+            const dotColor = sourceColor(sourceById?.get(session.id) ?? "codex");
+            return (
+              <button
                 type="button"
-                className="rail-rank"
+                className="top-session-item rail-rank"
                 key={session.id}
                 onClick={() => onSelectSession(session.id)}
                 title={`查看 ${session.nickname ?? session.id} 的费用明细`}
               >
-                <span className="rail-rank-main">
-                  <span className="rail-rank-top">
-                    <span className="rail-rank-index" aria-hidden="true">{index + 1}</span>
-                    <span className="rail-rank-name">
-                      {session.nickname ?? session.id}
+                <div className="od-row" style={{ justifyContent: "space-between", width: "100%" }}>
+                  <span className="source-pill">
+                    <span className="mono" style={{ color: "var(--text-muted)" }}>
+                      {String(index + 1).padStart(2, "0")}
                     </span>
-                    <span className="num">
-                      {unit === "tokens"
-                        ? formatCostTokens(session.cost)
-                        : formatCost(session.cost, unit)}
-                    </span>
-                  </span>
-                  <span className="rail-rank-bar">
-                    <i
-                      style={{
-                        width: `${max > 0 ? 100 * (costValue(session.cost, unit) ?? 0) / max : 0}%`,
-                      }}
+                    <span
+                      className="source-dot"
+                      style={{ background: dotColor }}
+                      aria-hidden="true"
                     />
+                    <span className="od-truncate">{session.nickname ?? session.id}</span>
                   </span>
-                </span>
-              </BareButton>
-            ))}
-          </div>
-        )}
-        <Button className="rail-more" onClick={onOpenSessions}>
-          查看全部会话 <Icon name="arrow" />
-        </Button>
-      </Panel>
+                  <strong className="mono od-nowrap" style={{ fontSize: "12px" }}>
+                    {unit === "tokens"
+                      ? formatCostTokens(session.cost)
+                      : formatCost(session.cost, unit)}
+                  </strong>
+                </div>
+                <div className="top-session-bar">
+                  <span
+                    style={{
+                      width: `${max > 0 ? Math.max(6, (100 * (costValue(session.cost, unit) ?? 0)) / max) : 0}%`,
+                      background: dotColor,
+                    }}
+                  />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <Button className="rail-more" style={{ marginTop: "12px", width: "100%" }} onClick={onOpenSessions}>
+        <span>查看全部会话</span>
+        <Icon name="chevron" />
+      </Button>
     </aside>
   );
 }

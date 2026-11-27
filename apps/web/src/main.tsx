@@ -6,6 +6,7 @@ import { applyTheme, readThemePref } from "./theme-pref";
 // on equal specificity, so existing component styling stays authoritative.
 import "./shadcn.css";
 import "./styles.css";
+import "./crisp-sky.css";
 
 // Resolve the theme before first paint so a dark preference never flashes light.
 applyTheme(readThemePref());

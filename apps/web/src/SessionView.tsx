@@ -3,10 +3,11 @@ import type { SessionSnapshot, TaskTiming, Turn } from "./api";
 import { useUnit } from "./UnitContext";
 import {
   cacheHitRatio,
-  disclaimer,
   formatCompactTokens,
   formatCostTokens,
   formatExactTokens,
+  formatPerformanceDuration,
+  formatPerformanceNumber,
   sourceLabel,
   usageNote,
   formatCost,
@@ -30,20 +31,23 @@ import { ContextMeter } from "./ContextMeter";
 import { RateLimits } from "./RateLimits";
 import { WasteToggles } from "./WasteToggles";
 import { TurnTable } from "./TurnTable";
-import { RelativeTime } from "./RelativeTime";
 import { treeAppearance } from "./buckets";
 import { DetailSection } from "./DetailSection";
-import { PerformanceMetrics } from "./PerformanceMetrics";
+import { PerformanceMetrics, resolvePerformance } from "./PerformanceMetrics";
+import { performanceCopy } from "./performance-copy";
 import { formatAnimatedCost } from "./LedgerStrip";
 import { useAnimatedNumber, useFlashOnChange } from "./motion";
 import { LegacyBadge as Badge } from "@/components/ui/legacy-badge";
-import { BareButton, Panel } from "./ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { sourceColor } from "./session-source";
+import { Icon, Panel } from "./ui";
 
 type Props = {
   snapshot: SessionSnapshot;
   selectedNodeId: string | null;
   onSelectNode: (id: string) => void;
   onUpdate: (snap: SessionSnapshot) => void;
+  onNotify?: (message: string) => void;
   contextOpen: "tools" | "skills" | null;
   onContextOpen: (id: "tools" | "skills" | null) => void;
 };
@@ -65,6 +69,7 @@ export function SessionView({
   selectedNodeId,
   onSelectNode,
   onUpdate,
+  onNotify,
   contextOpen,
   onContextOpen,
 }: Props) {
@@ -72,11 +77,13 @@ export function SessionView({
   const [highlightTurnId, setHighlightTurnId] = useState<string | null>(null);
   const [highlightNonce, setHighlightNonce] = useState(0);
   const [contextExpanded, setContextExpanded] = useState(false);
+  const [activeTab, setActiveTab] = useState<"perf" | "turns" | "tree">("perf");
   const contextRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setHighlightTurnId(null);
     setContextExpanded(false);
+    setActiveTab("perf");
   }, [snapshot.id]);
 
   useEffect(() => {
@@ -151,12 +158,25 @@ export function SessionView({
   const totalFlash = useFlashOnChange(snapshot.cost.raw);
   const wasteFlash = useFlashOnChange(snapshot.waste.raw);
 
+  const resolvedPerf = resolvePerformance(snapshot.performance, turns, taskTimings);
+  const perfCopy = performanceCopy(resolvedPerf, snapshot.source);
+  const requestDuration = formatPerformanceDuration(resolvedPerf.requestDurationMs);
+  const taskDuration = formatPerformanceDuration(resolvedPerf.taskDurationMs);
+  const resolvedTz = useMemo(() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || "Local";
+    } catch {
+      return "Local";
+    }
+  }, []);
+
   function handleSuggestionClick(ids: string[]) {
     const target = suggestionTarget(snapshot.tree, ids);
     if (!target) return;
     setHighlightTurnId(target.turnId);
     setHighlightNonce((n) => n + 1);
     onSelectNode(target.nodeId);
+    setActiveTab("turns");
   }
 
   return (
@@ -180,95 +200,123 @@ export function SessionView({
         </details>
       )}
 
-      <header className="page-heading session-page-heading sess-head">
-        <div className="page-heading-copy">
-          <div className="sess-title">
-            <Badge variant="outline" className="badge">{sourceLabel(snapshot.source)}</Badge>
-            <h1 tabIndex={-1}>{snapshot.nickname ?? "会话明细"}</h1>
-            {snapshot.live && <Badge variant="outline" className="badge live">LIVE</Badge>}
-            {snapshot.fastMode && (
-              <Badge variant="outline"
-                className="badge fast"
-                title="最新日志记录使用 Fast；展开轮次可查看该轮倍率与 token 单价"
+      <section className="detail-hero sess-head">
+        <div className="detail-hero-top">
+          <div className="od-fill sess-title">
+            <h2 className="detail-title" tabIndex={-1}>{snapshot.nickname ?? "会话明细"}</h2>
+            <div className="detail-meta-row">
+              <Badge
+                variant="outline"
+                className="badge session-source-badge"
               >
-                Fast
+                <span
+                  className="source-dot"
+                  style={{ background: sourceColor(snapshot.source ?? "codex") }}
+                  aria-hidden="true"
+                />
+                {sourceLabel(snapshot.source)}
               </Badge>
-            )}
-            {snapshot.parentId && <Badge variant="outline" className="badge child">子会话</Badge>}
+              <span className="cs-tag cs-tag--blue mono">{snapshot.model ?? "未知模型"}</span>
+              {snapshot.live && <Badge variant="outline" className="badge live">LIVE</Badge>}
+              {snapshot.fastMode && (
+                <Badge
+                  variant="outline"
+                  className="badge fast"
+                  title="最新日志记录使用 Fast；展开轮次可查看该轮倍率与 token 单价"
+                >
+                  Fast
+                </Badge>
+              )}
+              {snapshot.parentId && <Badge variant="outline" className="badge child">子会话</Badge>}
+              {snapshot.effort && <span className="cs-tag">{snapshot.effort}</span>}
+              {snapshot.cwd && (
+                <button
+                  type="button"
+                  className="session-project-path"
+                  title={`点击拷贝项目路径：${snapshot.cwd}`}
+                  onClick={() => {
+                    if (navigator.clipboard?.writeText) {
+                      void navigator.clipboard.writeText(snapshot.cwd!).catch(() => {});
+                    }
+                    onNotify?.(`已拷贝项目路径：${snapshot.cwd}`);
+                  }}
+                >
+                  <Icon name="folder" />
+                  <span className="mono session-project-value">{snapshot.cwd}</span>
+                  <Icon name="copy" className="session-project-copy" />
+                </button>
+              )}
+            </div>
           </div>
-          <p className="source-path sess-path" title={snapshot.cwd ?? undefined}>
-            {snapshot.cwd ?? "本地会话"} · {snapshot.model ?? "未知模型"}
-            {snapshot.effort ? ` · ${snapshot.effort}` : ""} · 最近活动{" "}
-            <RelativeTime iso={snapshot.lastEventAt ?? snapshot.startedAt} />
-          </p>
+          <button
+            type="button"
+            className="btn btn-sm session-reference"
+            title={snapshot.id}
+            onClick={() => {
+              if (navigator.clipboard?.writeText) {
+                void navigator.clipboard.writeText(snapshot.id).catch(() => {});
+              }
+              onNotify?.(`已复制会话 ID：${snapshot.id}`);
+            }}
+          >
+            <Icon name="copy" />
+            <span className="mono od-truncate">{snapshot.id}</span>
+          </button>
         </div>
-        <span className="session-reference" title={snapshot.id}>
-          {snapshot.id.slice(0, 8)}
-        </span>
+
         {snapshot.cost.unmeasured ? (
-          <p className="banner" role="status">
+          <p className="banner" role="status" style={{ margin: 0 }}>
             {usageNote(snapshot.cost)}对话和工具调用仍可展开查看。
           </p>
         ) : null}
         {snapshot.forkedFrom ? (
-          <p className="source-path">
+          <p className="source-path" style={{ margin: 0 }}>
             分叉自：{snapshot.forkedFrom} · 已识别的继承记录不重复计费。
           </p>
         ) : null}
 
-        <div className="session-metrics stat-row headline-main">
-          <div className="headline-row stat headline-total">
-            <div className="headline-total-main">
-              <span className="headline-label">
-                {unit === "tokens" ? "总用量" : "预估总费用"}
-              </span>
-              <span
-                className={`headline-value${totalFlash ? " value-flash" : ""}`}
-                title={formatCostTitle(snapshot.cost, unit)}
-              >
-                {unit === "tokens"
-                  ? formatCostTokens(
-                      animatedTotal == null
-                        ? snapshot.cost
-                        : { ...snapshot.cost, raw: Math.round(animatedTotal) },
-                    )
-                  : formatAnimatedCost(snapshot.cost, unit, animatedTotal)}
-              </span>
-              <small>
-                {formatUnitSuffix(unit)} · {turns.length.toLocaleString("en-US")} 轮调用
-              </small>
-            </div>
-            <div className="headline-split" data-testid="usage-breakdown">
-              <span className="headline-split-heading">输入 / 输出</span>
-              {snapshot.cost.raw > 0 && (
-                <div className="headline-split-bar" aria-hidden="true">
-                  <i
-                    className="headline-split-seg input"
-                    style={{ flex: Math.max(inputTokens, 1) }}
-                  />
-                  <i
-                    className="headline-split-seg output"
-                    style={{ flex: Math.max(outputTokens, 1) }}
-                  />
-                </div>
-              )}
-              <div className="headline-split-rows">
-                <span data-testid="input-headline" title={inputTitle}>
-                  <i className="swatch cached" aria-hidden="true" /> 输入{" "}
-                  <b>{inputDisplay}</b>
-                </span>
-                <span data-testid="output-headline" title={outputTitle}>
-                  <i className="swatch output" aria-hidden="true" /> 输出{" "}
-                  <b>{outputDisplay}</b>
-                </span>
-              </div>
-              <small>{usageDetail}</small>
-            </div>
-          </div>
-          <div className="headline-row stat">
-            <span className="headline-label">疑似可优化</span>
+        <div className="cs-kpi-grid headline-main">
+          <div className="cs-kpi-card headline-row">
+            <span className="cs-kpi-label">
+              {unit === "tokens" ? "总用量" : "预估总费用"}
+            </span>
             <span
-              className={`headline-value waste${wasteFlash ? " value-flash" : ""}`}
+              className={`cs-kpi-value headline-value${totalFlash ? " value-flash" : ""}`}
+              title={formatCostTitle(snapshot.cost, unit)}
+            >
+              {unit === "tokens"
+                ? formatCostTokens(
+                    animatedTotal == null
+                      ? snapshot.cost
+                      : { ...snapshot.cost, raw: Math.round(animatedTotal) },
+                  )
+                : formatAnimatedCost(snapshot.cost, unit, animatedTotal)}
+            </span>
+            <span className="cs-kpi-sub mono" data-testid="usage-breakdown">
+              <span data-testid="input-headline" title={inputTitle}>输入 <b>{inputDisplay}</b></span>
+              <span>·</span>
+              <span data-testid="output-headline" title={outputTitle}>输出 <b>{outputDisplay}</b></span>
+              <span className="visually-hidden"> · {usageDetail}</span>
+            </span>
+          </div>
+          <div className="cs-kpi-card headline-row">
+            <span className="cs-kpi-label">调用与定价</span>
+            <span className="cs-kpi-value">{turns.length.toLocaleString("en-US")} 轮</span>
+            <span className="cs-kpi-sub">
+              定价覆盖 {pricingCoverage} · {(snapshot.children ?? []).length > 0 ? `${(snapshot.children ?? []).length} 个子会话` : "无子 Agent"}
+            </span>
+          </div>
+          <div className="cs-kpi-card headline-row cs-kpi-card--emerald">
+            <span className="cs-kpi-label">缓存命中</span>
+            <span className="cs-kpi-value">
+              {animatedHit == null ? "—" : formatPercent(animatedHit)}
+            </span>
+            <span className="cs-kpi-sub">{usageDetail}</span>
+          </div>
+          <div className={`cs-kpi-card headline-row${snapshot.waste.raw > 0 ? " cs-kpi-card--amber" : ""}`}>
+            <span className="cs-kpi-label">疑似可优化</span>
+            <span
+              className={`cs-kpi-value headline-value waste${wasteFlash ? " value-flash" : ""}`}
               data-testid="waste-headline"
               title={formatCostTitle(snapshot.waste, unit)}
             >
@@ -280,37 +328,15 @@ export function SessionView({
                   )
                 : formatAnimatedCost(snapshot.waste, unit, animatedWaste)}
             </span>
-            <small>{formatUnitSuffix(unit)} · 占比 {unitWaste}</small>
-          </div>
-          <div className="headline-row stat">
-            <span className="headline-label">缓存命中</span>
-            <span className="headline-value">
-              {animatedHit == null ? "—" : formatPercent(animatedHit)}
-            </span>
-            <small>占输入</small>
-          </div>
-          <div className="headline-row stat">
-            <span className="headline-label">定价覆盖</span>
-            <span className="headline-value">{pricingCoverage}</span>
-            <small>{unpriced ?? "已全部计价"}</small>
-          </div>
-          <div className="headline-row stat">
-            <span className="headline-label">子会话</span>
-            <span className="headline-value">
-              {(snapshot.children ?? []).length}
-            </span>
-            <small>
-              {(snapshot.children ?? []).length > 0
-                ? "已汇总至本会话"
-                : "无子 Agent"}
-            </small>
+            <span className="cs-kpi-sub">{formatUnitSuffix(unit)} · 占比 {unitWaste}</span>
           </div>
         </div>
+
         {unpriced ? (
-          <p className="headline-note identity-warn">{unpriced}</p>
+          <p className="headline-note identity-warn" style={{ margin: 0 }}>{unpriced}</p>
         ) : null}
         {!identity.ok && (
-          <p className="headline-note identity-warn">
+          <p className="headline-note identity-warn" style={{ margin: 0 }}>
             构成合计 {identity.parts.toLocaleString("en-US")} ≠ raw{" "}
             {snapshot.cost.raw.toLocaleString("en-US")}
           </p>
@@ -334,61 +360,158 @@ export function SessionView({
             },
           ]}
         />
-        <div className="headline-legend">
-          <span className="swatch useful" /> 其余
-          <span className="swatch waste" /> 疑似可优化 {unitWaste}
-          {unit !== "tokens" && unitWaste !== tokenWaste && (
-            <span className="legend-note">token {tokenWaste}</span>
+        <div className="hero-mix-foot">
+          <div className="headline-legend">
+            <span><span className="swatch useful" /> 有效消耗 {formatPercent(Math.max(0, 100 - (snapshot.cost.raw > 0 ? (100 * snapshot.waste.raw) / snapshot.cost.raw : 0)))}</span>
+            <span><span className="swatch waste" /> 疑似可优化 {unitWaste}</span>
+            {unit !== "tokens" && unitWaste !== tokenWaste && (
+              <span className="legend-note">token {tokenWaste}</span>
+            )}
+          </div>
+          <div className="hero-perf-inline mono" aria-label="响应性能摘要">
+            <span title={perfCopy.ttftNote}>
+              TTFT <strong>{formatPerformanceNumber(resolvedPerf.avgTtftMs == null ? null : resolvedPerf.avgTtftMs / 1000)} s</strong>
+            </span>
+            <span title={perfCopy.speedNote}>
+              <strong>{formatPerformanceNumber(resolvedPerf.outputTokensPerSecond)} tok/s</strong>
+            </span>
+            <span title={perfCopy.requestDurationNote}>
+              请求 <strong>{requestDuration.value} {requestDuration.unit}</strong>
+            </span>
+            <span title={perfCopy.taskDurationNote} className="hero-perf-muted">
+              总耗时 <strong>{taskDuration.value} {taskDuration.unit}</strong>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as "perf" | "turns" | "tree")}
+        className="session-data-tabs"
+      >
+        <div className="session-tabs-bar">
+          <TabsList className="session-tabs-list" aria-label="会话数据展示">
+            <TabsTrigger value="perf" className="session-tab-trigger">
+              性能
+            </TabsTrigger>
+            <TabsTrigger value="turns" className="session-tab-trigger">
+              轮次详情 ({turnIds ? turnIds.size : turns.length})
+            </TabsTrigger>
+            <TabsTrigger value="tree" className="session-tab-trigger">
+              成本树
+            </TabsTrigger>
+          </TabsList>
+          {selectedNodeId && selectedNodeId !== snapshot.tree.id && (
+            <div className="session-tab-filter-pill">
+              <span>
+                已选节点：<strong>{selectedAppearance.label}</strong>
+              </span>
+              {activeTab === "tree" && (
+                <button
+                  type="button"
+                  className="session-tab-filter-action"
+                  onClick={() => setActiveTab("turns")}
+                >
+                  查看轮次详情
+                </button>
+              )}
+              <button
+                type="button"
+                className="session-tab-filter-action"
+                onClick={() => onSelectNode(snapshot.tree.id)}
+              >
+                清除筛选
+              </button>
+            </div>
           )}
         </div>
-      </header>
-      <PerformanceMetrics
-        performance={snapshot.performance}
-        turns={turns}
-        tasks={taskTimings}
-        source={snapshot.source}
-      />
-      <p className="disclaimer">{disclaimer(snapshot.rateCardAsOf)}</p>
 
-      <div className="session-body two">
-        <Panel className="session-left tree-panel">
-          <CostTree
-            key={snapshot.id}
-            tree={snapshot.tree}
-            selectedNodeId={selectedNodeId}
-            onSelect={onSelectNode}
+        <TabsContent value="perf" className="session-tab-panel">
+          <Panel className="chart-card perf-card session-perf-panel">
+            <div className="chart-head">
+              <div>
+                <h3 className="chart-title">响应性能与延迟分布</h3>
+                <p className="chart-subtitle">
+                  TTFT、输出速率与耗时统计，及 TTFT / 输出速率分布直方图
+                </p>
+              </div>
+            </div>
+            <PerformanceMetrics
+              performance={resolvedPerf}
+              turns={turns}
+              tasks={taskTimings}
+              source={snapshot.source}
+              alwaysShowDistributions
+            />
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="turns" className="session-tab-panel">
+          <TurnTable
+            turns={turns}
+            turnIds={turnIds}
+            highlightTurnId={highlightTurnId}
+            highlightNonce={highlightNonce}
+            resetKey={`${snapshot.id}:${selectedNodeId ?? ""}`}
+            scopeLabel={selectedAppearance.label}
+            source={snapshot.source}
           />
-        </Panel>
-        <TurnTable
-          turns={turns}
-          turnIds={turnIds}
-          highlightTurnId={highlightTurnId}
-          highlightNonce={highlightNonce}
-          resetKey={`${snapshot.id}:${selectedNodeId ?? ""}`}
-          scopeLabel={selectedAppearance.label}
-          source={snapshot.source}
-        />
-      </div>
+        </TabsContent>
+
+        <TabsContent value="tree" className="session-tab-panel">
+          <div className="session-tree-pane">
+            <CostTree
+              key={snapshot.id}
+              tree={snapshot.tree}
+              selectedNodeId={selectedNodeId}
+              onSelect={onSelectNode}
+            />
+            <div className="session-tree-actions">
+              <span className="session-tree-hint">
+                当前节点「{selectedAppearance.label}」共 {turnIds ? turnIds.size : turns.length} 轮对话
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm session-tree-jump"
+                onClick={() => setActiveTab("turns")}
+              >
+                在轮次详情中查看
+                <Icon name="arrow" />
+              </button>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+
       <div className="detail-stack">
         <DetailSection
           key={`rules-${snapshot.id}`}
+          icon="sliders"
+          iconTone="brand"
           title="优化建议与浪费规则"
           description={`${suggestions.length} 条建议 · 按需调整哪些行为计为浪费`}
         >
           <WasteToggles snapshot={snapshot} onUpdate={onUpdate} />
           {suggestions.length > 0 && (
             <Panel className="suggestions chart-card">
-              <h3>建议</h3>
               <ul>
                 {suggestions.map((s) => (
                   <li key={s.id}>
-                    <BareButton
+                    <button
                       type="button"
+                      className="suggestion-banner-btn"
                       onClick={() => handleSuggestionClick(s.turnIds)}
                     >
-                      <strong>{s.title}</strong>
-                      <span>{s.body}</span>
-                    </BareButton>
+                      <div className="suggestion-banner-copy">
+                        <strong>{s.title}</strong>
+                        <span>{s.body}</span>
+                      </div>
+                      <span className="suggestion-locate-pill">
+                        <span>定位轮次</span>
+                        <Icon name="chevron" />
+                      </span>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -397,8 +520,10 @@ export function SessionView({
         </DetailSection>
         <div ref={contextRef} className="detail-anchor">
           <DetailSection
+            icon="shield"
+            iconTone="emerald"
             title="上下文与会话信息"
-            description={`${snapshot.context?.tools.items.length ?? 0} 个工具 · ${snapshot.context?.skills.items.length ?? 0} 项技能 · 用量限额与账本校验`}
+            description={`${snapshot.context?.tools.items.length ?? 0} 个工具 · ${snapshot.context?.skills.items.length ?? 0} 项技能 · 定价覆盖 ${pricingCoverage} · 账本校验${snapshot.ledger_warning ? "需复核" : "通过"}`}
             open={contextExpanded || contextOpen != null}
             onToggle={(open) => {
               setContextExpanded(open);
@@ -406,40 +531,49 @@ export function SessionView({
             }}
           >
             <div className="context-support">
-              <ContextProfileCard
-                profile={
-                  snapshot.context ?? {
-                    tools: { chars: 0, items: [] },
-                    skills: { chars: 0, items: [] },
+              <div className="context-support-main">
+                <ContextProfileCard
+                  profile={
+                    snapshot.context ?? {
+                      tools: { chars: 0, items: [] },
+                      skills: { chars: 0, items: [] },
+                    }
                   }
-                }
-                open={contextOpen}
-                onOpen={onContextOpen}
-              />
-              {snapshot.rate_limits != null && (
-                <RateLimits raw={snapshot.rate_limits} />
-              )}
-              {snapshot.contextMeasurement != null && (
-                <ContextMeter measurement={snapshot.contextMeasurement} />
-              )}
-            </div>
-            <div className="session-audit" aria-label="当前会话数据口径">
-              <span>
-                <i className={unpriced ? "audit-dot warn" : "audit-dot good"} />
-                定价覆盖 <strong>{pricingCoverage}</strong>
-              </span>
-              <span>
-                <i
-                  className={
-                    snapshot.ledger_warning
-                      ? "audit-dot warn"
-                      : "audit-dot good"
-                  }
+                  open={contextOpen}
+                  onOpen={onContextOpen}
                 />
-                账本校验{" "}
-                <strong>{snapshot.source && snapshot.source !== "codex" ? "按原始消息用量统计" : snapshot.ledger_warning ? "需复核" : "通过"}</strong>
-              </span>
+                <div className="session-audit" aria-label="当前会话数据口径">
+                  <span>
+                    <i className={unpriced ? "audit-dot warn" : "audit-dot good"} />
+                    定价覆盖 <strong>{pricingCoverage}</strong>
+                  </span>
+                  <span>
+                    <i
+                      className={
+                        snapshot.ledger_warning
+                          ? "audit-dot warn"
+                          : "audit-dot good"
+                      }
+                    />
+                    账本校验{" "}
+                    <strong>{snapshot.source && snapshot.source !== "codex" ? "按原始消息用量统计" : snapshot.ledger_warning ? "需复核" : "通过"}</strong>
+                  </span>
+                </div>
+              </div>
+              <div className="context-support-side">
+                {snapshot.contextMeasurement != null && (
+                  <ContextMeter measurement={snapshot.contextMeasurement} />
+                )}
+                {snapshot.rate_limits != null && (
+                  <RateLimits raw={snapshot.rate_limits} />
+                )}
+                <div className="context-tz-foot">
+                  <span>本地时区归日</span>
+                  <span className="mono">{resolvedTz}</span>
+                </div>
+              </div>
             </div>
+            {snapshot.cwd && <p className="source-path">项目路径：{snapshot.cwd}</p>}
             <p className="source-path">会话 ID：{snapshot.id}</p>
           </DetailSection>
         </div>

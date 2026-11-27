@@ -164,11 +164,13 @@ export function TurnTable({
   return (
     <Panel className="turn-table-wrap chart-card">
       <div className="turn-table-head">
-        <h3>
-          轮次{scopeLabel ? ` · ${scopeLabel}` : ""} ({visible.length}
-          {filtered.length !== visible.length ? ` / ${filtered.length}` : ""})
-        </h3>
-        <TurnSparkline turns={filtered} />
+        <div className="turn-table-title-group">
+          <h3>
+            轮次明细 · {scopeLabel || "本会话"} ({visible.length}
+            {filtered.length !== visible.length ? ` / ${filtered.length}` : ""})
+          </h3>
+          <TurnSparkline turns={filtered} />
+        </div>
         {filtered.length > 0 && (
           <div className="mix-legend">
             <span className="swatch uncached" /> 未缓存
@@ -193,22 +195,22 @@ export function TurnTable({
               </caption>
               <TableHeader>
                 <TableRow>
-                  <TableHead scope="col" aria-sort="descending">
+                  <TableHead scope="col" className="col-time" aria-sort="descending">
                     时间
                   </TableHead>
-                  <TableHead scope="col">本轮目的</TableHead>
-                  <TableHead scope="col">分类</TableHead>
-                  <TableHead scope="col">工具</TableHead>
-                  <TableHead scope="col">构成</TableHead>
-                  <TableHead scope="col" className="turn-cache" title="已缓存输入 ÷ 输入">缓存</TableHead>
-                  <TableHead scope="col" className="turn-token num-col" title="输入 token，包含已缓存部分">
+                  <TableHead scope="col" className="col-prompt">本轮目的</TableHead>
+                  <TableHead scope="col" className="col-bucket">分类</TableHead>
+                  <TableHead scope="col" className="col-tools">工具</TableHead>
+                  <TableHead scope="col" className="col-mix">构成</TableHead>
+                  <TableHead scope="col" className="col-cache turn-cache" title="已缓存输入 ÷ 输入">缓存</TableHead>
+                  <TableHead scope="col" className="col-tok turn-token num-col" title="输入 token，包含已缓存部分">
                     Token 输入
                   </TableHead>
-                  <TableHead scope="col" className="turn-token num-col" title="输出 token">
+                  <TableHead scope="col" className="col-tok turn-token num-col" title="输出 token">
                     Token 输出
                   </TableHead>
-                  <TableHead scope="col" className="turn-performance num-col" title="本次请求发出到首 token 的等待时间">TTFT (s)</TableHead>
-                  <TableHead scope="col" className="turn-performance num-col" title="本次请求的输出 token 速度；有 TTFT 时按解码时长（请求时长 − TTFT）计算">tok/s</TableHead>
+                  <TableHead scope="col" className="col-perf turn-performance num-col" title="本次请求发出到首 token 的等待时间">TTFT (s)</TableHead>
+                  <TableHead scope="col" className="col-perf turn-performance num-col" title="本次请求的输出 token 速度；有 TTFT 时按解码时长（请求时长 − TTFT）计算">tok/s</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -246,6 +248,7 @@ export function TurnTable({
                           highlightTurnId === t.id ? "highlighted" : "",
                           expanded ? "expanded" : "",
                           newTurnIds.has(t.id) ? "turn-row-new" : "",
+                          t.bucket === "reread" || (t.labels?.length ?? 0) > 0 ? "is-flagged" : "",
                         ]
                           .filter(Boolean)
                           .join(" ")}
@@ -276,11 +279,7 @@ export function TurnTable({
                         </TableCell>
                         <TableCell className="bucket-col">
                           {appearance ? (
-                            <span className="bucket-chip">
-                              <i
-                                className="legend-dot"
-                                style={{ background: appearance.color }}
-                              />
+                            <span className={`bucket-chip bucket-pill is-${t.bucket ?? "other"}`}>
                               {appearance.label}
                             </span>
                           ) : (

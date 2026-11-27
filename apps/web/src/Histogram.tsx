@@ -136,6 +136,7 @@ export function Histogram({
             >
               <div className="hb-bar">
                 <i
+                  className={count === max && max > 0 ? "is-peak" : undefined}
                   style={{ height: `${height}%` }}
                   aria-hidden="true"
                 />
@@ -202,9 +203,9 @@ export function HistogramPair({
   const [speedCumulative, setSpeedCumulative] = useState(false);
   return (
     <div className="hist-grid">
-      <Panel className="hist-card">
+      <Panel className="hist-card is-ttft">
         <div className="hist-head">
-          <span className="h">TTFT 分布</span>
+          <span className="h">首字延迟 TTFT</span>
           <button
             type="button"
             className="hist-mode"
@@ -218,9 +219,9 @@ export function HistogramPair({
         </div>
         <Histogram title="TTFT" data={ttft} cumulative={ttftCumulative} noun={noun} />
       </Panel>
-      <Panel className="hist-card">
+      <Panel className="hist-card is-speed">
         <div className="hist-head">
-          <span className="h">输出速度分布</span>
+          <span className="h">输出速度 tok/s</span>
           <button
             type="button"
             className="hist-mode"

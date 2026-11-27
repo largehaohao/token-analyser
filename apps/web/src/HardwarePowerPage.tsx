@@ -128,104 +128,84 @@ function areaD(
   return d.trim();
 }
 
-/** 整机负载表的量程与两个百分比，同源派生，作为一组传给整机项。 */
-type LoadGauge = {
-  scaleW: number;
-  nowPct: number;
-  peakPct: number;
-};
-
 /**
- * 当前瞬时功率的单项。整机项带半圆负载表：弧线填充 = 当前功率相对
- * “当前与区间峰值取大”的比例，橙色刻线标出区间峰值位置。
+ * 当前瞬时功率拆分卡片：以 Crisp Sky 占比条与四格内嵌指标展示整机/GPU/CPU/其他功耗。
  */
-function PowerNowItem({
-  seriesKey,
+function PowerSplitCard({
   current,
   otherNow,
-  load,
 }: {
-  seriesKey: SeriesKey;
   current: PowerSample;
   otherNow: number | null;
-  load: LoadGauge;
 }) {
-  const meta = POWER_SERIES.find((s) => s.key === seriesKey)!;
-  const v = current[seriesKey];
-  const isTotal = seriesKey === "machine";
-  const animated = useAnimatedNumber(v);
-  const peakAngle = Math.PI * (1 - load.peakPct / 100);
-  const peakX = (r: number) => 60 + r * Math.cos(peakAngle);
-  const peakY = (r: number) => 60 - r * Math.sin(peakAngle);
+  const total = current.machine;
+  const gpu = current.gpu;
+  const cpu = current.cpu;
+  const denom = total != null && total > 0 ? total : null;
+  const shareText = (val: number | null) =>
+    val != null && denom != null ? `${((100 * val) / denom).toFixed(1)}%` : "—";
+  const parts = [
+    { key: "gpu", label: "GPU 功耗", value: gpu, color: "var(--color-output)" },
+    { key: "cpu", label: "CPU 功耗", value: cpu, color: "var(--color-input)" },
+    { key: "other", label: "其他组件", value: otherNow, color: "var(--color-neutral)" },
+  ];
+
   return (
-    <div className={`ledger-item${isTotal ? " power-now-total" : ""}`}>
-      <span className="ledger-label">
-        {isTotal ? "整机当前功率" : `${meta.label} 当前功率`}
-      </span>
-      <span className="ledger-value power-now-value">
-        {animated == null ? "—" : Math.round(animated).toLocaleString("zh-CN")}
-        <span className="ledger-unit"> W</span>
-      </span>
-      <span className="ledger-delta">
-        {v == null ? "当前时刻无采样" : `采样于 ${formatClock(current.t)}`}
-        {isTotal && v != null ? " · 含其他硬件" : ""}
-      </span>
-      {isTotal && v != null && (
-        <>
-          <svg
-            className="power-gauge"
-            viewBox="0 0 120 72"
-            aria-hidden="true"
-          >
-            <title>{`当前负载 ${Math.round(load.nowPct)}% · 量程 ${Math.round(load.scaleW)} W`}</title>
-            <path
-              className="power-gauge-track"
-              d="M10 60 A50 50 0 0 1 110 60"
-              pathLength={100}
+    <Panel role="region" className="cs-card power-split-card" aria-label="当前瞬时功率">
+      <div className="cs-card-header">
+        <div>
+          <h2 className="cs-card-title">当前瞬时功率拆分</h2>
+          <p className="cs-card-subtitle">
+            {total == null
+              ? "当前时刻暂无整机功率采样"
+              : `采样于 ${formatClock(current.t)} · 按核心组件拆分实时整机功耗占比`}
+          </p>
+        </div>
+        <span className="cs-tag cs-tag--cyan mono">
+          整机 {formatWatts(total)}
+        </span>
+      </div>
+      <div className="power-split-bar" aria-hidden="true">
+        {parts.map((part) => {
+          const w =
+            denom != null && part.value != null
+              ? Math.max(0, (100 * part.value) / denom)
+              : 0;
+          return (
+            <span
+              key={part.key}
+              style={{
+                width: `${w}%`,
+                background: part.color,
+              }}
+              title={`${part.label}: ${formatWatts(part.value)}`}
             />
-            <path
-              className="power-gauge-fill"
-              d="M10 60 A50 50 0 0 1 110 60"
-              pathLength={100}
-              strokeDasharray={`${load.nowPct} 100`}
-            />
-            <line
-              className="power-gauge-peak"
-              x1={peakX(44)}
-              y1={peakY(44)}
-              x2={peakX(56)}
-              y2={peakY(56)}
-            />
-            <text className="power-gauge-text" x="60" y="50" textAnchor="middle">
-              {Math.round(load.nowPct)}%
-            </text>
-            <text className="power-gauge-scale" x="10" y="70" textAnchor="middle">
-              0
-            </text>
-            <text className="power-gauge-scale" x="110" y="70" textAnchor="middle">
-              {Math.round(load.scaleW)}
-            </text>
-          </svg>
-          <div className="power-now-split" aria-hidden="true">
-            {[
-              { key: "cpu", value: current.cpu ?? 0 },
-              { key: "gpu", value: current.gpu ?? 0 },
-              { key: "other", value: otherNow ?? 0 },
-            ].map((part) => (
-              <i
-                key={part.key}
-                className={`power-now-seg ${part.key}`}
-                style={{ flex: Math.max(part.value, 1) }}
-              />
-            ))}
-          </div>
-          <span className="power-now-split-note">
-            CPU {formatWatts(current.cpu)} · GPU {formatWatts(current.gpu)} ·
-            其他 {formatWatts(otherNow)}
+          );
+        })}
+      </div>
+      <div className="power-split-cards">
+        <div className="power-split-item od-stat">
+          <span className="perf-label">整机总功耗</span>
+          <span className="perf-value od-nowrap">{formatWatts(total)}</span>
+        </div>
+        <div className="power-split-item od-stat">
+          <span className="perf-label">GPU 功耗 ({shareText(gpu)})</span>
+          <span className="perf-value od-nowrap" style={{ color: "var(--color-output-ink)" }}>
+            {formatWatts(gpu)}
           </span>
-        </>
-      )}
-    </div>
+        </div>
+        <div className="power-split-item od-stat">
+          <span className="perf-label">CPU 功耗 ({shareText(cpu)})</span>
+          <span className="perf-value od-nowrap" style={{ color: "var(--accent-secondary-ink)" }}>
+            {formatWatts(cpu)}
+          </span>
+        </div>
+        <div className="power-split-item od-stat">
+          <span className="perf-label">其他组件 ({shareText(otherNow)})</span>
+          <span className="perf-value od-nowrap">{formatWatts(otherNow)}</span>
+        </div>
+      </div>
+    </Panel>
   );
 }
 
@@ -251,10 +231,12 @@ export function HardwarePowerPage({
   now,
   refreshKey = 0,
   adapter = demoPowerAdapter,
+  onTopMeta,
 }: {
   now: number;
   refreshKey?: number;
   adapter?: PowerDataAdapter;
+  onTopMeta?: (meta: { devicePill?: string; windowPill?: string; hostPill?: string; statusText?: string }) => void;
 }) {
   const [mode, setMode] = useState<RangeMode>({
     kind: "quick",
@@ -650,30 +632,40 @@ export function HardwarePowerPage({
       ? 0
       : Math.min(100, (100 * integrals.machine.peakW) / loadScaleW);
 
+  const hostLabel = useMemo(() => {
+    if (!feed.url) return undefined;
+    try {
+      return new URL(feed.url).hostname;
+    } catch {
+      return undefined;
+    }
+  }, [feed.url]);
+  const windowLabelText = formatWindowRange(activeWindow);
+  const topStatusText = live
+    ? "Prometheus 已接入 · 电费不计入 Token 成本"
+    : feed.loading && !feed.samples && !feed.error
+      ? "正在连接功率采集源"
+      : usingDemo
+        ? "演示数据 · 电费不计入 Token 成本"
+        : "采集源不可达 · 电费不计入 Token 成本";
+
+  useEffect(() => {
+    onTopMeta?.({
+      windowPill: windowLabelText,
+      hostPill: hostLabel,
+      statusText: topStatusText,
+    });
+  }, [onTopMeta, windowLabelText, hostLabel, topStatusText]);
+
   return (
     <main className="overview power-page" data-testid="power-page">
-      <header className="page-heading">
-        <div className="page-heading-copy">
-          <div className="heading-title-row">
-            <h1 tabIndex={-1}>硬件用电</h1>
-            <Badge variant="outline" className="page-range">
-              {formatWindowRange(activeWindow)} · {rangeSub}
-            </Badge>
-          </div>
-        </div>
-      </header>
-
-      {live ? (
-        <Notice tone="success">
-          已接入 Prometheus（{feed.url ?? "已配置地址"}）· 电费为本地估算，不计入 Token 成本。
-        </Notice>
-      ) : feed.loading && !feed.samples && !feed.error ? (
+      {live ? null : feed.loading && !feed.samples && !feed.error ? (
         <Notice tone="info">正在连接功率采集源…</Notice>
       ) : usingDemo ? (
         <Notice tone="warning">
           {instantSample != null
-            ? `历史范围为演示数据${feed.error ? `（${feed.error}）` : ""}，当前功率为实时采样；电费不计入 Token 成本。`
-            : `演示数据${feed.error ? `（${feed.error}）` : ""} · 电费不计入 Token 成本。`}
+            ? `历史范围为演示数据，尚未接入${feed.error ? `（${feed.error}）` : ""}，当前功率为实时采样；电费不计入 Token 成本。`
+            : `演示数据，尚未接入${feed.error ? `（${feed.error}）` : ""} · 电费不计入 Token 成本。`}
         </Notice>
       ) : (
         <Notice tone="warning">
@@ -682,12 +674,12 @@ export function HardwarePowerPage({
       )}
 
       <Panel role="region"
-        className="chart-card power-energy-hero"
+        className="cs-card power-energy-hero"
         aria-label="所选范围累计用电与电费"
         data-testid="power-energy-hero"
       >
         <p className="power-heading-summary" data-testid="power-summary">
-          <span className="power-heading-kicker">
+          <span className="cs-tag cs-tag--cyan">
             {rangeSub}用电量 · 整机口径
           </span>
           <span className="power-heading-note">
@@ -695,86 +687,77 @@ export function HardwarePowerPage({
             {formatWindowRange(activeWindow)}
           </span>
         </p>
-        <div className="power-energy-top">
-          <div className="power-energy-primary">
-            <span className="ledger-label">整机用电量</span>
-            <span className="ledger-value power-hero-value">
+
+        <div className="cs-kpi-grid power-kpi-grid">
+          <div className="cs-kpi-card">
+            <span className="cs-kpi-label ledger-label">整机用电量</span>
+            <span className="cs-kpi-value ledger-value power-hero-value">
               {formatKwh({ kwh: animatedKwh, complete: integrals.machine.complete })}
               <span className="ledger-unit"> kWh</span>
             </span>
-            <span className="ledger-delta">
+            <span className="cs-kpi-sub ledger-delta">
               {integrals.machine.kwh == null
                 ? `${rangeSub}无整机采样`
                 : `覆盖 ${formatCoverage(integrals.machine)} · 含其他硬件`}
             </span>
           </div>
-          <div className="power-energy-cost">
-            <span className="ledger-label">
+
+          <div className="cs-kpi-card is-brand">
+            <span className="cs-kpi-label ledger-label">
               {usingDemo ? "演示电费" : "估算电费"}
             </span>
-            <span className="ledger-value power-hero-value power-hero-cost">
+            <span className="cs-kpi-value ledger-value power-hero-value power-hero-cost">
               {formatCny(animatedCost, integrals.machine.complete)}
             </span>
-            <span className="ledger-delta">
+            <span className="cs-kpi-sub ledger-delta">
               {price.error
                 ? "电价无效"
                 : integrals.machine.kwh == null
                   ? `${rangeSub}无整机采样`
-                  : `${formatPricePerKwh(price.value)} 元/kWh`}
+                  : `${formatPricePerKwh(price.value)} 元/kWh · 本地电价估算`}
             </span>
           </div>
-        </div>
-        <dl className="power-energy-stats">
-          <div>
-            <dt>区间平均</dt>
-            <dd>
-              {formatWatts(integrals.machine.avgW)}
-              <span className="power-stat-hint">整机口径</span>
-            </dd>
+
+          <div className="cs-kpi-card">
+            <span className="cs-kpi-label">区间平均功耗</span>
+            <span className="cs-kpi-value">{formatWatts(integrals.machine.avgW)}</span>
+            <span className="cs-kpi-sub">
+              {current.machine == null
+                ? "当前时刻无瞬时采样"
+                : `当前瞬时 ${formatWatts(current.machine)}`}
+            </span>
           </div>
-          <div>
-            <dt>区间峰值</dt>
-            <dd>
-              {formatWatts(integrals.machine.peakW)}
-              <span className="power-stat-hint">原始采样</span>
-            </dd>
-          </div>
-          <div className="power-stat-now">
-            <dt>当前功率</dt>
-            <dd>
-              {formatWatts(current.machine)}
-              <span className="power-stat-hint">
-                {current.machine == null
-                  ? "当前时刻无采样"
-                  : `采样于 ${formatClock(current.t)}`}
+
+          <div className="cs-kpi-card">
+            <span className="cs-kpi-label">区间峰值功耗</span>
+            <span className="cs-kpi-value">{formatWatts(integrals.machine.peakW)}</span>
+            <span className="cs-kpi-sub power-peak-sub">
+              <span>
+                {current.machine != null && integrals.machine.peakW != null
+                  ? `当前 ${Math.round(loadNowPct)}%`
+                  : `统计窗口 ${formatDuration(spanMs)}`}
               </span>
               {current.machine != null && integrals.machine.peakW != null && (
                 <span
                   className="power-load-track"
                   aria-hidden="true"
-                  title={`当前相对区间峰值 ${Math.round(loadNowPct)}%`}
+                  title={`当前相对区间峰值 ${Math.round(loadNowPct)}% · 统计窗口 ${formatDuration(spanMs)}`}
                 >
                   <i className="power-load-fill" style={{ width: `${loadNowPct}%` }} />
                   <i className="power-load-peak" style={{ left: `${loadPeakPct}%` }} />
                 </span>
               )}
-            </dd>
+            </span>
           </div>
-          <div>
-            <dt>统计窗口</dt>
-            <dd>
-              {formatDuration(spanMs)}
-              <span className="power-stat-hint">{formatWindowRange(activeWindow)}</span>
-            </dd>
-          </div>
-        </dl>
+        </div>
+
         <div className="power-energy-breakdown">
           <div className="power-energy-breakdown-head">
             <span>用电构成</span>
             <span
               title={`构成占比按 CPU、GPU、整机同时有读数的区间计算（共同覆盖 ${formatDuration(composition.machine.coveredMs)}）。统计窗口 ${formatDuration(spanMs)}。`}
             >
-              共同覆盖区间
+              共同覆盖区间 · {formatDuration(composition.machine.coveredMs)}
             </span>
           </div>
           <div className="power-energy-bar" aria-hidden="true">
@@ -805,52 +788,59 @@ export function HardwarePowerPage({
         </div>
       </Panel>
 
-      <Panel role="region" className="chart-card power-controls" aria-label="电价与采样粒度">
-        <div className="power-controls-grid">
-          <div className="power-field">
-            <Label htmlFor="power-price">电价（元/kWh）</Label>
-            <Input
-              id="power-price"
-              className="power-input power-price-input"
-              type="number"
-              step="0.01"
-              min="0.01"
-              inputMode="decimal"
-              value={priceRaw}
-              onChange={(e) => setPriceRaw(e.target.value)}
-              aria-invalid={price.error != null}
-              aria-describedby={price.error ? "power-price-error" : undefined}
-            />
-            {price.error && (
-              <p id="power-price-error" className="power-error" role="alert">
-                {price.error}
-              </p>
-            )}
+      <div className="power-middle-split">
+        <Panel role="region" className="cs-card power-controls" aria-label="统计范围与电价">
+          <div className="power-controls-grid">
+            <h2 className="cs-card-title">电价与采集参数</h2>
+            <div className="rate-input-group">
+              <Label htmlFor="power-price">电价（元/kWh）</Label>
+              <div className="rate-input-wrap">
+                <Input
+                  id="power-price"
+                  className="rate-input power-price-input"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  inputMode="decimal"
+                  value={priceRaw}
+                  onChange={(e) => setPriceRaw(e.target.value)}
+                  aria-invalid={price.error != null}
+                  aria-describedby={price.error ? "power-price-error" : undefined}
+                />
+                <span className="rate-unit" aria-hidden="true">元</span>
+              </div>
+              {price.error && (
+                <p id="power-price-error" className="field-error power-error" role="alert">
+                  {price.error}
+                </p>
+              )}
+            </div>
+            <p className="power-window" role="status">
+              当前统计范围 {rangeSub}（{formatWindowRange(activeWindow)}）· 采集粒度每 {formatDuration(stepMs)}（{samples.length} 点）· 曲线均值粒度每 {formatDuration(bucketMs)} · 默认 {formatPricePerKwh(DEFAULT_PRICE_CNY_PER_KWH)} 元/kWh
+            </p>
           </div>
-          <p className="power-window" role="status">
-            采样 {formatDuration(stepMs)}（{samples.length} 点）· 曲线均值 {formatDuration(bucketMs)} · 默认 {formatPricePerKwh(DEFAULT_PRICE_CNY_PER_KWH)} 元/kWh
-          </p>
-        </div>
-      </Panel>
+        </Panel>
 
-      <Panel role="region" className="ledger power-ledger-now" aria-label="当前瞬时功率">
-        {(["machine", "cpu", "gpu"] as const).map((key) => (
-          <PowerNowItem
-            key={key}
-            seriesKey={key}
-            current={current}
-            otherNow={otherNow}
-            load={{ scaleW: loadScaleW, nowPct: loadNowPct, peakPct: loadPeakPct }}
-          />
-        ))}
-      </Panel>
+        <PowerSplitCard current={current} otherNow={otherNow} />
+      </div>
 
-      <Panel role="region" className="chart-card power-trend" data-testid="power-trend" aria-label="功率趋势">
-        <div className="chart-head power-trend-head">
+      <Panel role="region" className="cs-card power-trend" data-testid="power-trend" aria-label="功率趋势">
+        <div className="cs-card-header power-trend-head">
           <div>
-            <h2 className="chart-title">功率趋势</h2>
-            <p className="chart-desc">
-              {formatWindowRange(activeWindow)} · {rangeSub}
+            <div className="power-trend-title-row">
+              <h2 className="cs-card-title">功率变化趋势</h2>
+              <div className="chart-legend power-legend" aria-hidden="true">
+                {POWER_SERIES.map((s) => (
+                  <span key={s.key}>
+                    <i className="power-legend-line" style={{ background: s.color }} />
+                    {s.key === "machine" ? "整机功耗" : `${s.label} 功耗`}
+                  </span>
+                ))}
+                <span>{formatDuration(bucketMs)} 均值</span>
+              </div>
+            </div>
+            <p className="cs-card-subtitle">
+              {formatWindowRange(activeWindow)} · {rangeSub} · 移动指针查看各时段均值与峰值 · 峰值见悬停
             </p>
           </div>
           <SegmentedControl
@@ -914,84 +904,60 @@ export function HardwarePowerPage({
             </Button>
           </form>
         )}
-        <div className="chart-legend power-legend" aria-hidden="true">
-          {POWER_SERIES.map((s) => (
-            <span key={s.key}>
-              <svg width="22" height="8" viewBox="0 0 22 8" aria-hidden="true">
-                <line
-                  x1="1"
-                  y1="4"
-                  x2="21"
-                  y2="4"
-                  stroke={s.color}
-                  strokeWidth="2"
-                  strokeDasharray={s.dash === "none" ? undefined : s.dash}
-                />
-              </svg>
-              {s.key === "machine" ? "整机" : s.label}
-            </span>
-          ))}
-          <span>{formatDuration(bucketMs)} 均值</span>
-        </div>
         {n < 2 ? (
           <p className="empty-inline">该时间范围内没有采样。</p>
         ) : (
           <>
-            <div
-              className="power-chart-scroll"
-              ref={chartScrollRef}
-              data-testid="power-chart-scroll"
-            >
-              <div className="power-plot" style={{ width: chartWidth }}>
-                <svg
-                  className="power-svg"
-                  width={chartWidth}
-                  height={PLOT_TOP + PLOT_H + 4}
-                  viewBox={`0 0 ${chartWidth} ${PLOT_TOP + PLOT_H + 4}`}
-                  role="img"
-                  aria-label={`${rangeSub}功率趋势图：CPU、GPU、整机三条折线`}
-                >
-                  <defs>
-                    <linearGradient
-                      id="power-area-fill"
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
-                      <stop
-                        offset="0%"
-                        style={{ stopColor: "var(--chart-cyan)" }}
-                        stopOpacity="0.28"
+            <div className="power-chart-frame">
+              <div className="power-y-axis" aria-hidden="true">
+                {[1, 0.5, 0].map((ratio) => (
+                  <span key={ratio}>{Math.round(yMax * ratio)}W</span>
+                ))}
+              </div>
+              <div
+                className="power-chart-scroll"
+                ref={chartScrollRef}
+                data-testid="power-chart-scroll"
+              >
+                <div className="power-plot" style={{ width: chartWidth }}>
+                  <svg
+                    className="power-svg"
+                    width={chartWidth}
+                    height={PLOT_TOP + PLOT_H + 4}
+                    viewBox={`0 0 ${chartWidth} ${PLOT_TOP + PLOT_H + 4}`}
+                    role="img"
+                    aria-label={`${rangeSub}功率趋势图：CPU、GPU、整机三条折线`}
+                  >
+                    <defs>
+                      <linearGradient
+                        id="power-area-fill"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop
+                          offset="0%"
+                          style={{ stopColor: "var(--accent-primary)" }}
+                          stopOpacity="0.22"
+                        />
+                        <stop
+                          offset="100%"
+                          style={{ stopColor: "var(--accent-primary)" }}
+                          stopOpacity="0.01"
+                        />
+                      </linearGradient>
+                    </defs>
+                    {[1, 0.5, 0].map((ratio) => (
+                      <line
+                        key={ratio}
+                        className="power-grid"
+                        x1={PLOT_LEFT}
+                        x2={chartWidth - 8}
+                        y1={PLOT_TOP + PLOT_H * (1 - ratio)}
+                        y2={PLOT_TOP + PLOT_H * (1 - ratio)}
                       />
-                      <stop
-                        offset="100%"
-                        style={{ stopColor: "var(--chart-cyan)" }}
-                        stopOpacity="0.02"
-                      />
-                    </linearGradient>
-                  </defs>
-                  {[1, 0.5, 0].map((ratio) => (
-                    <line
-                      key={ratio}
-                      className="power-grid"
-                      x1={PLOT_LEFT}
-                      x2={chartWidth - 8}
-                      y1={PLOT_TOP + PLOT_H * (1 - ratio)}
-                      y2={PLOT_TOP + PLOT_H * (1 - ratio)}
-                    />
-                  ))}
-                  {[1, 0.5, 0].map((ratio) => (
-                    <text
-                      key={`t-${ratio}`}
-                      className="power-ylab"
-                      x={PLOT_LEFT - 6}
-                      y={PLOT_TOP + PLOT_H * (1 - ratio) + 3}
-                      textAnchor="end"
-                    >
-                      {Math.round(yMax * ratio)}
-                    </text>
-                  ))}
+                    ))}
                   <path
                     ref={areaRef}
                     className="power-area"
@@ -1061,12 +1027,13 @@ export function HardwarePowerPage({
                     </button>
                   ))}
                 </div>
-                <div className="power-ticks">
-                  {visibleTicks.map(({ b, i }) => (
-                    <span key={b.t} style={{ left: Math.min(chartWidth - 70, Math.max(70, x(i))) }}>
-                      {formatClock(b.t)}
-                    </span>
-                  ))}
+                  <div className="power-ticks">
+                    {visibleTicks.map(({ b, i }) => (
+                      <span key={b.t} style={{ left: Math.min(chartWidth - 70, Math.max(70, x(i))) }}>
+                        {formatClock(b.t)}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1094,52 +1061,72 @@ export function HardwarePowerPage({
             <TableHeader>
               <TableRow>
                 <TableHead scope="col">设备</TableHead>
-                <TableHead scope="col">当前功率</TableHead>
-                <TableHead scope="col">用电量 (kWh)</TableHead>
-                <TableHead scope="col">电费</TableHead>
-                <TableHead scope="col">平均功率</TableHead>
-                <TableHead scope="col">峰值功率</TableHead>
-                <TableHead scope="col">覆盖</TableHead>
+                <TableHead scope="col" className="num">当前功率</TableHead>
+                <TableHead scope="col" className="num">用电量 (kWh)</TableHead>
+                <TableHead scope="col" className="num">电费</TableHead>
+                <TableHead scope="col" className="num">平均功率</TableHead>
+                <TableHead scope="col" className="num">峰值功率</TableHead>
+                <TableHead scope="col" className="num">覆盖</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableRow>
-                <TableHead scope="row">CPU</TableHead>
+                <TableHead scope="row">
+                  <span className="power-device-name">
+                    <i className="power-device-dot is-cpu" aria-hidden="true" />
+                    CPU
+                  </span>
+                </TableHead>
                 <TableCell className="num">{formatWatts(current.cpu)}</TableCell>
                 <TableCell className="num">{formatKwh(integrals.cpu)}</TableCell>
                 <TableCell className="num">{formatCny(cost(integrals.cpu), integrals.cpu.complete)}</TableCell>
                 <TableCell className="num">{formatWatts(integrals.cpu.avgW)}</TableCell>
                 <TableCell className="num">{formatWatts(integrals.cpu.peakW)}</TableCell>
-                <TableCell>{formatCoverage(integrals.cpu)}</TableCell>
+                <TableCell className="num power-cov-cell">{formatCoverage(integrals.cpu)}</TableCell>
               </TableRow>
               <TableRow>
-                <TableHead scope="row">GPU</TableHead>
+                <TableHead scope="row">
+                  <span className="power-device-name">
+                    <i className="power-device-dot is-gpu" aria-hidden="true" />
+                    GPU
+                  </span>
+                </TableHead>
                 <TableCell className="num">{formatWatts(current.gpu)}</TableCell>
                 <TableCell className="num">{formatKwh(integrals.gpu)}</TableCell>
                 <TableCell className="num">{formatCny(cost(integrals.gpu), integrals.gpu.complete)}</TableCell>
                 <TableCell className="num">{formatWatts(integrals.gpu.avgW)}</TableCell>
                 <TableCell className="num">{formatWatts(integrals.gpu.peakW)}</TableCell>
-                <TableCell>{formatCoverage(integrals.gpu)}</TableCell>
+                <TableCell className="num power-cov-cell">{formatCoverage(integrals.gpu)}</TableCell>
               </TableRow>
-              <TableRow>
-                <TableHead scope="row">整机（总量）</TableHead>
+              <TableRow className="is-machine-row">
+                <TableHead scope="row">
+                  <span className="power-device-name">
+                    <i className="power-device-dot is-machine" aria-hidden="true" />
+                    整机（总量）
+                  </span>
+                </TableHead>
                 <TableCell className="num">{formatWatts(current.machine)}</TableCell>
                 <TableCell className="num">{formatKwh(integrals.machine)}</TableCell>
-                <TableCell className="num">
+                <TableCell className="num power-cost-cell">
                   {formatCny(cost(integrals.machine), integrals.machine.complete)}
                 </TableCell>
                 <TableCell className="num">{formatWatts(integrals.machine.avgW)}</TableCell>
                 <TableCell className="num">{formatWatts(integrals.machine.peakW)}</TableCell>
-                <TableCell>{formatCoverage(integrals.machine)}</TableCell>
+                <TableCell className="num power-cov-cell">{formatCoverage(integrals.machine)}</TableCell>
               </TableRow>
               <TableRow>
-                <TableHead scope="row">其他硬件（推算）</TableHead>
+                <TableHead scope="row">
+                  <span className="power-device-name">
+                    <i className="power-device-dot is-other" aria-hidden="true" />
+                    其他硬件（推算）
+                  </span>
+                </TableHead>
                 <TableCell className="num">{formatWatts(otherNow)}</TableCell>
                 <TableCell className="num">{formatKwh(integrals.other)}</TableCell>
                 <TableCell className="num">{formatCny(cost(integrals.other), integrals.other.complete)}</TableCell>
                 <TableCell className="num">{formatWatts(integrals.other.avgW)}</TableCell>
                 <TableCell className="num">—</TableCell>
-                <TableCell>{formatCoverage(integrals.other)}</TableCell>
+                <TableCell className="num power-cov-cell">{formatCoverage(integrals.other)}</TableCell>
               </TableRow>
             </TableBody>
           </table>
