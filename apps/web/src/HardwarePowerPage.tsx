@@ -660,26 +660,24 @@ export function HardwarePowerPage({
               {formatWindowRange(activeWindow)} · {rangeSub}
             </Badge>
           </div>
-          <p>整机用电量、电费与当前功率；分项来自 CPU、GPU 与其他硬件。</p>
         </div>
       </header>
 
       {live ? (
         <Notice tone="success">
-          已接入实时采集：Prometheus（{feed.url ?? "已配置地址"}）。以下功率、用电量与电费均来自该范围内真实采样；
-          瞬时功率为最新采样。电费仍为本地估算，不计入成本总览的 Token 成本。
+          已接入 Prometheus（{feed.url ?? "已配置地址"}）· 电费为本地估算，不计入 Token 成本。
         </Notice>
       ) : feed.loading && !feed.samples && !feed.error ? (
         <Notice tone="info">正在连接功率采集源…</Notice>
       ) : usingDemo ? (
         <Notice tone="warning">
           {instantSample != null
-            ? `历史范围为演示数据${feed.error ? `（采集源不可用：${feed.error}）` : ""}，用电量与电费由内置示例序列生成；瞬时功率为实时采样。演示电费不计入 Token 成本。`
-            : `演示数据，尚未接入${feed.error ? `（采集源不可用：${feed.error}）` : ""}。以下数值由内置示例序列生成，缺失读数显示 —；演示电费不计入 Token 成本。`}
+            ? `历史范围为演示数据${feed.error ? `（${feed.error}）` : ""}，当前功率为实时采样；电费不计入 Token 成本。`
+            : `演示数据${feed.error ? `（${feed.error}）` : ""} · 电费不计入 Token 成本。`}
         </Notice>
       ) : (
         <Notice tone="warning">
-          采集源不可达{feed.error ? `（${feed.error}）` : ""}。未显示演示数据；启动引擎前设置 ENABLE_POWER_PREVIEW=1 可查看内置示例。示例电费不计入 Token 成本。
+          采集源不可达{feed.error ? `（${feed.error}）` : ""} · 启动引擎前设置 ENABLE_POWER_PREVIEW=1 可预览示例。
         </Notice>
       )}
 
@@ -719,10 +717,10 @@ export function HardwarePowerPage({
             </span>
             <span className="ledger-delta">
               {price.error
-                ? "电价无效，电费显示 —"
+                ? "电价无效"
                 : integrals.machine.kwh == null
                   ? `${rangeSub}无整机采样`
-                  : `电价 ${formatPricePerKwh(price.value)} 元/kWh · ${usingDemo ? "演示值，不计入 Token 成本" : "本地估算，不计入 Token 成本"}`}
+                  : `${formatPricePerKwh(price.value)} 元/kWh`}
             </span>
           </div>
         </div>
@@ -776,7 +774,7 @@ export function HardwarePowerPage({
             <span
               title={`构成占比按 CPU、GPU、整机同时有读数的区间计算（共同覆盖 ${formatDuration(composition.machine.coveredMs)}）。统计窗口 ${formatDuration(spanMs)}。`}
             >
-              整机 = CPU + GPU + 其他硬件 · 共同覆盖区间
+              共同覆盖区间
             </span>
           </div>
           <div className="power-energy-bar" aria-hidden="true">
@@ -807,15 +805,7 @@ export function HardwarePowerPage({
         </div>
       </Panel>
 
-      <Panel role="region" className="chart-card power-controls" aria-label="统计范围与电价">
-        <div className="chart-head">
-          <div>
-            <h2 className="chart-title">统计范围与电价</h2>
-            <p className="chart-desc">
-              时间范围在功率趋势中选择，用电量与电费跟同一窗口；当前功率不受范围影响。
-            </p>
-          </div>
-        </div>
+      <Panel role="region" className="chart-card power-controls" aria-label="电价与采样粒度">
         <div className="power-controls-grid">
           <div className="power-field">
             <Label htmlFor="power-price">电价（元/kWh）</Label>
@@ -836,17 +826,11 @@ export function HardwarePowerPage({
                 {price.error}
               </p>
             )}
-            <p className="power-note">
-              默认 {formatPricePerKwh(DEFAULT_PRICE_CNY_PER_KWH)} 元/kWh；电费 = 用电量 × 电价，不计入 Token 成本。
-            </p>
           </div>
+          <p className="power-window" role="status">
+            采样 {formatDuration(stepMs)}（{samples.length} 点）· 曲线均值 {formatDuration(bucketMs)} · 默认 {formatPricePerKwh(DEFAULT_PRICE_CNY_PER_KWH)} 元/kWh
+          </p>
         </div>
-        <p className="power-window" role="status">
-          当前统计范围：{formatWindowRange(activeWindow)}（共 {formatDuration(spanMs)} ·{" "}
-          {rangeSub}；{mode.kind === "quick" ? "结束于当前时间" : "按自定义起止时间统计"}）。
-          趋势、用电量与电费均来自这一范围：采集粒度每 {formatDuration(stepMs)}（共{" "}
-          {samples.length} 个采样），曲线均值粒度每 {formatDuration(bucketMs)}。
-        </p>
       </Panel>
 
       <Panel role="region" className="ledger power-ledger-now" aria-label="当前瞬时功率">
@@ -944,11 +928,10 @@ export function HardwarePowerPage({
                   strokeDasharray={s.dash === "none" ? undefined : s.dash}
                 />
               </svg>
-              {s.key === "machine" ? (live ? "整机（墙插估算）" : "整机（总量）") : s.label}
+              {s.key === "machine" ? "整机" : s.label}
             </span>
           ))}
-          <span>断开 = 缺失（—）</span>
-          <span>曲线 = {formatDuration(bucketMs)} 均值 · 峰值见悬停</span>
+          <span>{formatDuration(bucketMs)} 均值</span>
         </div>
         {n < 2 ? (
           <p className="empty-inline">该时间范围内没有采样。</p>
@@ -1104,12 +1087,6 @@ export function HardwarePowerPage({
         <div className="chart-head">
           <div>
             <h2 className="chart-title">区间统计明细（{rangeSub}）</h2>
-            <p className="chart-desc">
-              整机包含 CPU、GPU 和其他硬件，各行不可重复相加。
-              覆盖不足时显示已知下限。表格可左右滚动查看用电量、电费和覆盖率。
-              用电量、平均功率与峰值都取自每 {formatDuration(stepMs)} 的原始采样，
-              不受曲线分桶影响。
-            </p>
           </div>
         </div>
         <div className="power-table-scroll" tabIndex={0} role="region" aria-label="区间统计表，可左右滚动">
@@ -1117,17 +1094,17 @@ export function HardwarePowerPage({
             <TableHeader>
               <TableRow>
                 <TableHead scope="col">设备</TableHead>
-                <TableHead scope="col">瞬时功率（当前）</TableHead>
-                <TableHead scope="col">区间用电量 kWh</TableHead>
-                <TableHead scope="col">区间电费</TableHead>
+                <TableHead scope="col">当前功率</TableHead>
+                <TableHead scope="col">用电量 (kWh)</TableHead>
+                <TableHead scope="col">电费</TableHead>
                 <TableHead scope="col">平均功率</TableHead>
                 <TableHead scope="col">峰值功率</TableHead>
-                <TableHead scope="col">数据覆盖</TableHead>
+                <TableHead scope="col">覆盖</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableRow>
-                <TableHead scope="row">CPU（分项）</TableHead>
+                <TableHead scope="row">CPU</TableHead>
                 <TableCell className="num">{formatWatts(current.cpu)}</TableCell>
                 <TableCell className="num">{formatKwh(integrals.cpu)}</TableCell>
                 <TableCell className="num">{formatCny(cost(integrals.cpu), integrals.cpu.complete)}</TableCell>
@@ -1136,7 +1113,7 @@ export function HardwarePowerPage({
                 <TableCell>{formatCoverage(integrals.cpu)}</TableCell>
               </TableRow>
               <TableRow>
-                <TableHead scope="row">GPU（分项）</TableHead>
+                <TableHead scope="row">GPU</TableHead>
                 <TableCell className="num">{formatWatts(current.gpu)}</TableCell>
                 <TableCell className="num">{formatKwh(integrals.gpu)}</TableCell>
                 <TableCell className="num">{formatCny(cost(integrals.gpu), integrals.gpu.complete)}</TableCell>
@@ -1145,7 +1122,7 @@ export function HardwarePowerPage({
                 <TableCell>{formatCoverage(integrals.gpu)}</TableCell>
               </TableRow>
               <TableRow>
-                <TableHead scope="row">整机（总量，含其他硬件）</TableHead>
+                <TableHead scope="row">整机（总量）</TableHead>
                 <TableCell className="num">{formatWatts(current.machine)}</TableCell>
                 <TableCell className="num">{formatKwh(integrals.machine)}</TableCell>
                 <TableCell className="num">
@@ -1156,7 +1133,7 @@ export function HardwarePowerPage({
                 <TableCell>{formatCoverage(integrals.machine)}</TableCell>
               </TableRow>
               <TableRow>
-                <TableHead scope="row">其他硬件（整机 − CPU − GPU，推算）</TableHead>
+                <TableHead scope="row">其他硬件（推算）</TableHead>
                 <TableCell className="num">{formatWatts(otherNow)}</TableCell>
                 <TableCell className="num">{formatKwh(integrals.other)}</TableCell>
                 <TableCell className="num">{formatCny(cost(integrals.other), integrals.other.complete)}</TableCell>
@@ -1167,11 +1144,14 @@ export function HardwarePowerPage({
             </TableBody>
           </table>
         </div>
-        <p className="power-note">
-          “其他硬件”行是整机与两个分项在同一采样上的差值（内存、存储、风扇与电源转换损耗等），
-          任一序列缺失时无法推算，显示 —；其余各行的用电量都来自各自序列的独立积分。
-          {usingDemo ? "演示电费" : "电费"}不会加入成本总览的 Token 成本。
-        </p>
+        <details className="performance-footnote">
+          <summary>口径说明 · 整机含 CPU、GPU 及其他硬件，各行独立积分</summary>
+          <p className="performance-note">
+            用电量、平均功率与峰值均按每 {formatDuration(stepMs)} 原始采样独立积分，覆盖不足时显示已知下限；
+            “其他硬件”为整机减去 CPU 与 GPU 的同点差值（内存、存储、风扇与电源损耗等），任一序列缺失时显示 —。
+            {usingDemo ? "演示电费" : "电费"}不计入成本总览的 Token 成本。
+          </p>
+        </details>
       </Panel>
     </main>
   );

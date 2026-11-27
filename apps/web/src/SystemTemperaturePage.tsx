@@ -516,7 +516,6 @@ export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; re
     >
       <header className="page-heading temps-header">
         <div className="page-heading-copy">
-          <p className="temps-kicker">系统监控 / 温度</p>
           <h1 tabIndex={-1}>
             {pageTitle(latest ? latest.gpus.length : null)}
           </h1>
@@ -531,13 +530,13 @@ export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; re
           </Badge>
           {latest ? (
             <time dateTime={new Date(latest.timestamp * 1000).toISOString()}>
-              {formatClock(latest.timestamp)} 更新
+              {formatClock(latest.timestamp)}
             </time>
           ) : (
             <span>尚未采样</span>
           )}
           <span className="temps-live-meta" title={sourceUrl ?? undefined}>
-            {ageSec != null ? `数据 ${ageSec} 秒前` : "每 2 秒采样"} · 每 2 秒刷新
+            {ageSec != null ? `${ageSec} 秒前` : "每 2 秒刷新"}
           </span>
         </div>
       </header>
@@ -625,12 +624,9 @@ export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; re
 
       <section className="temps-section" aria-label="实时读数">
         <div className="temps-section-head">
-          <div>
-            <p className="temps-kicker">实时读数</p>
-            <h2 className="temps-section-title">传感器与散热余量</h2>
-          </div>
+          <h2 className="temps-section-title">实时读数</h2>
           <p className="temps-section-meta" title={sourceUrl ?? undefined}>
-            <Icon name="clock" /> 数据源 Prometheus · 每 2 秒采样 · 无示例数据
+            <Icon name="clock" /> Prometheus · 2s 轮询
           </p>
         </div>
         <div className="temps-gpu-grid">
@@ -649,15 +645,7 @@ export function SystemTemperaturePage({ now, refreshKey = 0 }: { now: number; re
       <section className="temps-history" aria-label="温度历史">
         <div className="chart-head temps-history-head">
           <div>
-            <p className="temps-kicker">历史趋势</p>
             <h2 className="chart-title">温度历史</h2>
-            <p className="chart-desc">
-              虚线是各传感器停机线，空档断开、不补 0。
-              <span className="temps-hint-desktop">
-                悬停或聚焦曲线后用 ← → 查看每个采样。
-              </span>
-              <span className="temps-hint-touch">轻触曲线查看某一时刻的读数。</span>
-            </p>
           </div>
           <div className="temps-period">
             <span className="filter-label">时间范围</span>
@@ -795,12 +783,9 @@ function GpuCard({
           );
         })}
       </div>
-      <p className="temps-scale-note">
-        三条共用 0–{TEMP_SCALE_TOP}°C 刻度 · 虚线是各自停机线，柱顶到虚线就是余量
-      </p>
       <dl className="temps-stats">
         <div>
-          <dt>风扇转速</dt>
+          <dt>风扇</dt>
           <dd>
             {gpu && gpu.fan_rpm != null
               ? `${formatTemp(gpu.fan_rpm, 0)} RPM`
@@ -809,7 +794,7 @@ function GpuCard({
           </dd>
         </div>
         <div>
-          <dt>GPU 功耗 / 上限</dt>
+          <dt>功耗 / 上限</dt>
           <dd>
             {gpu && gpu.power_w != null
               ? `${formatTemp(gpu.power_w, 0)} W`
@@ -822,7 +807,7 @@ function GpuCard({
           </dd>
         </div>
         <div>
-          <dt>GPU 负载</dt>
+          <dt>负载</dt>
           <dd>
             {gpu && gpu.utilization != null
               ? `${formatTemp(gpu.utilization, 0)} %`
@@ -830,7 +815,7 @@ function GpuCard({
           </dd>
         </div>
         <div>
-          <dt>显存占用 / 总量</dt>
+          <dt>显存</dt>
           <dd>
             {gpu && gpu.vram_used_gib != null
               ? `${formatGiB(gpu.vram_used_gib)} GiB`
@@ -879,8 +864,7 @@ function CpuCard({
       aria-label="CPU 温度"
     >
       <div className="temps-cpu-id">
-        <p className="temps-kicker">CPU 温度</p>
-        <h2>{cpu?.name ?? "等待采样"}</h2>
+        <h2>{cpu?.name ?? "CPU"}</h2>
         <Badge variant="outline"
           className={`temps-pill ${
             stale
@@ -915,11 +899,6 @@ function CpuCard({
           </div>
         ))}
       </div>
-      <p className="temps-cpu-note">
-        CPU 无停机线设定
-        <br />
-        仅展示实测温度
-      </p>
     </Panel>
   );
 }

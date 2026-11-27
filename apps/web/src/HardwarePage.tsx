@@ -29,11 +29,6 @@ export function HardwarePage(props: {
               {props.tab === "temps" ? "温度" : "用电"}
             </Badge>
           </p>
-          <p className="hardware-context-copy">
-            {props.tab === "temps"
-              ? "实时传感器读数与历史趋势 · 缺失读数保持为 —"
-              : "功率曲线、区间用电与电费估算"}
-          </p>
         </div>
         <nav className="hardware-tabs" aria-label="硬件子页">
           <SegmentedControl

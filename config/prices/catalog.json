@@ -1,23 +1,23 @@
 {
-  "as_of": "2026-11-25",
+  "as_of": "2026-11-27",
   "sources": {
     "deepseek": {
       "label": "DeepSeek",
-      "as_of": "2026-11-25",
+      "as_of": "2026-11-27",
       "page": "https://api-docs.deepseek.com/quick_start/pricing",
       "model_count": 2
     },
     "gemini": {
       "label": "Gemini",
-      "as_of": "2026-11-25",
+      "as_of": "2026-11-27",
       "page": "https://ai.google.dev/gemini-api/docs/pricing",
-      "model_count": 7
+      "model_count": 4
     },
     "grok": {
       "label": "Grok",
-      "as_of": "2026-11-25",
+      "as_of": "2026-11-27",
       "page": "https://docs.x.ai/developers/models",
-      "model_count": 4
+      "model_count": 2
     }
   },
   "models": {

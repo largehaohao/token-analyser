@@ -8680,4 +8680,29 @@ button.ledger-item {
   line-height: 1.65;
 }
 
+/* Hardware pages breathing room */
+.power-controls .power-controls-grid {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.power-controls .power-window {
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+}
+
+.power-page > .chart-card,
+.power-page > .power-ledger-now {
+  margin-top: 20px;
+}
+
+.temps-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+
 
